@@ -35,10 +35,16 @@ const modelListTimeout = 15 * time.Second
 // skipped rather than staged.
 var catalogModelIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// codexModelsClientVersion is the numeric compatibility sentinel accepted by
-// the Codex models endpoint and used by Codex source/test builds. It is a Codex
-// protocol version, not the independently versioned Coddy application version.
-const codexModelsClientVersion = "0.0.0"
+// codexModelsClientVersion is the Codex release the model catalog is asked
+// for; it has nothing to do with Coddy's own version. The backend leaves out
+// every model whose minimal_client_version is above it, because a Codex binary
+// that old cannot run that model. Coddy runs every model through its own loop
+// and tools, so it asks as a Codex release above any the gates name and lists
+// the whole catalog the account is offered. The value stays a 0.x release: the
+// backend answers 1.0.0 and above with model settings no Codex release gets.
+// "0.0.0", what a Codex source build sends, is answered as an older release,
+// which hid gpt-6-sol and gpt-6-luna while gpt-6-astra was listed (issue #394).
+const codexModelsClientVersion = "0.999.0"
 
 // defaultModelListBaseURL returns the base URL used for model listing when the
 // provider config leaves api_base empty.

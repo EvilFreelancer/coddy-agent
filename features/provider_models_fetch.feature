@@ -23,3 +23,16 @@ Feature: The settings form fetches the model list a provider advertises
     Then the gateway answers with the models "m1,m2"
     And the gateway answers with context window 131072 for "m1"
     And the gateway answers with context window 8192 for "m2"
+
+  Scenario: A codex provider lists the models only recent Codex releases are offered
+    The Codex backend leaves a model out of its catalog for every Codex
+    release older than the model's minimal_client_version, and it answers a
+    Codex source build (client_version 0.0.0) as an older release. Coddy runs
+    every model through its own loop and tools, so the settings form lists
+    the whole catalog the account is offered, the models the newest Codex
+    lists included (issue #394).
+    Given a stand-in Codex backend whose catalog offers "gpt-6-astra" from Codex 0.153.0
+    And the Codex catalog offers "gpt-6-sol,gpt-6-luna" from Codex 0.155.0
+    And a coddy server holding a codex provider signed in to that backend
+    When the settings form posts only the provider name "codex"
+    Then the gateway answers with the models "gpt-6-astra,gpt-6-luna,gpt-6-sol"
