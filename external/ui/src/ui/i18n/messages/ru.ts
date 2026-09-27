@@ -256,7 +256,7 @@ export const messagesRu: Record<string, string> = {
     "Окно контекста модели: по нему считаются индикатор контекста в композере и автоматическое сжатие. 0 — взять из списка моделей провайдера, если он его сообщает, иначе 128000.",
   "settings.schema.models.multimodal.label": "Мультимодальная",
   "settings.schema.models.multimodal.desc":
-    "Если включено, модель принимает изображения или файлы в дополнение к тексту. UI предложит прикрепление файлов для сообщений, отправляемых с этой моделью.",
+    "Если включено, модель принимает изображения или файлы в дополнение к тексту. UI предложит прикрепление файлов для сообщений, отправляемых с этой моделью, а read покажет ей картинку из файла PNG, JPEG, GIF или WebP.",
   "settings.schema.models.reasoning_levels.label": "Уровни рассуждения",
   "settings.schema.models.reasoning_levels.desc":
     "Необязательное переопределение уровней рассуждения для этой модели (например, low, medium, high). Пусто — автоопределение по идентификатору модели; явный пустой список скрывает селектор уровней.",
@@ -1404,6 +1404,8 @@ export const messagesRu: Record<string, string> = {
   "messages.editMessage": "Редактировать сообщение",
   "messages.attachedFiles": "Прикреплённые файлы",
   "messages.openAttachmentImage": "Открыть {fileName} крупнее",
+  "messages.toolImages": "Картинки, которые вызов показал модели",
+  "messages.openToolImage": "Открыть {fileName} крупнее",
   "messages.systemLabel": "Система",
   "messages.refresh": "Обновить",
   "messages.retryLastMessage": "Повторить последнее сообщение",
