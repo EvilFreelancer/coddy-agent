@@ -356,6 +356,38 @@ func (w *providerModelsWorld) wantCtx(want int, id string) error {
 	return nil
 }
 
+// modelListReportsWindow checks the window GET /v1/models reports for a model
+// row, the number the web UI draws its context ring against and automatic
+// compaction measures against.
+func (w *providerModelsWorld) modelListReportsWindow(want int, ref string) error {
+	if w.ts == nil {
+		return fmt.Errorf("gateway not started")
+	}
+	res, err := http.Get(w.ts.URL + "/v1/models")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	var body struct {
+		Data []struct {
+			ID               string `json:"id"`
+			MaxContextTokens int    `json:"max_context_tokens"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		return fmt.Errorf("decode /v1/models: %w", err)
+	}
+	for _, m := range body.Data {
+		if m.ID == ref {
+			if m.MaxContextTokens != want {
+				return fmt.Errorf("GET /v1/models max_context_tokens for %s = %d, want %d", ref, m.MaxContextTokens, want)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("GET /v1/models has no %s row", ref)
+}
+
 func TestProviderModelsFetchFeature(t *testing.T) {
 	suite := godog.TestSuite{
 		Name: "provider_models_fetch",
@@ -385,6 +417,7 @@ func TestProviderModelsFetchFeature(t *testing.T) {
 			sc.Step(`^the gateway answers with the models "([^"]*)"$`, w.wantModels)
 			sc.Step(`^the gateway answers with context window (\d+) for "([^"]*)"$`, w.wantCtx)
 			sc.Step(`^the upstream saw the key "([^"]*)"$`, w.upstreamSawKey)
+			sc.Step(`^the model list reports the context window (\d+) for "([^"]*)"$`, w.modelListReportsWindow)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

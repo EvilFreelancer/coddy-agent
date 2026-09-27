@@ -83,3 +83,42 @@ func TestListCodexModelsHidesTheModelsCodexHides(t *testing.T) {
 		}
 	}
 }
+
+// The Codex catalog reports each model's window as context_window (272000 for
+// the gpt-5.6 and gpt-6 families), the one Codex itself works with;
+// max_context_window is only the ceiling an operator may raise it to. A value
+// in a shape the listing does not expect reads as no window rather than
+// failing the whole catalog.
+func TestListCodexModelsCarryTheCatalogContextWindow(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	cache := `{
+      "models": [
+        {"slug": "gpt-6-astra", "visibility": "list", "context_window": 272000, "max_context_window": 872000},
+        {"slug": "gpt-5.5", "visibility": "list", "context_window": "272000"},
+        {"slug": "gpt-odd", "visibility": "list", "context_window": {"tokens": 1}},
+        {"slug": "gpt-old", "visibility": "list"}
+      ]
+    }`
+	if err := os.WriteFile(filepath.Join(dir, "models_cache.json"), []byte(cache), 0o600); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	models, err := ListModels(context.Background(), ProviderInput{Type: "codex"})
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	got := make(map[string]int, len(models))
+	for _, m := range models {
+		got[m.ID] = m.ContextWindow
+	}
+	want := map[string]int{"gpt-6-astra": 272000, "gpt-5.5": 272000, "gpt-odd": 0, "gpt-old": 0}
+	if len(got) != len(want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s: context window = %d, want %d", id, got[id], n)
+		}
+	}
+}

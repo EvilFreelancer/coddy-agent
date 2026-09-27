@@ -280,6 +280,11 @@ type codexModelCacheEntry struct {
 	// Priority is how Codex itself ranks the catalog, lowest first. It decides
 	// which model a fresh sign-in adopts as the default.
 	Priority int `json:"priority"`
+	// ContextWindow is the window Codex works with for the model (272000 for
+	// the gpt-5.6 and gpt-6 families); max_context_window is only the ceiling
+	// an operator may raise it to. Raw, so a value in an unexpected shape reads
+	// as no window instead of failing the whole catalog.
+	ContextWindow json.RawMessage `json:"context_window"`
 }
 
 // codexVisibilityHidden marks a catalog row Codex keeps out of its own picker.
@@ -325,7 +330,11 @@ func normalizeCodexModels(models []codexModelCacheEntry) []ModelEntry {
 	visible := visibleCodexModels(models)
 	out := make([]ModelEntry, 0, len(visible))
 	for _, m := range visible {
-		out = append(out, ModelEntry{ID: m.Slug, Name: strings.TrimSpace(m.DisplayName)})
+		out = append(out, ModelEntry{
+			ID:            m.Slug,
+			Name:          strings.TrimSpace(m.DisplayName),
+			ContextWindow: positiveTokenCount(m.ContextWindow),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

@@ -36,3 +36,14 @@ Feature: The settings form fetches the model list a provider advertises
     And a coddy server holding a codex provider signed in to that backend
     When the settings form posts only the provider name "codex"
     Then the gateway answers with the models "gpt-6-astra,gpt-6-luna,gpt-6-sol"
+
+  Scenario: A codex model measures its context against the window of the Codex catalog
+    The Codex catalog reports each model's context window, context_window,
+    the window Codex itself works with. A codex model without
+    max_context_tokens measures its context ring and its automatic compaction
+    against that window, not against the 128000-token fallback.
+    Given a stand-in Codex backend whose catalog offers "gpt-6-astra" from Codex 0.153.0
+    And a coddy server holding a codex provider signed in to that backend
+    When the settings form posts only the provider name "codex"
+    Then the gateway answers with context window 272000 for "gpt-6-astra"
+    And the model list reports the context window 272000 for "codex/gpt-6-astra"

@@ -153,16 +153,17 @@ func TestContextWindowResolutionOrder(t *testing.T) {
 }
 
 func TestContextWindowAsksOnlyProvidersThatReportWindows(t *testing.T) {
-	cfg := windowTestConfig(t.TempDir())
-	listing := &windowListing{windows: map[string]int{"qwen3.8-27b": 262144}}
+	home := t.TempDir()
+	cfg := windowTestConfig(home)
+	listing := &windowListing{windows: map[string]int{"qwen3.8-27b": 262144, "gpt-5.6": 272000}}
 	m := newWindowTestManager(t, cfg, listing, nil)
 
 	// A model with max_context_tokens needs no listing either.
-	m.AwaitContextWindows(context.Background(), cfg, []string{"oai/gpt-4o", "ant/claude", "cdx/gpt-5.6", "hub/configured"}, time.Second)
+	m.AwaitContextWindows(context.Background(), cfg, []string{"oai/gpt-4o", "ant/claude", "hub/configured"}, time.Second)
 	if n := listing.calls.Load(); n != 0 {
 		t.Fatalf("listing read %d times for providers that report no windows, want 0", n)
 	}
-	for _, model := range []string{"oai/gpt-4o", "ant/claude", "cdx/gpt-5.6"} {
+	for _, model := range []string{"oai/gpt-4o", "ant/claude"} {
 		if tokens, source := m.ContextWindow(cfg, model); tokens != config.DefaultContextWindowTokens || source != ContextWindowDefault {
 			t.Errorf("%s: ContextWindow = %d/%q, want the default", model, tokens, source)
 		}
@@ -171,6 +172,20 @@ func TestContextWindowAsksOnlyProvidersThatReportWindows(t *testing.T) {
 	m.AwaitContextWindows(context.Background(), cfg, []string{"nd/qwen3.8-27b"}, time.Second)
 	if tokens, source := m.ContextWindow(cfg, "nd/qwen3.8-27b"); tokens != 262144 || source != ContextWindowFromProvider {
 		t.Fatalf("neuraldeep model: ContextWindow = %d/%q, want 262144 from the provider", tokens, source)
+	}
+
+	// The Codex catalog reports a window per model (context_window), read
+	// with the row's own sign-in: the managed credential of the row, and the
+	// Codex CLI login, since this is the only codex row.
+	m.AwaitContextWindows(context.Background(), cfg, []string{"cdx/gpt-5.6"}, time.Second)
+	if tokens, source := m.ContextWindow(cfg, "cdx/gpt-5.6"); tokens != 272000 || source != ContextWindowFromProvider {
+		t.Fatalf("codex model: ContextWindow = %d/%q, want 272000 from the provider", tokens, source)
+	}
+	listing.mu.Lock()
+	in := listing.inputs[len(listing.inputs)-1]
+	listing.mu.Unlock()
+	if in.Type != "codex" || in.AuthPath != config.CodexAuthPath(home, "cdx") || in.NoCLILogin {
+		t.Fatalf("codex listing asked with %+v, want the row's type, its managed credential and the CLI login", in)
 	}
 }
 
