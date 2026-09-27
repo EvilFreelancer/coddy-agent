@@ -54,14 +54,16 @@ export function initTelegramMiniApp(): void {
     const height = webApp?.viewportHeight
       ? Math.min(webApp.viewportHeight, browserHeight)
       : browserHeight;
-    const stableHeight = webApp?.viewportStableHeight || height;
+    const stableHeight = webApp?.viewportStableHeight || window.innerHeight;
     if (height > 0 && Number.isFinite(height)) {
       root.style.setProperty("--coddy-telegram-viewport-height", `${height}px`);
     }
+    // Against the layout viewport, not the visual one: an overlaying keyboard is
+    // --coddy-keyboard-inset's to count (ChatScreen), not this height's.
     if (stableHeight > 0 && Number.isFinite(stableHeight)) {
       root.style.setProperty(
         "--coddy-telegram-stable-height",
-        `${Math.min(stableHeight, browserHeight)}px`,
+        `${Math.min(stableHeight, window.innerHeight)}px`,
       );
     }
     const safe = webApp?.safeAreaInset;

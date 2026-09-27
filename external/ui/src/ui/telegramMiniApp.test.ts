@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, expect, test, vi } from "vitest";
 import { initTelegramMiniApp, isTelegramMiniApp } from "./telegramMiniApp";
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   delete window.Telegram;
   delete window.__coddyTelegramLaunchURL;
   delete document.documentElement.dataset.telegramMiniApp;
@@ -65,7 +70,9 @@ test("boot applies Telegram viewport and safe area, then updates on Telegram eve
   );
   expect(root.style.getPropertyValue("--coddy-telegram-safe-top")).toBe("20px");
   expect(root.style.getPropertyValue("--coddy-telegram-safe-left")).toBe("5px");
-  expect(root.style.getPropertyValue("--coddy-telegram-safe-right")).toBe("7px");
+  expect(root.style.getPropertyValue("--coddy-telegram-safe-right")).toBe(
+    "7px",
+  );
   expect(ready).toHaveBeenCalledOnce();
 
   webApp.viewportHeight = 390;
@@ -83,4 +90,43 @@ test("a URL marker still enables layout when the SDK has no initData", () => {
   window.__coddyTelegramLaunchURL = "#tgWebAppData=auth_date%3D1";
   initTelegramMiniApp();
   expect(document.documentElement.dataset.telegramMiniApp).toBe("true");
+});
+
+test("an overlaying keyboard is left to the keyboard inset, not the stable height", () => {
+  // iOS: the keyboard shrinks the visual viewport and leaves innerHeight alone.
+  vi.stubGlobal("visualViewport", {
+    height: 400,
+    offsetTop: 0,
+    scale: 1,
+    addEventListener: vi.fn(),
+  });
+  window.Telegram = {
+    WebApp: {
+      initData: "auth_date=1",
+      viewportHeight: 700,
+      viewportStableHeight: 700,
+    },
+  };
+  initTelegramMiniApp();
+
+  const root = document.documentElement;
+  expect(root.style.getPropertyValue("--coddy-telegram-viewport-height")).toBe(
+    "400px",
+  );
+  expect(root.style.getPropertyValue("--coddy-telegram-stable-height")).toBe(
+    "700px",
+  );
+});
+
+test("the docked composer keeps the keyboard inset in a Mini App", () => {
+  const css = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = css.match(
+    /html\[data-telegram-mini-app="true"\] \.chat-bottom:has\(\.composer-wrap-docked\) \{([^}]*)\}/,
+  );
+  expect(rule?.[1]).toMatch(
+    /bottom:\s*max\(\s*var\(--coddy-keyboard-inset, 0px\)/,
+  );
 });

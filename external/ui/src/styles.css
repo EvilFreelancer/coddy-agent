@@ -14245,8 +14245,14 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     padding-right: max(10px, env(safe-area-inset-right, 0px), var(--coddy-telegram-safe-right, 0px));
   }
 
+  /* Telegram's stable height lifts the block out of the hidden lower part of a
+     half-open Mini App; an overlaying keyboard still lifts it by
+     --coddy-keyboard-inset (ChatScreen), whichever is more. */
   html[data-telegram-mini-app="true"] .chat-bottom:has(.composer-wrap-docked) {
-    bottom: max(0px, calc(100dvh - var(--coddy-telegram-stable-height, 100dvh)));
+    bottom: max(
+      var(--coddy-keyboard-inset, 0px),
+      calc(100dvh - var(--coddy-telegram-stable-height, 100dvh))
+    );
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px), var(--coddy-telegram-safe-bottom, 0px));
     padding-left: max(14px, env(safe-area-inset-left, 0px), var(--coddy-telegram-safe-left, 0px));
     padding-right: max(14px, env(safe-area-inset-right, 0px), var(--coddy-telegram-safe-right, 0px));

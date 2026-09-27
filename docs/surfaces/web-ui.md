@@ -253,7 +253,7 @@ Telegram Mini App (issue [#320](https://github.com/coddy-project/coddy-agent/iss
 *Mode selector in a 390px Telegram Mini App viewport, dark theme*
 
 - The page loads Telegram's [official Web App script](https://core.telegram.org/bots/webapps#initializing-mini-apps) before the SPA. At boot, the UI enters Mini App layout when `Telegram.WebApp.initData` is non-empty **or** the launch URL contains a non-empty `tgWebAppData`, `tgWebAppVersion` or `tgWebAppStartParam`. The URL is captured before the SDK loads because the launch data may live in the fragment. These are presentation signals, not authentication; the server never trusts them as a user identity.
-- On the stacked shell, Telegram's visible and stable viewport heights and safe area insets keep the top bar and docked composer within the Mini App window. The page clips horizontal overflow without turning the document into another scrollport. Mode, Model, Reasoning and Permission selectors use a centred, scrollable panel within that visible height. Ordinary browser layout remains unchanged.
+- On the stacked shell, Telegram's visible and stable viewport heights and safe area insets keep the top bar and docked composer within the Mini App window. The page clips horizontal overflow without turning the document into another scrollport. The docked composer stays above both the hidden lower part of a half-open Mini App and an on-screen keyboard that overlays the page. The composer's menus (Mode, Model, Reasoning, Permission, environment, folder and branch) use a centred, scrollable panel within that visible height. Ordinary browser layout remains unchanged.
 
 Header links
 
