@@ -82,7 +82,8 @@ func ProviderAPIKeyEnvVarName(providerName string) string {
 // EffectiveAPIKey returns the key to pass to LLM clients. Resolution order:
 // the configured non-empty api_key, then api_key_command stdout (when set and it
 // succeeds), then the conventional environment variable derived from the provider
-// name (see ProviderAPIKeyEnvVarName).
+// name (see ProviderAPIKeyEnvVarName). A codex row has no key to resolve: it
+// signs in with ChatGPT, so none of the three is read and no helper runs.
 func (p *ProviderConfig) EffectiveAPIKey() string {
 	return p.EffectiveAPIKeyContext(context.Background())
 }
@@ -103,7 +104,7 @@ func (p *ProviderConfig) EffectiveAPIKeyContext(ctx context.Context) string {
 // that exited without output is not an error; the environment variable is
 // the fallback in every case.
 func (p *ProviderConfig) EffectiveAPIKeyContextErr(ctx context.Context) (string, error) {
-	if p == nil {
+	if p == nil || strings.TrimSpace(p.Type) == "codex" {
 		return "", nil
 	}
 	if k := strings.TrimSpace(p.APIKey); k != "" {

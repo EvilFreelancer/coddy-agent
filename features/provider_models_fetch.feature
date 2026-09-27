@@ -29,19 +29,21 @@ Feature: The settings form fetches the model list a provider advertises
     release older than the model's minimal_client_version, and it answers a
     Codex source build (client_version 0.0.0) as an older release. Coddy runs
     every model through its own loop and tools, so the settings form lists
-    the whole catalog the account is offered, the models the newest Codex
-    lists included (issue #394).
+    the models the newest Codex releases are offered too (issue #394).
     Given a stand-in Codex backend whose catalog offers "gpt-6-astra" from Codex 0.153.0
     And the Codex catalog offers "gpt-6-sol,gpt-6-luna" from Codex 0.155.0
     And a coddy server holding a codex provider signed in to that backend
     When the settings form posts only the provider name "codex"
     Then the gateway answers with the models "gpt-6-astra,gpt-6-luna,gpt-6-sol"
+    When the settings form reads the models of the saved provider "codex"
+    Then the gateway answers with the models "gpt-6-astra,gpt-6-luna,gpt-6-sol"
 
   Scenario: A codex model measures its context against the window of the Codex catalog
     The Codex catalog reports each model's context window, context_window,
-    the window Codex itself works with. A codex model without
-    max_context_tokens measures its context ring and its automatic compaction
-    against that window, not against the 128000-token fallback.
+    the window Codex itself works with (272000 for every model it served on
+    2026-09-27). A codex model without max_context_tokens measures its context
+    ring and its automatic compaction against that window, not against the
+    128000-token fallback.
     Given a stand-in Codex backend whose catalog offers "gpt-6-astra" from Codex 0.153.0
     And a coddy server holding a codex provider signed in to that backend
     When the settings form posts only the provider name "codex"

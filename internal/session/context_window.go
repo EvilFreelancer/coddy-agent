@@ -61,6 +61,8 @@ type providerContextWindows interface {
 type ModelListerFunc func(ctx context.Context, in llm.ProviderInput) ([]llm.ModelEntry, error)
 
 type contextWindowEntry struct {
+	// provider names the row whose listing this is.
+	provider string
 	// windows maps the API model id to its reported window; nil until the
 	// listing answered once.
 	windows   map[string]int
@@ -239,7 +241,7 @@ func (m *Manager) refreshContextWindows(cfg *config.Config, prov config.Provider
 	}
 	e := w.entries[key]
 	if e == nil {
-		e = &contextWindowEntry{}
+		e = &contextWindowEntry{provider: prov.Name}
 		w.entries[key] = e
 	}
 	if e.inflight != nil {
@@ -307,6 +309,22 @@ func (w *contextWindowState) nowLocked() time.Time {
 		return w.now()
 	}
 	return time.Now()
+}
+
+// ForgetContextWindowFailures lets the next reader ask the model listing of
+// the provider row named providerName again at once, instead of after the
+// retry backoff. The credential handlers call it after a login or a logout: a
+// read that failed for want of a sign-in says nothing about the next one.
+// Windows already read stay, since a model's window does not depend on the
+// account asking; a read in flight keeps its outcome.
+func (m *Manager) ForgetContextWindowFailures(providerName string) {
+	m.windows.mu.Lock()
+	defer m.windows.mu.Unlock()
+	for _, e := range m.windows.entries {
+		if e.provider == providerName {
+			e.failedAt = time.Time{}
+		}
+	}
 }
 
 // SetContextWindowLister replaces how provider listings are read (and the

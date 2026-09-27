@@ -47,15 +47,18 @@ func TestListCodexModelsMissingCache(t *testing.T) {
 }
 
 func TestListCodexModelsHidesTheModelsCodexHides(t *testing.T) {
-	// visibility "hide" marks catalog rows Codex keeps out of its own picker
-	// (gpt-reserve, codex-auto-review). An absent field is not a hidden model:
-	// older caches carry no visibility at all.
+	// Codex puts a catalog row in its own picker only when its visibility is
+	// "list": "hide" marks gpt-reserve and codex-auto-review, and "none" is
+	// the third value of the same enum (codex-rs/protocol, ModelVisibility).
+	// An absent field is not a hidden model: older caches carry no visibility
+	// at all.
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", dir)
 	cache := `{
       "models": [
         {"slug": "gpt-6-astra", "display_name": "GPT-6-Astra", "visibility": "list", "priority": 1},
         {"slug": "gpt-reserve", "display_name": "GPT-Reserve", "visibility": "hide", "priority": 3},
+        {"slug": "gpt-internal", "display_name": "GPT-Internal", "visibility": "none", "priority": 2},
         {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide", "priority": 43},
         {"slug": "gpt-5.5", "display_name": "GPT-5.5"}
       ]
@@ -85,7 +88,7 @@ func TestListCodexModelsHidesTheModelsCodexHides(t *testing.T) {
 }
 
 // The Codex catalog reports each model's window as context_window (272000 for
-// the gpt-5.6 and gpt-6 families), the one Codex itself works with;
+// every model it serves on 2026-09-27), the one Codex itself works with;
 // max_context_window is only the ceiling an operator may raise it to. A value
 // in a shape the listing does not expect reads as no window rather than
 // failing the whole catalog.
@@ -120,5 +123,24 @@ func TestListCodexModelsCarryTheCatalogContextWindow(t *testing.T) {
 		if got[id] != n {
 			t.Errorf("%s: context window = %d, want %d", id, got[id], n)
 		}
+	}
+}
+
+// The model a fresh sign-in adopts as agent.model is the first one Codex
+// itself would offer, so a row Codex keeps out of its picker never becomes
+// the default, however it is ranked.
+func TestRankedCodexModelsOfferOnlyWhatCodexLists(t *testing.T) {
+	ranked := rankedCodexModels([]codexModelCacheEntry{
+		{Slug: "gpt-internal", Visibility: "none", Priority: 0},
+		{Slug: "gpt-reserve", Visibility: "hide", Priority: 1},
+		{Slug: "gpt-legacy", Priority: 7},
+		{Slug: "gpt-6-astra", Visibility: "list", Priority: 5},
+	})
+	var got []string
+	for _, m := range ranked {
+		got = append(got, m.Slug)
+	}
+	if want := []string{"gpt-6-astra", "gpt-legacy"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("ranked = %v, want %v", got, want)
 	}
 }

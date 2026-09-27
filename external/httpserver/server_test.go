@@ -5006,9 +5006,12 @@ const testHomeEnv = "CODDY_TEST_HTTPSERVER_HOME"
 // that needs a home of its own still sets CODDY_HOME itself. HOME stays the
 // operator's on purpose: tests run git in temp repositories and need its
 // identity, so ~-paths such as the default ~/.agents/skills are not isolated.
+// CODEX_HOME and the Codex backend are isolated as well (see
+// TestTestsDoNotReachTheOperatorsCodexLogin).
 func TestMain(m *testing.M) {
 	if home := os.Getenv(testHomeEnv); home != "" {
-		// A helper process, or a run nested in one: the home is the parent's.
+		// A helper process, or a run nested in one: the home is the parent's,
+		// and so are CODEX_HOME and the Codex backend, inherited as they are.
 		_ = os.Setenv("CODDY_HOME", home)
 		os.Exit(m.Run())
 	}
@@ -5017,13 +5020,51 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "test home:", err)
 		os.Exit(1)
 	}
+	codexHome, err := os.MkdirTemp("", "coddy-httpserver-codex-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "test codex home:", err)
+		os.Exit(1)
+	}
+	codexBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no Codex backend in this test: point "+llm.EnvCodexBaseURL+" at a stand-in", http.StatusServiceUnavailable)
+	}))
 	_ = os.Setenv(testHomeEnv, home)
 	_ = os.Setenv("CODDY_HOME", home)
+	_ = os.Setenv("CODEX_HOME", codexHome)
+	_ = os.Setenv(llm.EnvCodexBaseURL, codexBackend.URL)
 	code := m.Run()
-	if err := os.RemoveAll(home); err != nil {
-		fmt.Fprintln(os.Stderr, "test home:", err)
+	codexBackend.Close()
+	for _, dir := range []string{home, codexHome} {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "test home:", err)
+		}
 	}
 	os.Exit(code)
+}
+
+// No test of this package may read the Codex CLI login of whoever runs the
+// tests, or send it to the real Codex backend: a codex model has its catalog
+// read for its context window whenever GET /v1/models is served or a turn
+// starts, with the CLI login standing in for the only codex row. TestMain
+// points CODEX_HOME at an empty directory under the temp dir and
+// CODDY_CODEX_BASE_URL at a local server that refuses every request; a test
+// with a Codex stand-in of its own still sets both itself.
+func TestTestsDoNotReachTheOperatorsCodexLogin(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome, err := filepath.EvalSymlinks(os.Getenv("CODEX_HOME"))
+	if err != nil || !strings.HasPrefix(codexHome, tmp+string(filepath.Separator)) {
+		t.Fatalf("CODEX_HOME = %q (%v), want a directory of the run's own under %q", os.Getenv("CODEX_HOME"), err, tmp)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err == nil {
+		t.Fatalf("CODEX_HOME %s holds a Codex CLI login", codexHome)
+	}
+	base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL))
+	if err != nil || base.Hostname() != "127.0.0.1" {
+		t.Fatalf("%s = %q, want the local server TestMain started", llm.EnvCodexBaseURL, os.Getenv(llm.EnvCodexBaseURL))
+	}
 }
 
 // A test of this package that loads a config without naming a home (the

@@ -243,10 +243,11 @@ func testCodexVersion(s string) (v [3]int, ok bool) {
 // above the client_version the request names, so a request naming an old
 // release loses the newest models: 0.0.0, a Codex source build, hid gpt-6-sol
 // and gpt-6-luna (issue #394). Coddy runs every model through its own loop and
-// tools, so the request has to clear every gate a Codex 0.x release can set,
-// in the x.y.z form the backend accepts - and stay a 0.x release, since the
-// backend answers 1.0.0 and above with a catalog variant no release gets.
-func TestCodexCatalogRequestClearsEveryReleaseGate(t *testing.T) {
+// tools, so the request has to clear the gates of the Codex 0.x releases, far
+// past the current one, in the x.y.z form the backend accepts - and stay a 0.x
+// release, since the backend answers 1.0.0 and above with a catalog variant no
+// release gets.
+func TestCodexCatalogRequestClearsTheReleaseGates(t *testing.T) {
 	authPath := writeCodexAuth(t, t.TempDir(), codexAuthFile{
 		AuthMode: codexAuthModeChatGPT,
 		Tokens:   codexTokens{AccessToken: makeJWT(time.Now().Add(time.Hour))},

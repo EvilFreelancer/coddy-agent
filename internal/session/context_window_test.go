@@ -189,6 +189,74 @@ func TestContextWindowAsksOnlyProvidersThatReportWindows(t *testing.T) {
 	}
 }
 
+// Each codex row reads its catalog with its own sign-in, and the Codex CLI
+// login stands in only for the row it serves: here the row named codex, so a
+// second row never sends that login's token.
+func TestContextWindowCodexRowsReadWithTheirOwnSignIn(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Paths: config.Paths{Home: home},
+		Providers: []config.ProviderConfig{
+			{Name: "codex", Type: "codex"},
+			{Name: "codex-work", Type: "codex"},
+		},
+		Models: []config.ModelEntry{{Model: "codex/gpt-6-sol"}, {Model: "codex-work/gpt-6-sol"}},
+		Agent:  config.Agent{Model: "codex/gpt-6-sol"},
+	}
+	listing := &windowListing{windows: map[string]int{"gpt-6-sol": 272000}}
+	m := newWindowTestManager(t, cfg, listing, nil)
+
+	m.AwaitContextWindows(context.Background(), cfg, []string{"codex/gpt-6-sol", "codex-work/gpt-6-sol"}, time.Second)
+	listing.mu.Lock()
+	inputs := append([]llm.ProviderInput(nil), listing.inputs...)
+	listing.mu.Unlock()
+	if len(inputs) != 2 {
+		t.Fatalf("listings read = %d, want one per codex row", len(inputs))
+	}
+	for _, in := range inputs {
+		wantCLI := in.Name == "codex"
+		if in.AuthPath != config.CodexAuthPath(home, in.Name) || in.NoCLILogin == wantCLI {
+			t.Fatalf("row %s asked with %+v, want its own credential and the CLI login only for the row named codex", in.Name, in)
+		}
+	}
+	for _, ref := range []string{"codex/gpt-6-sol", "codex-work/gpt-6-sol"} {
+		if tokens, _ := m.ContextWindow(cfg, ref); tokens != 272000 {
+			t.Fatalf("%s: ContextWindow = %d, want 272000", ref, tokens)
+		}
+	}
+}
+
+// A failed read of a listing is not repeated for contextWindowRetry, but a
+// read that failed for want of a sign-in says nothing once the row signs in:
+// after ForgetContextWindowFailures the next reader asks that row again at
+// once, while every other row keeps its backoff.
+func TestContextWindowFailureIsForgottenAfterASignIn(t *testing.T) {
+	cfg := windowTestConfig(t.TempDir())
+	clock := &windowTestClock{now: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)}
+	listing := &windowListing{err: errors.New("codex auth: no ChatGPT tokens")}
+	m := newWindowTestManager(t, cfg, listing, clock)
+	refs := []string{"cdx/gpt-5.6", "nd/qwen3.8-27b"}
+
+	m.AwaitContextWindows(context.Background(), cfg, refs, time.Second)
+	listing.set(map[string]int{"gpt-5.6": 272000, "qwen3.8-27b": 262144}, nil)
+	m.AwaitContextWindows(context.Background(), cfg, refs, time.Second)
+	if n := listing.calls.Load(); n != 2 {
+		t.Fatalf("listing read %d times inside the retry backoff, want 2 (one per row)", n)
+	}
+
+	m.ForgetContextWindowFailures("cdx")
+	m.AwaitContextWindows(context.Background(), cfg, refs, time.Second)
+	if n := listing.calls.Load(); n != 3 {
+		t.Fatalf("listing read %d times after the sign-in, want 3 (the signed-in row once more)", n)
+	}
+	if tokens, source := m.ContextWindow(cfg, "cdx/gpt-5.6"); tokens != 272000 || source != ContextWindowFromProvider {
+		t.Fatalf("signed-in row: ContextWindow = %d/%q, want 272000 from the provider", tokens, source)
+	}
+	if tokens, source := m.ContextWindow(cfg, "nd/qwen3.8-27b"); tokens != config.DefaultContextWindowTokens || source != ContextWindowDefault {
+		t.Fatalf("other row: ContextWindow = %d/%q, want the default until its backoff ends", tokens, source)
+	}
+}
+
 func TestContextWindowFailedListingRetriesAfterBackoff(t *testing.T) {
 	cfg := windowTestConfig(t.TempDir())
 	clock := &windowTestClock{now: time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)}

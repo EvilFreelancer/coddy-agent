@@ -301,6 +301,25 @@ func (w *providerModelsWorld) postBody(body string) error {
 	if err != nil {
 		return err
 	}
+	return w.readModels(res)
+}
+
+// getSaved reads the model list of a saved provider row through
+// GET /coddy/providers/{name}/models, the route that looks the row up in the
+// saved config instead of merging a posted one.
+func (w *providerModelsWorld) getSaved(name string) error {
+	if w.ts == nil {
+		return fmt.Errorf("gateway not started")
+	}
+	res, err := http.Get(w.ts.URL + "/coddy/providers/" + name + "/models")
+	if err != nil {
+		return err
+	}
+	return w.readModels(res)
+}
+
+// readModels records the {"ok","models"} answer both routes share.
+func (w *providerModelsWorld) readModels(res *http.Response) error {
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d, want 200", res.StatusCode)
@@ -414,6 +433,7 @@ func TestProviderModelsFetchFeature(t *testing.T) {
 			})
 			sc.Step(`^the settings form posts the provider row "([^"]*)" of type "([^"]*)" at that upstream with key "([^"]*)"$`, w.postRow)
 			sc.Step(`^the settings form posts only the provider name "([^"]*)"$`, w.postNameOnly)
+			sc.Step(`^the settings form reads the models of the saved provider "([^"]*)"$`, w.getSaved)
 			sc.Step(`^the gateway answers with the models "([^"]*)"$`, w.wantModels)
 			sc.Step(`^the gateway answers with context window (\d+) for "([^"]*)"$`, w.wantCtx)
 			sc.Step(`^the upstream saw the key "([^"]*)"$`, w.upstreamSawKey)

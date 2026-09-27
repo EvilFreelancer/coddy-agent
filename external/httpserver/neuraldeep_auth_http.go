@@ -157,7 +157,7 @@ func (s *Server) coddyProviderNeuralDeepAuthDelete(w http.ResponseWriter, r *htt
 		writeCoddyConfigErr(w, http.StatusInternalServerError, "could not remove NeuralDeep credentials")
 		return
 	}
-	s.dropProviderUsage(name, "neuraldeep")
+	s.providerCredentialChanged(name, "neuraldeep")
 	resp, err := s.neuralDeepAuthStatus(name, provider, "")
 	if err != nil {
 		writeCoddyConfigErr(w, http.StatusInternalServerError, err.Error())
@@ -309,8 +309,20 @@ func (s *Server) persistNeuralDeepLogin(ctx context.Context, attempt *codexAuthL
 	attempt.Status = "completed"
 	attempt.Connected = true
 	// A new key is another account as far as the usage cache is concerned.
-	s.dropProviderUsage(attempt.ProviderName, "neuraldeep")
+	s.providerCredentialChanged(attempt.ProviderName, "neuraldeep")
 	return nil
+}
+
+// providerCredentialChanged forgets what the manager learned about a
+// provider row under its previous credential, after a credential of
+// providerType changed (login, logout): the cached account usage, and a
+// failed read of the row's model listing, so its context windows are read
+// again at once rather than after the retry backoff.
+func (s *Server) providerCredentialChanged(name, providerType string) {
+	s.dropProviderUsage(name, providerType)
+	if s.mgr != nil && strings.TrimSpace(name) != "" {
+		s.mgr.ForgetContextWindowFailures(name)
+	}
 }
 
 // dropProviderUsage forgets the cached account usage of a provider after a
