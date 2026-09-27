@@ -14,7 +14,7 @@ Every variable the `coddy` binary reads, grouped by area, with the file that rea
 
 ## Providers and keys
 
-A provider's key is resolved in this order: the literal `api_key`, the stdout of `api_key_command`, then the variable `NAME_API_KEY`, where `NAME` is the provider name upper-cased with hyphens turned into underscores (`rpa` becomes `RPA_API_KEY`, `my-lab` becomes `MY_LAB_API_KEY`). The name is built by `config.ProviderAPIKeyEnvVarName` in `internal/config/providers.go`, and every surface that reports where a credential comes from (`coddy providers list`, the NeuralDeep sign-in over HTTP, the usage cache) calls the same function.
+A provider's key is resolved in this order: the literal `api_key`, the stdout of `api_key_command`, then the variable `NAME_API_KEY`, where `NAME` is the provider name upper-cased with hyphens turned into underscores (`rpa` becomes `RPA_API_KEY`, `my-lab` becomes `MY_LAB_API_KEY`). The name is built by `config.ProviderAPIKeyEnvVarName` in `internal/config/providers.go`, and every surface that reports where a credential comes from (`coddy providers list`, the NeuralDeep sign-in over HTTP, the usage cache) calls the same function. A `codex` row resolves no key: it signs in with ChatGPT, reads none of the three and runs no `api_key_command`.
 
 | Variable | Read by | Meaning | Documented in |
 |---|---|---|---|

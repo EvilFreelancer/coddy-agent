@@ -315,13 +315,13 @@ func (s *Server) persistNeuralDeepLogin(ctx context.Context, attempt *codexAuthL
 
 // providerCredentialChanged forgets what the manager learned about a
 // provider row under its previous credential, after a credential of
-// providerType changed (login, logout): the cached account usage, and a
-// failed read of the row's model listing, so its context windows are read
-// again at once rather than after the retry backoff.
+// providerType changed (login, logout): the cached account usage, and the
+// last read of the row's model listing, so its context windows are read again
+// with the new credential rather than after the hour or the retry backoff.
 func (s *Server) providerCredentialChanged(name, providerType string) {
 	s.dropProviderUsage(name, providerType)
 	if s.mgr != nil && strings.TrimSpace(name) != "" {
-		s.mgr.ForgetContextWindowFailures(name)
+		s.mgr.ForgetContextWindows(name)
 	}
 }
 

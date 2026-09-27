@@ -148,6 +148,7 @@ Agent name, title, and build version are not configurable here. They are fixed i
 # used as the key (credential helper, like git/docker helpers or AWS credential_process). It lets a provider fetch
 # short-lived or login-issued keys without storing a static secret. On failure resolution falls back to NAME_API_KEY.
 # Resolution order: literal api_key -> api_key_command stdout -> NAME_API_KEY env.
+# A codex row reads none of the three and runs no helper: it signs in with ChatGPT (coddy providers login).
 providers:
   - name: "openai"
     type: "openai"
@@ -721,7 +722,7 @@ models:
   - model: "nd-tech/qwen3.6-35b-a3b"
 ```
 
-Each row signs in separately: the Sign In button on its row in Settings, or **`coddy providers login <name>`** in a terminal. A row config.yaml does not list yet is created by its login when **`--type`** names the type (**`coddy providers login codex-work --type codex`**). The login lands under **`$CODDY_HOME/providers/<name>/`**, a model of the row is **`<name>/<model id>`**, and the row's **`<NAME>_API_KEY`** variable (**`CODEX_WORK_API_KEY`**, **`ND_TECH_API_KEY`**) belongs to that row only.
+Each row signs in separately: the Sign In button on its row in Settings, or **`coddy providers login <name>`** in a terminal. A row config.yaml does not list yet is created by its login when **`--type`** names the type (**`coddy providers login codex-work --type codex`**). The login lands under **`$CODDY_HOME/providers/<name>/`**, a model of the row is **`<name>/<model id>`**, and the row's **`<NAME>_API_KEY`** variable (**`ND_TECH_API_KEY`**) belongs to that row only; a codex row reads no key variable at all.
 
 The Codex CLI login (**`~/.codex/auth.json`**, **`CODEX_HOME`**) and the Devin CLI login are one account each, so each stands in for one row without a login of its own: the only row of its type, or, when there are several, the row named **`codex`** (**`devin`**). Every other row signs in itself instead of quietly running on that account - adding a second codex row to a setup whose only row, **`chatgpt`**, ran on the Codex CLI login leaves **`chatgpt`** unsigned too, until it signs in or is renamed **`codex`**. The startup log, **`coddy --dry-run`**, **`coddy providers list`** and the Settings row name such a row and the row the CLI login serves, and **`--devin-cli`** refuses a row the Devin CLI login does not serve.
 

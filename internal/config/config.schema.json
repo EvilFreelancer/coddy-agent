@@ -40,11 +40,11 @@
           },
           "api_key": {
             "type": "string",
-            "description": "Provider secret. A literal key, a \"${ENV}\" reference expanded at load time, or empty to read NAME_API_KEY at LLM call time. Resolution order: api_key -> api_key_command stdout -> NAME_API_KEY. For type \"devin\" it is a Devin session token and, when set, wins over the browser login and the Devin CLI login."
+            "description": "Provider secret. A literal key, a \"${ENV}\" reference expanded at load time, or empty to read NAME_API_KEY at LLM call time. Resolution order: api_key -> api_key_command stdout -> NAME_API_KEY. For type \"devin\" it is a Devin session token and, when set, wins over the browser login and the Devin CLI login. Ignored for type \"codex\", which signs in with ChatGPT."
           },
           "api_key_command": {
             "type": "string",
-            "description": "Optional credential-helper command. When api_key is empty it runs via the detected host shell (pwsh, powershell, or cmd on Windows; bash or sh elsewhere) and the trimmed stdout is used as the key. On failure resolution falls back to NAME_API_KEY."
+            "description": "Optional credential-helper command. When api_key is empty it runs via the detected host shell (pwsh, powershell, or cmd on Windows; bash or sh elsewhere) and the trimmed stdout is used as the key. On failure resolution falls back to NAME_API_KEY. Never run for type \"codex\", which takes no key."
           },
           "proxy": {
             "type": "string",

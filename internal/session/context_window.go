@@ -63,6 +63,11 @@ type ModelListerFunc func(ctx context.Context, in llm.ProviderInput) ([]llm.Mode
 type contextWindowEntry struct {
 	// provider names the row whose listing this is.
 	provider string
+	// gen counts the credential changes of the row (ForgetContextWindows): a
+	// read that returns under another gen than it started with is dropped.
+	gen int
+	// cancel calls off the running read; nil while idle.
+	cancel context.CancelFunc
 	// windows maps the API model id to its reported window; nil until the
 	// listing answered once.
 	windows   map[string]int
@@ -259,14 +264,16 @@ func (m *Manager) refreshContextWindows(cfg *config.Config, prov config.Provider
 	}
 	done := make(chan struct{})
 	e.inflight = done
+	gen := e.gen
 	list := w.list
 	if list == nil {
 		list = llm.ListModels
 	}
 	authPath := config.ProviderAuthPath(cfg.Paths.Home, prov.Name, prov.Type)
+	ctx, cancel := context.WithTimeout(context.Background(), contextWindowFetchTimeout)
+	e.cancel = cancel
 	go func() {
 		defer close(done)
-		ctx, cancel := context.WithTimeout(context.Background(), contextWindowFetchTimeout)
 		defer cancel()
 		models, err := list(ctx, llm.ProviderInput{
 			Name:     prov.Name,
@@ -281,6 +288,13 @@ func (m *Manager) refreshContextWindows(cfg *config.Config, prov config.Provider
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		e.inflight = nil
+		e.cancel = nil
+		if e.gen != gen {
+			// The row's credential changed while this read was out: what it
+			// brought describes the previous one, and the next reader asks
+			// again.
+			return
+		}
 		if err != nil {
 			e.failedAt = w.nowLocked()
 			m.log.Debug("provider model listing unavailable; context windows fall back to max_context_tokens or the default",
@@ -311,18 +325,28 @@ func (w *contextWindowState) nowLocked() time.Time {
 	return time.Now()
 }
 
-// ForgetContextWindowFailures lets the next reader ask the model listing of
-// the provider row named providerName again at once, instead of after the
-// retry backoff. The credential handlers call it after a login or a logout: a
-// read that failed for want of a sign-in says nothing about the next one.
-// Windows already read stay, since a model's window does not depend on the
-// account asking; a read in flight keeps its outcome.
-func (m *Manager) ForgetContextWindowFailures(providerName string) {
+// ForgetContextWindows makes the next reader of the provider row named
+// providerName read its model listing again, instead of trusting the last
+// read for the rest of its hour or waiting out the retry backoff of a failed
+// one. The credential handlers call it after a login or a logout: a read that
+// failed for want of a sign-in says nothing once the row signs in, and a
+// listing read with another account may lack the models this one is offered.
+// The windows already read keep serving until the next read lands, since a
+// model's window does not depend on the account asking; a read still out asks
+// with the previous credential, so it is called off, and dropped whatever it
+// brought.
+func (m *Manager) ForgetContextWindows(providerName string) {
 	m.windows.mu.Lock()
 	defer m.windows.mu.Unlock()
 	for _, e := range m.windows.entries {
-		if e.provider == providerName {
-			e.failedAt = time.Time{}
+		if e.provider != providerName {
+			continue
+		}
+		e.gen++
+		e.fetchedAt = time.Time{}
+		e.failedAt = time.Time{}
+		if e.cancel != nil {
+			e.cancel()
 		}
 	}
 }

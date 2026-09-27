@@ -14,6 +14,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -5011,8 +5012,15 @@ const testHomeEnv = "CODDY_TEST_HTTPSERVER_HOME"
 func TestMain(m *testing.M) {
 	if home := os.Getenv(testHomeEnv); home != "" {
 		// A helper process, or a run nested in one: the home is the parent's,
-		// and so are CODEX_HOME and the Codex backend, inherited as they are.
+		// and so is the Codex backend, inherited as it is. CODEX_HOME is set
+		// again in any case, and a backend that is not a local one is replaced,
+		// so a marker left in the environment by hand does not open the way to
+		// the operator's Codex login either.
 		_ = os.Setenv("CODDY_HOME", home)
+		_ = os.Setenv("CODEX_HOME", filepath.Join(home, "codex-home"))
+		if base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL)); err != nil || !isLoopbackIP(base.Hostname()) {
+			_ = os.Setenv(llm.EnvCodexBaseURL, "http://127.0.0.1:1")
+		}
 		os.Exit(m.Run())
 	}
 	home, err := os.MkdirTemp("", "coddy-httpserver-home-")
@@ -5062,9 +5070,17 @@ func TestTestsDoNotReachTheOperatorsCodexLogin(t *testing.T) {
 		t.Fatalf("CODEX_HOME %s holds a Codex CLI login", codexHome)
 	}
 	base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL))
-	if err != nil || base.Hostname() != "127.0.0.1" {
+	if err != nil || !isLoopbackIP(base.Hostname()) {
 		t.Fatalf("%s = %q, want the local server TestMain started", llm.EnvCodexBaseURL, os.Getenv(llm.EnvCodexBaseURL))
 	}
+}
+
+// isLoopbackIP reports whether host is a loopback IP address; httptest binds
+// 127.0.0.1, or [::1] on a host without IPv4 loopback. Unlike isLoopbackHost,
+// which reads a listen address, an empty host is not one.
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // A test of this package that loads a config without naming a home (the
