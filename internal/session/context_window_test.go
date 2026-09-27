@@ -288,6 +288,55 @@ func TestContextWindowReadInFlightAcrossASignInIsDropped(t *testing.T) {
 	}
 }
 
+// The read of the previous credential may take its time to return even once
+// called off; the reader that comes right after a sign-in must not wait for
+// it, but start the read of the new credential at once. The idle wait still
+// covers the read called off until it returns, and it records nothing.
+func TestContextWindowSignInStartsANewReadWithoutWaitingForTheOldOne(t *testing.T) {
+	cfg := windowTestConfig(t.TempDir())
+	hold := make(chan struct{})
+	var calls atomic.Int32
+	list := func(ctx context.Context, in llm.ProviderInput) ([]llm.ModelEntry, error) {
+		if calls.Add(1) == 1 {
+			<-hold // deaf to its cancellation, as a slow transport can be
+			return nil, errors.New("codex auth: no ChatGPT tokens")
+		}
+		return []llm.ModelEntry{{ID: "gpt-5.6", ContextWindow: 272000}}, nil
+	}
+	m := NewManager(cfg, &contextUsageCapture{}, nil, slog.Default(), t.TempDir(), nil)
+	m.SetContextWindowLister(list, nil)
+	var once sync.Once
+	release := func() { once.Do(func() { close(hold) }) }
+	t.Cleanup(func() {
+		release()
+		if err := m.WaitContextWindowsIdle(5 * time.Second); err != nil {
+			t.Error(err)
+		}
+	})
+	refs := []string{"cdx/gpt-5.6"}
+
+	m.AwaitContextWindows(context.Background(), cfg, refs, 10*time.Millisecond)
+	m.ForgetContextWindows("cdx")
+	m.AwaitContextWindows(context.Background(), cfg, refs, time.Second)
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("listing read %d times, want 2: the first read after the sign-in waited for the one called off", n)
+	}
+	if tokens, source := m.ContextWindow(cfg, "cdx/gpt-5.6"); tokens != 272000 || source != ContextWindowFromProvider {
+		t.Fatalf("ContextWindow = %d/%q, want 272000 from the new read", tokens, source)
+	}
+
+	if err := m.WaitContextWindowsIdle(50 * time.Millisecond); err == nil {
+		t.Fatal("the idle wait returned while the read called off was still out")
+	}
+	release()
+	if err := m.WaitContextWindowsIdle(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if tokens, _ := m.ContextWindow(cfg, "cdx/gpt-5.6"); tokens != 272000 {
+		t.Fatalf("the read called off overwrote the window: %d", tokens)
+	}
+}
+
 // A model's window does not depend on the account asking, but the models a
 // catalog lists do: after a sign-in to another account the listing is read
 // again, instead of trusting for the rest of the hour one that lacks the

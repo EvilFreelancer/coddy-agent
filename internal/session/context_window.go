@@ -80,8 +80,12 @@ type contextWindowEntry struct {
 type contextWindowState struct {
 	mu      sync.Mutex
 	entries map[string]*contextWindowEntry
-	list    ModelListerFunc
-	now     func() time.Time
+	// detached holds the reads a credential change called off
+	// (ForgetContextWindows) until they return: no entry waits for them any
+	// more, but WaitContextWindowsIdle still does.
+	detached map[chan struct{}]struct{}
+	list     ModelListerFunc
+	now      func() time.Time
 }
 
 // resolveContextWindow applies the resolution order for modelRef. tokens is 0
@@ -287,14 +291,15 @@ func (m *Manager) refreshContextWindows(cfg *config.Config, prov config.Provider
 		})
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		e.inflight = nil
-		e.cancel = nil
 		if e.gen != gen {
-			// The row's credential changed while this read was out: what it
-			// brought describes the previous one, and the next reader asks
-			// again.
+			// A credential change called this read off and let it go: what it
+			// brought describes the previous credential, and the entry may
+			// already run the read of the new one, which this one leaves alone.
+			delete(w.detached, done)
 			return
 		}
+		e.inflight = nil
+		e.cancel = nil
 		if err != nil {
 			e.failedAt = w.nowLocked()
 			m.log.Debug("provider model listing unavailable; context windows fall back to max_context_tokens or the default",
@@ -332,21 +337,28 @@ func (w *contextWindowState) nowLocked() time.Time {
 // failed for want of a sign-in says nothing once the row signs in, and a
 // listing read with another account may lack the models this one is offered.
 // The windows already read keep serving until the next read lands, since a
-// model's window does not depend on the account asking; a read still out asks
-// with the previous credential, so it is called off, and dropped whatever it
-// brought.
+// model's window does not depend on the account asking. A read still out asks
+// with the previous credential: it is called off and let go, so the next
+// reader starts the read of the new credential at once instead of waiting for
+// it, and whatever it brings is dropped.
 func (m *Manager) ForgetContextWindows(providerName string) {
-	m.windows.mu.Lock()
-	defer m.windows.mu.Unlock()
-	for _, e := range m.windows.entries {
+	w := &m.windows
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, e := range w.entries {
 		if e.provider != providerName {
 			continue
 		}
 		e.gen++
 		e.fetchedAt = time.Time{}
 		e.failedAt = time.Time{}
-		if e.cancel != nil {
+		if e.inflight != nil {
 			e.cancel()
+			if w.detached == nil {
+				w.detached = make(map[chan struct{}]struct{})
+			}
+			w.detached[e.inflight] = struct{}{}
+			e.inflight, e.cancel = nil, nil
 		}
 	}
 }
@@ -385,7 +397,8 @@ func (m *Manager) WaitContextWindowsIdle(timeout time.Duration) error {
 	}
 }
 
-// inflightContextWindowFetches snapshots the fetches running right now.
+// inflightContextWindowFetches snapshots the fetches running right now, the
+// ones a credential change called off included.
 func (m *Manager) inflightContextWindowFetches() []chan struct{} {
 	m.windows.mu.Lock()
 	defer m.windows.mu.Unlock()
@@ -394,6 +407,9 @@ func (m *Manager) inflightContextWindowFetches() []chan struct{} {
 		if e.inflight != nil {
 			out = append(out, e.inflight)
 		}
+	}
+	for ch := range m.windows.detached {
+		out = append(out, ch)
 	}
 	return out
 }

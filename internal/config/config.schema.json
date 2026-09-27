@@ -9,7 +9,7 @@
     "providers": {
       "type": "array",
       "title": "LLM providers",
-      "description": "API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores).",
+      "description": "API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores); a row of type \"codex\" signs in with ChatGPT and reads no key.",
       "items": {
         "type": "object",
         "additionalProperties": false,

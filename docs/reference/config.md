@@ -45,11 +45,11 @@ Generated from `internal/config/config.schema.json` (the schema embedded into th
 <!-- docsgen:config:start -->
 ### `providers`
 
-API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores).
+API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores); a row of type "codex" signs in with ChatGPT and reads no key.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `providers` | list of objects |  | API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores). |
+| `providers` | list of objects |  | API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores); a row of type "codex" signs in with ChatGPT and reads no key. |
 | `providers[].name` | string |  | Logical id used as the first segment of models[].model. ASCII letters, digits, hyphen, underscore; must start with a letter. |
 | `providers[].type` | string, one of `openai`, `anthropic`, `neuraldeep`, `codex`, `devin` |  | Wire protocol for this provider. Use "openai" for configurable OpenAI-compatible endpoints (OpenAI, DeepSeek, Groq, Ollama, llama.cpp, LM Studio), "anthropic" for Anthropic, "neuraldeep" for NeuralDeep's OpenAI-compatible API at one of its two official deployments (selected with api_base), "codex" for ChatGPT OAuth against the official Codex backend (Responses API), or "devin" for a Devin (Cognition) account signed in through the browser or the Devin CLI, served by the Devin API server; see https://coddy.dev/docs/features/devin. |
 | `providers[].api_base` | string |  | Optional base URL override. For type "openai" include /v1 (e.g. http://localhost:11434/v1); for type "anthropic" an Anthropic-compatible gateway (default https://api.anthropic.com). For type "neuraldeep" it selects the deployment: https://api.neuraldeep.ru/v1 (Russia, the default) or https://api.neuraldeep.tech/v1 (the international mirror); any other value falls back to the default. Ignored for types "codex" and "devin", which always use their official endpoints. |
@@ -412,7 +412,7 @@ Messenger bot adapters (used only by binaries built with -tags gateway or -tags 
 
 List of LLM backends (`[]config.ProviderConfig`, `internal/config/providers.go`).
 
-Key resolution order: `api_key` → `api_key_command` stdout → `NAME_API_KEY` env var.
+Key resolution order: `api_key` → `api_key_command` stdout → `NAME_API_KEY` env var. A `codex` row signs in with ChatGPT and reads none of them.
 
 ```yaml
 providers:
