@@ -9,7 +9,7 @@ This page is the narrative guide. Two companion artifacts cover the full key lis
 # yaml-language-server: $schema=https://coddy.dev/config.schema.json
 ```
 
-**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), `coddy mcp add`, a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, and the order the keys are already in. A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
+**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), `coddy mcp add`, a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, the order the keys are already in and the way you wrote every value they do not change (see [Environment variable references](#environment-variable-references)). A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way, and a provider or a model entry keeps only the fields it named. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
 
 ```json
 "yaml.schemas": { "https://coddy.dev/config.schema.json": ["**/.coddy/config.yaml"] }
@@ -24,7 +24,7 @@ Resolved locations use environment variables and flags (see README). In short:
 - **`CODDY_HOME`** - agent state directory. Default **`~/.coddy`**. Holds `config.yaml`, `sessions/`, `skills/`, Coddy-managed provider credentials under `providers/`, and **`scheduler/`** when using the optional cron scheduler.
 - **`CODDY_CWD`** - default filesystem cwd when `session/new` sends an empty `cwd`. Default is the process working directory at startup. Same meaning as the **`--cwd`** flag when set.
 - **`CODDY_CONFIG`** - explicit path to `config.yaml`. Same as **`--config`**.
-- **`CODEX_HOME`** - Codex CLI state directory read by **`type: codex`** providers when no Coddy-managed credential exists. Default **`~/.codex`**.
+- **`CODEX_HOME`** - Codex CLI state directory read by a **`type: codex`** provider when no Coddy-managed credential exists: the only codex row, or the row named **`codex`** among several ([Several profiles of one provider type](#several-profiles-of-one-provider-type)). Default **`~/.codex`**.
 - **`CODDY_CODEX_BASE_URL`** - override for the Codex backend endpoint (default **`https://chatgpt.com/backend-api/codex`**). Process-level on purpose: **`api_base`** stays ignored for **`type: codex`**, so a settings document cannot redirect a ChatGPT OAuth token. Used by the executable specs and by self-hosted Codex gateways.
 - **`CODDY_DEVIN_CLI_CREDENTIALS`** - the Devin CLI **`credentials.toml`** read by **`type: devin`** providers when no Coddy-managed login exists. Default **`~/.local/share/devin/credentials.toml`** (or under **`$XDG_DATA_HOME`**). **`CODDY_DEVIN_API_SERVER_URL`**, **`CODDY_DEVIN_WEBAPP_URL`** and **`CODDY_DEVIN_API_URL`** move the Devin endpoints for the whole process, for stands and tests; see [Devin](../features/devin.md).
 
@@ -266,8 +266,8 @@ prompts:
   # Built-in templates order: Tools, Skills, Memory (session notes).
   # They deliberately render neither {{.TodoList}} nor {{.UTCNow}}: both move between the steps of a
   # turn, and the system prompt is what the provider's prompt cache keys the whole conversation on.
-  # Coddy sends the clock, the checklist and the rules a tool call activated after the history instead,
-  # in a <turn_context> block. Your own template may still render them, at the cost of that cache.
+  # Coddy sends the clock and the checklist after the history instead, in a <turn_context> block,
+  # and a rule a tool call activates rides in that call's result. Your own template may still render them, at the cost of that cache.
   # See docs/contributing/react-agent.md (The turn context block).
   dir: ""
   agent_prompt: "agent.md"     # optional; default agent.md
@@ -305,7 +305,7 @@ memory:
   dir: "" # long-term memory root; empty = $CODDY_HOME/memory. Supports ${CODDY_HOME} and ~ when set.
   wait_seconds: 20      # how long a turn waits for the report before its first model call; 0 never waits
   timeout_seconds: 300  # hard limit of one memory run
-  keep_runs: 20         # finished memory runs kept per session in the Tasks drawer; 0 keeps all
+  keep_runs: 20         # finished memory runs kept per session in the Tasks panel; 0 keeps all
   recall_max_turns: 6   # the child's round cap is the larger of the two
   persist_max_turns: 12
   copilot_max_tokens: 4096
@@ -329,12 +329,16 @@ skills:
     - "${CWD}/.coddy/skills"
 
 # Rules (Go: config.Rules, internal/config/rules.go)
-# Discovered from .coddy/rules, the shared .agents/rules, .cursor/rules,
-# .claude/rules, .codex/rules, and nested **/AGENTS.md under session CWD, plus
-# your own ~/.coddy/rules, which applies in every workspace. Your own
+# One project folder is read under the session CWD: the first of .coddy/rules,
+# the shared .agents/rules, .cursor/rules, .claude/rules and .codex/rules that
+# holds a rule file, so another agent's mirror of the same rules is not loaded
+# twice. Your own ~/.coddy/rules joins it in every workspace, and nested
+# **/AGENTS.md are read for the folders a tool enters. Your own
 # ~/.coddy/AGENTS.md is read too, ahead of the project's, and has no key here.
 # .mdc files are read as Cursor rules, .md files as Claude Code rules.
-# Injected into {{.Rules}} in the system prompt (separate from skills). See docs/features/rules.md.
+# The rules that always apply go into {{.Rules}} in the system prompt (separate
+# from skills); a rule scoped to paths arrives with the tool result or message
+# that touches a matching path. See docs/features/rules.md.
 rules:
   auto_discover: true
   systems: []   # optional: user, coddy, agents-dir, cursor, claude, codex, agents
@@ -474,7 +478,7 @@ httpserver:
     session_ttl_hours: 720                   # 0 = the browser drops the cookie on close (the server still expires its record after 30 days)
 ```
 
-A hash written into this file by hand needs every `$` doubled (`$$argon2id$$v=19$$...`), because a `$NAME` is expanded as an environment reference when the file loads. The command does that for you; `coddy -t` names the problem when it finds a hash that no longer parses. A `${VAR}` reference in `user` or `password_hash` works like every other value here, which also means a save from the settings screen writes the expanded value back into the file - keep a credential out of the document entirely with `CODDY_HTTP_USER` / `CODDY_HTTP_PASSWORD` instead.
+A hash written into this file by hand needs every `$` doubled (`$$argon2id$$v=19$$...`), because a `$NAME` is expanded as an environment reference when the file loads. The command does that for you; `coddy -t` names the problem when it finds a hash that no longer parses. A `${VAR}` reference in `user` or `password_hash` works like every other value here and survives a save from the settings screen as a reference; to keep a credential out of the document entirely, use `CODDY_HTTP_USER` / `CODDY_HTTP_PASSWORD` instead.
 
 The account can also come from the environment alone - `CODDY_HTTP_USER` and `CODDY_HTTP_PASSWORD`, see the `.env` section below - which is the route for a container or a systemd unit. The form is for browsers; `coddy --remote`, `coddy acp --remote`, a swarm relay and every script still present the bearer token. Full behaviour: [HTTP API](../reference/http-api.md#web-ui-sign-in-optional), [Remote mode](../operate/remote.md#the-sign-in-form).
 
@@ -618,10 +622,19 @@ corrupting the secret. The Settings UI does this automatically for the `proxy` f
 write `$$` by hand.
 
 **A save keeps the references.** The loaded configuration holds what a reference resolved to, so the
-Settings UI works with the secret itself. When it saves, a value written as `${VAR}` in the file is
-written back as `${VAR}` as long as it still resolves to the value being saved; only a value you
+Settings UI works with the secret itself and with absolute paths. When it saves, a value written as
+`${VAR}`, `${CODDY_HOME}/...` or `~/...` in the file is written back that way as long as it still
+loads as the value being saved - in a single value (`memory.dir`) and in a list entry
+(`skills.dirs`, `subagents.dirs`, `hooks.files`, `instructions.files`) alike; only a value you
 changed on the screen replaces the reference. A key kept in the environment or in `~/.coddy/.env`
-therefore never lands in `config.yaml` because of an unrelated save.
+therefore never lands in `config.yaml` because of an unrelated save, and a save of an untouched form
+writes every value back the way the file spelled it. The same holds for what the process changes
+after reading the file: a command-line flag, the relay listen address `coddy serve` fills in or a
+pairing token from the environment is not written into `config.yaml` unless you change that value on
+the screen, and a value another save changed after you opened the form is not put back by yours.
+When the file on disk does not load at the moment of the save (a broken hand edit, a deleted file),
+the save writes the configuration the server runs, as it always did. Indentation and blank lines are
+not kept: a save writes the file indented by two spaces, without blank lines between sections.
 
 Two placeholders are not environment variables:
 
@@ -687,6 +700,32 @@ The same API is served from two deployments: **`https://api.neuraldeep.ru/v1`** 
 The models of a Devin (Cognition) account, reached the way the Devin CLI reaches them.
 
 **`coddy providers login devin`** signs in through the browser (PKCE, like **`devin auth login`**): the Devin page sends the browser back to a loopback port on this machine, and over SSH you paste the address it ended on into the terminal instead. **`--devin-cli`** reuses the login the Devin CLI already holds and opens no browser. The session token is stored under **`$CODDY_HOME/providers/<name>/devin-auth.json`**; without it the provider falls back to the Devin CLI's **`credentials.toml`**, and an explicit **`api_key`** (or **`api_key_command`** / **`DEVIN_API_KEY`**) wins over both. The login adds one model per family, such as **`devin/claude-opus-5`**, with the family's variants as its **`reasoning_levels`**: level **`high`** is sent as **`claude-opus-5-high`**. **`api_base`** is ignored; optional **`proxy`** routes the sign-in, the catalog and chat ([Provider proxy](#provider-proxy)). The full story, including how levels map to variants and how the output cap is chosen, is on [Devin](../features/devin.md).
+
+### Several profiles of one provider type
+
+A row is a profile: several rows may share a type, each under a name of its own, and each keeps its own sign-in, its own models and its own usage. Three ChatGPT accounts are three **`codex`** rows, two NeuralDeep accounts are two **`neuraldeep`** rows:
+
+```yaml
+providers:
+  - name: "codex"
+    type: "codex"
+  - name: "codex-work"
+    type: "codex"
+  - name: "neuraldeep"
+    type: "neuraldeep"
+  - name: "nd-tech"
+    type: "neuraldeep"
+    api_base: "https://api.neuraldeep.tech/v1"
+models:
+  - model: "codex-work/gpt-5.5"
+  - model: "nd-tech/qwen3.6-35b-a3b"
+```
+
+Each row signs in separately: the Sign In button on its row in Settings, or **`coddy providers login <name>`** in a terminal. A row config.yaml does not list yet is created by its login when **`--type`** names the type (**`coddy providers login codex-work --type codex`**). The login lands under **`$CODDY_HOME/providers/<name>/`**, a model of the row is **`<name>/<model id>`**, and the row's **`<NAME>_API_KEY`** variable (**`CODEX_WORK_API_KEY`**, **`ND_TECH_API_KEY`**) belongs to that row only.
+
+The Codex CLI login (**`~/.codex/auth.json`**, **`CODEX_HOME`**) and the Devin CLI login are one account each, so each stands in for one row without a login of its own: the only row of its type, or, when there are several, the row named **`codex`** (**`devin`**). Every other row signs in itself instead of quietly running on that account - adding a second codex row to a setup whose only row, **`chatgpt`**, ran on the Codex CLI login leaves **`chatgpt`** unsigned too, until it signs in or is renamed **`codex`**. The startup log, **`coddy --dry-run`**, **`coddy providers list`** and the Settings row name such a row and the row the CLI login serves, and **`--devin-cli`** refuses a row the Devin CLI login does not serve.
+
+The rows stay apart where they are shown too: the usage panel heading and the console's **`/usage`** name the row next to the brand (**`Codex · codex-work`**) unless the row is named after its type, and a NeuralDeep sign-in labels its key on the hub with the row (**`coddy @ host (nd-tech)`**).
 
 ### Local OpenAI-compatible servers (Ollama, llama.cpp, LM Studio)
 Use **`type: openai`** and set **`api_base`** to an OpenAI-compatible base URL that already includes **`/v1`**, for example **`http://localhost:11434/v1`** for Ollama.

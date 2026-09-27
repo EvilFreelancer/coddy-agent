@@ -220,9 +220,9 @@ Private repositories rely on your ambient `git` credentials; API URLs are checke
 
 ## Directory layout
 
-![Settings, Skills tab: the resolved skills.dirs, remote sources and installed skills](../assets/screenshot-fullhd-settings-skills.png)
+![Settings, Skills tab: auto-discovery, the resolved skills.dirs, remote sources and installed skills](../assets/screenshot-fullhd-settings-skills.png)
 
-*Settings, Skills tab: the resolved skills.dirs, remote sources and installed skills*
+*Settings, Skills tab: auto-discovery, the resolved skills.dirs, the remote sources with the built-in one greyed out, and the installed skills, the bundled ones among them*
 
 Coddy searches all directories in `skills.dirs` and deduplicates by skill name. **Later directories have higher priority** — if the same skill name appears in multiple directories, the version from the directory listed last wins.
 
@@ -286,7 +286,7 @@ Full skill body here...
 
 `name` sets the canonical slash-command identifier (e.g. `/code-review`). It overrides the filesystem-derived name when set. `description` is shown in the catalog and the Settings → Skills panel.
 
-Two optional fields pick what the skill runs on. `model` names a configured model id and `reasoning` (alias `effort`) a level that model offers, `off` or `default`; when the skill is invoked, by `/code-review` in a prompt or by the model's `load_skill`, they apply for the rest of that turn and the session's own settings return with the next one ([Session settings](session-settings.md#the-model-switches-itself)):
+Two optional fields pick what the skill runs on. `model` names a configured model id and `reasoning` (alias `effort`) a level that model offers, `off` or `default`; when the skill is invoked, by `/code-review` in a prompt or by the model's `load_skill`, they apply for the rest of that turn and the session's own settings return with the next one ([Session settings](session-settings.md#changing-the-model-on-request)):
 
 ```markdown
 ---
@@ -334,14 +334,37 @@ To share it with others, publish to GitHub and list it on [skills.sh](https://sk
 
 ---
 
+## When skills are read
+
+A session reads its skills from disk when it starts (the console's first
+session, `session/new` or `session/load` over ACP, a new chat in the web UI),
+when its workspace changes and when the configuration is reloaded; nothing
+is read over the network for that.
+
+- **Read at the start, bodies included**: every `SKILL.md` (and root `.md` /
+  `.mdc` skill file) of the folders in `skills.dirs` and of the managed
+  folder, about 0.1 ms per skill, so a thousand installed skills add some
+  100 ms to the console's first frame; the skills built into the binary are
+  held in memory.
+- **Never read at the start**: `skills.sources`. A source's manifest or
+  repository is fetched only when someone asks for it - `coddy skills sync`,
+  `coddy plugin marketplace sync` and `/plugin`, Settings → Skills
+  (**Refresh**, **Update**), `GET /coddy/skills/updates` - so a large
+  marketplace, or a source that does not answer, never delays a session.
+
+What can hold a start up are the configured MCP servers; the console
+connects them after its first frame ([MCP servers](mcp.md#mcp-server-lifecycle)).
+
 ## How skills are applied
 
 On each `session/prompt` the agent:
 
-1. Scans `skills.dirs` for the session cwd and `CODDY_HOME`.
+1. Uses the skills the session read from `skills.dirs` for its cwd and `CODDY_HOME` ([When skills are read](#when-skills-are-read)).
 2. All loaded (and enabled) skills are always active — their bodies are available as slash commands and injected on demand.
 3. Builds the **`{{.Skills}}`** system-prompt block: the slash-command catalog listing all skills, plus the full body of any always-active or glob-matched skill whose name is **not** already in the catalog.
-4. At LLM call time, if the last user message contains `/name` invocations, each matched skill's body is **prepended to the user message** before it is sent to the model. This augmentation happens only inside the LLM request — it is **not stored in session history** and is **not visible in the chat transcript**.
+4. Looks for `/name` invocations in the text the user typed and **appends each matched skill's body to the user message**, as a `<coddy_attachment path="skill:name" kind="skill">` element after the typed text. The message goes into **session history with the body in it**, so later turns replay the same bytes: the provider's cached prefix holds, and the model keeps the instructions it was given until a compaction folds the message into its summary ([Mentions and the prompt cache](mentions.md#mentions-and-the-prompt-cache)). The transcript shows the message as typed, because the web UI drops `kind="skill"` elements, and so does the history replay a reopened console or an ACP editor receives. A follow-up queued during a turn gets its skill bodies the same way.
+
+A body the model loads itself with the `load_skill` tool (offered while `skills.auto_discovery` is on) comes back as the result of that call and stays in session history like any other tool result.
 
 ACP clients receive `available_commands_update` after `session/new` and `session/load`. The HTTP UI queries `GET /coddy/slash-commands` for autocomplete.
 

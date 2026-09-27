@@ -75,7 +75,7 @@ func TestWakerOnlyRunsForTasksThatAskedForIt(t *testing.T) {
 	runner := &recordingRunner{}
 	w := NewBackgroundWaker(slog.Default(), runner.run)
 
-	// Neither of these should wake anything: one did not opt in, the other is
+	// Neither of these should wake anything: one explicitly disabled it, the other is
 	// still running.
 	w.OnSnapshot(finished("bg_1", "s1", bgtask.StatusSucceeded, false))
 	running := finished("bg_2", "s1", bgtask.StatusRunning, true)
@@ -170,7 +170,7 @@ func TestWakerDoesNotWakeWhileTheProcessIsShuttingDown(t *testing.T) {
 }
 
 func TestAttachReplacesAPreviousWakerInsteadOfStacking(t *testing.T) {
-	pool := bgtask.NewWithRunner(bgtask.Config{}, nil)
+	pool := bgtask.NewWithRunner(bgtask.Config{}, bgtask.NewCommandRunner())
 
 	first := &recordingRunner{}
 	NewBackgroundWaker(slog.Default(), first.run).Attach(pool)
@@ -185,7 +185,13 @@ func TestAttachReplacesAPreviousWakerInsteadOfStacking(t *testing.T) {
 	w := NewBackgroundWaker(slog.Default(), third.run)
 	w.Attach(pool)
 
-	w.OnSnapshot(finished("bg_1", "s1", bgtask.StatusSucceeded, true))
+	snap, err := pool.Start(bgtask.Spec{SessionID: "s1", Command: "echo done", NotifyOnFinish: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Wait(context.Background(), "s1", snap.ID, time.Second); err != nil {
+		t.Fatal(err)
+	}
 	waitForCalls(t, third, 1)
 
 	if sessions, _ := first.calls(); len(sessions) != 0 {
@@ -193,6 +199,27 @@ func TestAttachReplacesAPreviousWakerInsteadOfStacking(t *testing.T) {
 	}
 	if sessions, _ := second.calls(); len(sessions) != 0 {
 		t.Fatalf("the replaced waker still ran %d turns", len(sessions))
+	}
+}
+
+func TestWakerSkipsAResultCollectedBeforeTheNextTurn(t *testing.T) {
+	runner := &recordingRunner{}
+	w := NewBackgroundWaker(slog.Default(), runner.run)
+	pool := bgtask.NewWithRunner(bgtask.Config{}, bgtask.NewCommandRunner())
+	w.Attach(pool)
+	snap, err := pool.Start(bgtask.Spec{SessionID: "s1", Command: "echo done", NotifyOnFinish: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Wait(context.Background(), "s1", snap.ID, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.AcknowledgeResult("s1", snap.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(wakeSettleDelay + 300*time.Millisecond)
+	if sessions, _ := runner.calls(); len(sessions) != 0 {
+		t.Fatalf("collected result started %d redundant turns", len(sessions))
 	}
 }
 
@@ -217,6 +244,52 @@ func TestWakeInstructionReportsFailureHonestly(t *testing.T) {
 	}
 	if !strings.Contains(got, "did not succeed") {
 		t.Fatalf("instruction %q does not tell the model to report failure honestly", got)
+	}
+}
+
+// A subagent run that did not succeed kept its transcript, so the wake says to
+// continue that child with spawn_agent resume rather than start a new one on
+// the same task (issue #389); a run that succeeded and a shell command get no
+// such line.
+func TestWakeInstructionTellsHowToResumeASubagentThatDidNotSucceed(t *testing.T) {
+	end := time.Now()
+	agentRun := func(id string, status bgtask.Status) bgtask.Snapshot {
+		return bgtask.Snapshot{
+			ID: id, Kind: bgtask.KindAgent, Label: "agent general: translate", Status: status,
+			StartedAt: end.Add(-time.Minute), FinishedAt: &end,
+			Agent: &bgtask.AgentInfo{Name: "general", SessionID: "sess_" + id},
+		}
+	}
+	failed := agentRun("bg_5", bgtask.StatusFailed)
+	failed.Error = "LLM error: read tcp: wsarecv: An existing connection was forcibly closed by the remote host."
+	got := WakeInstruction([]bgtask.Snapshot{failed, agentRun("bg_6", bgtask.StatusSucceeded)})
+	if !strings.Contains(got, `spawn_agent with resume="bg_5"`) {
+		t.Fatalf("instruction %q does not say how to resume the failed subagent", got)
+	}
+	if strings.Contains(got, `resume="bg_6"`) {
+		t.Fatalf("instruction %q offers to resume a run that succeeded", got)
+	}
+	if got := WakeInstruction([]bgtask.Snapshot{finished("bg_1", "s1", bgtask.StatusFailed, true)}); strings.Contains(got, "resume=") {
+		t.Fatalf("instruction %q offers to resume a shell command", got)
+	}
+	// A run whose child session was never created left nothing to continue.
+	stillborn := agentRun("bg_7", bgtask.StatusFailed)
+	stillborn.Error = errCreateChildSession + ": subagent parent session is not live: sess_x"
+	if got := WakeInstruction([]bgtask.Snapshot{stillborn}); strings.Contains(got, "resume=") {
+		t.Fatalf("instruction %q offers to resume a child that was never created", got)
+	}
+	// A child that failed twice is named once, by its latest run.
+	again := agentRun("bg_8", bgtask.StatusFailed)
+	again.Agent.SessionID = failed.Agent.SessionID
+	got = WakeInstruction([]bgtask.Snapshot{failed, again})
+	if strings.Contains(got, `resume="bg_5"`) || strings.Count(got, "resume=") != 1 || !strings.Contains(got, `resume="bg_8"`) {
+		t.Fatalf("instruction %q does not name the child once, by its latest run", got)
+	}
+	// A child whose latest run in the batch succeeded needs nothing resumed.
+	recovered := agentRun("bg_9", bgtask.StatusSucceeded)
+	recovered.Agent.SessionID = failed.Agent.SessionID
+	if got := WakeInstruction([]bgtask.Snapshot{failed, recovered}); strings.Contains(got, "resume=") {
+		t.Fatalf("instruction %q offers to resume a child whose latest run succeeded", got)
 	}
 }
 

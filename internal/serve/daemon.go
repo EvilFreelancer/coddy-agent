@@ -27,6 +27,9 @@ const (
 	RoleDispatcher = "dispatcher"
 	// RoleWorker runs the subsystems and may ask to be replaced.
 	RoleWorker = "worker"
+	// RoleService is a foreground `coddy serve` that a service manager starts
+	// again when it exits with ExitRestart: the systemd unit sets it.
+	RoleService = "service"
 )
 
 // workerDrain bounds how long a worker is given to finish what it is doing when
@@ -38,14 +41,21 @@ const workerDrain = 30 * time.Second
 // it started to record itself before reporting that it did not come up.
 const startupGrace = 10 * time.Second
 
-// Role reports which half of the daemon this process was started as, or "" for
-// an ordinary foreground `coddy serve`.
+// Role reports which half of the daemon this process was started as,
+// RoleService under the systemd unit, or "" for an ordinary foreground
+// `coddy serve`.
 func Role() string { return strings.TrimSpace(os.Getenv(EnvRole)) }
 
 // Supervised reports whether something is waiting to start this process again.
 // It is what decides between exiting for a replacement and reporting that a
 // restart is due.
-func Supervised() bool { return Role() == RoleWorker }
+func Supervised() bool {
+	switch Role() {
+	case RoleWorker, RoleService:
+		return true
+	}
+	return false
+}
 
 // ExitCodeError carries the status a command wants the process to exit with,
 // for the cases where "failed" is not the whole story - a worker asking its
@@ -116,7 +126,7 @@ func StartDetached(opts DaemonOptions) (Record, error) {
 	if existing, err := ReadRecord(opts.Home); err == nil && existing.Running() {
 		return Record{}, &ErrAlreadyRunning{Record: existing}
 	}
-	exe, err := os.Executable()
+	exe, err := platform.Executable()
 	if err != nil {
 		return Record{}, fmt.Errorf("locate the coddy binary: %w", err)
 	}
@@ -136,6 +146,7 @@ func StartDetached(opts DaemonOptions) (Record, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	platform.DetachFromTerminal(cmd)
+	platform.AdaptCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		return Record{}, fmt.Errorf("start the dispatcher: %w", err)
 	}
@@ -269,7 +280,7 @@ func reapAbandonedWorker(home string, log *slog.Logger) {
 // disk, so a panic that escaped a surface, an OOM kill, or a `coddy update` that
 // replaced the executable are all recovered by the same mechanism.
 func runWorkerProcess(ctx context.Context, opts DaemonOptions, onStart func(pid int)) (int, error) {
-	exe, err := os.Executable()
+	exe, err := platform.Executable()
 	if err != nil {
 		return 1, fmt.Errorf("locate the coddy binary: %w", err)
 	}
@@ -282,6 +293,7 @@ func runWorkerProcess(ctx context.Context, opts DaemonOptions, onStart func(pid 
 	// Its own group, so stopping the worker reaches whatever it started - a
 	// background shell task, an MCP server - rather than orphaning it.
 	platform.DetachProcessGroup(cmd)
+	platform.AdaptCommand(cmd)
 	if err := cmd.Start(); err != nil {
 		return 1, fmt.Errorf("start the worker: %w", err)
 	}

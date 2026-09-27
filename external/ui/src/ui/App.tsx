@@ -10,7 +10,8 @@ import {
 import type { CSSProperties } from "react";
 import { ChatScreen } from "./chat/ChatScreen";
 import { useStableHandler } from "./components/useStableHandler";
-import type { QueuedMessage } from "./chat/Composer";
+import type { QueuedMessage, QueueMode } from "./chat/Composer";
+import { fileFromDataUrl } from "./chat/dataUrlFile";
 import {
   contextUsagePercent,
   withContextUsedTokens,
@@ -19,7 +20,25 @@ import { HERO_ACCENT_VERBS, pickHeroAccentVerb } from "./chat/heroTitleWords";
 import { insertNewThinkingBeforeStreamingAssistant } from "./chat/transcriptThinkingPlacement";
 import { openAIStreamErrorMessage } from "./chat/streamError";
 import { optimisticUserFiles } from "./chat/optimisticUserFiles";
-import { sessionMessageFiles } from "./chat/sessionMessageFiles";
+import {
+  applyToolCallRows,
+  readMessageCreatedAtUTC,
+  reasoningDurationCacheKey,
+  transcriptItemsFromMessages,
+  type ToolCallListRow,
+} from "./chat/transcriptFromMessages";
+import type { RawUiLogRow } from "./chat/uiLogNotices";
+import {
+  alignedTranscriptSuffix,
+  LIVE_WINDOW_REBASE_MESSAGES,
+  parseTranscriptWindow,
+  prependOlderPage,
+  transcriptPageQuery,
+  transcriptToolCallsQuery,
+  type OlderTranscript,
+  type TranscriptPageRequest,
+  type TranscriptWindow,
+} from "./chat/transcriptWindow";
 import { getEnv, notifyLocalApiUnauthorized } from "./env/remoteEnv";
 import {
   isAbortError,
@@ -58,15 +77,8 @@ import {
 import { createDebouncedSessionStatsRefresh } from "./chat/sessionStatsPoll";
 import {
   preserveTranscriptItemIds,
-  stableAssistantItemId,
   stablePermissionPromptItemId,
-  stableThinkingItemId,
-  stableToolCallItemId,
-  stableUserItemId,
-  stableWakeItemId,
 } from "./chat/transcriptItemIds";
-import { parseBackgroundWakeTasks } from "./chat/backgroundWake";
-import { uiLogNoticeFeed } from "./chat/uiLogNotices";
 import {
   dedupeAdjacentDuplicateThinkingCompleted,
   keepLocalTranscriptIfServerEmpty,
@@ -88,13 +100,11 @@ import {
 } from "./chat/toolsPermissionPolicy";
 import { reattachLocalQuestionPrompts } from "./chat/transcriptQuestionReattach";
 import { retireRelayedPermissionPrompts } from "./chat/relayedPermissionPrompts";
-import { pickRicherToolArgs } from "./chat/toolCallArgs";
 import { normalizeTodoPlanSnapshot } from "./chat/todoToolPreview";
 import {
   clearQuestionPromptRecords,
   mergeStoredQuestionPromptsIntoTranscript,
   patchQuestionToolArgsFromPromptRecords,
-  pickRicherQuestionToolArgs,
   upsertQuestionPromptRecord,
 } from "./chat/questionPromptSessionStore";
 import { transcriptHasFilledAssistant } from "./chat/streamSyncLocalAssistant";
@@ -123,6 +133,7 @@ import {
   type PendingNewChatWorkspace,
 } from "./sessions/newChatWorkspace";
 import { readNavRailCookie, writeNavRailCookie } from "./nav/navRailCookie";
+import { useRailScreenEscape } from "./nav/railEscape";
 import { readLlmModelCookie, writeLlmModelCookie } from "./chat/llmModelCookie";
 import {
   pickDefaultLlmModelForNewChat,
@@ -137,7 +148,17 @@ import { pickReasoningLevel } from "./chat/reasoningSelection";
 import { SessionsSidebar } from "./sessions/SessionsSidebar";
 import { useConfirm } from "./components/useConfirm";
 import { useT } from "./i18n/I18nProvider";
+import { composerAutoFocusAllowed } from "./chat/composerFocus";
 import type { SessionRow } from "./sessions/types";
+import {
+  type ArchiveMove,
+  cursorAfterRemovals,
+  overlayArchiveMoves,
+  pruneArchiveBookkeeping,
+  restoreRow,
+  rowPlace,
+  rowVisibleUnder,
+} from "./sessions/archiveMoves";
 import {
   DEFAULT_SESSION_GROUP_MODE,
   readSessionGroupCookie,
@@ -229,6 +250,8 @@ import {
 import type { BackgroundTask } from "./tasks/types";
 import type { SchedulerInfo, SchedulerJob } from "./scheduler/types";
 import { Settings } from "./settings/Settings";
+import { noteSettingsConfigReloaded } from "./settings/settingsConfigStore";
+import { wideRailMinWidthMediaQuery } from "./shellBreakpoint";
 
 const HDR = "X-Coddy-Session-ID";
 
@@ -279,30 +302,6 @@ type ToolCallStatusUpdate = {
   };
 };
 
-type ToolCallListRow = {
-  toolCallId: string;
-  name?: string;
-  kind?: string;
-  status?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  argsPreview?: string;
-  resultPreview?: string;
-  resultPreviewTruncated?: boolean;
-  planSnapshot?: unknown;
-};
-
-function readMessageCreatedAtUTC(
-  m: Record<string, unknown>,
-): string | undefined {
-  const raw = m.created_at ?? m.createdAt;
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-  const s = raw.trim();
-  return s === "" ? undefined : s;
-}
-
 function toolSseShowsTruncatedPreview(u: ToolCallStatusUpdate): boolean {
   const p = u._meta?.coddy?.toolResultPreview;
   return !!(p && p.truncated === true);
@@ -352,6 +351,13 @@ function randomSessionId(): string {
   return `sess_${hex}`;
 }
 
+/** One page of GET /coddy/sessions. */
+type SessionsPage = {
+  sessions: SessionRow[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+};
+
 async function fetchJSON<T>(
   path: string,
   init?: RequestInit,
@@ -367,17 +373,6 @@ async function fetchJSON<T>(
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`;
-}
-
-function parseRFC3339ms(s: string | undefined): number | null {
-  const t = (s || "").trim();
-  if (!t) return null;
-  const ms = Date.parse(t);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-function reasoningDurationCacheKey(text: string): string {
-  return text.trim().replace(/\s+/g, " ");
 }
 
 export function App() {
@@ -571,6 +566,38 @@ export function App() {
   const streamShadowBySidRef = useRef(
     new ShadowTranscriptCache<TranscriptItem[]>(),
   );
+  /**
+   * The live window of each session this client holds a transcript for: the
+   * page of the history its items start at (issue #338), and `seq`, the read
+   * that established it. Every reload of a session re-reads from that page,
+   * so a long history is never read whole again after the first screen.
+   */
+  const liveWindowBySidRef = useRef(
+    new Map<string, TranscriptWindow & { seq: number }>(),
+  );
+  /** Counter of reads that start a live window over (the newest page). */
+  const windowRebaseSeqRef = useRef(0);
+  /** The latest window-starting read in flight per session. */
+  const windowRebaseInFlightRef = useRef(new Map<string, number>());
+  /** The live window of the session on screen, for rendering. */
+  const [viewedLiveWindow, setViewedLiveWindow] = useState<
+    (TranscriptWindow & { sessionId: string; seq: number }) | null
+  >(null);
+  /**
+   * Older pages of the session on screen, read while the reader scrolled up
+   * past the live window. History that no longer changes: it takes no part
+   * in the reloads and merges of the live window and is shown above it.
+   */
+  const [olderTranscript, setOlderTranscript] =
+    useState<OlderTranscript | null>(null);
+  const olderTranscriptRef = useRef<OlderTranscript | null>(null);
+  olderTranscriptRef.current = olderTranscript;
+  const [olderTranscriptLoad, setOlderTranscriptLoad] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+  const olderLoadInFlightRef = useRef<string>("");
+  /** Whether the reader sits at the newest message (ChatScreen reports it). */
+  const readerAtTailRef = useRef(true);
   const postAbortBySidRef = useRef<Map<string, AbortController>>(new Map());
   const relayAbortBySidRef = useRef<Map<string, AbortController>>(new Map());
   const pendingPostBySidRef = useRef(new Map<string, AbortController>());
@@ -689,6 +716,51 @@ export function App() {
     });
     for (const sid of victims) {
       relayLastEventIdBySidRef.current.delete(sid);
+      if (sid !== nextViewedSid.trim()) {
+        liveWindowBySidRef.current.delete(sid);
+        windowRebaseInFlightRef.current.delete(sid);
+      }
+    }
+  }
+
+  /**
+   * The live window this tab holds for `sid`. A session it has rows of
+   * without having read a page - one it started and streamed from its first
+   * message - is held from message 0.
+   */
+  function heldLiveWindow(
+    sid: string,
+  ): { offset: number; seq: number } | undefined {
+    const held = liveWindowBySidRef.current.get(sid);
+    if (held) return held;
+    const hasLocalRows =
+      (streamShadowBySidRef.current.get(sid)?.length ?? 0) > 0 ||
+      (viewedSessionIdRef.current.trim() === sid &&
+        itemsRef.current.length > 0);
+    return hasLocalRows ? { offset: 0, seq: 0 } : undefined;
+  }
+
+  /** The query that re-reads the live window held for `sid`. */
+  function liveWindowQuery(sid: string): string {
+    const held = heldLiveWindow(sid.trim());
+    return transcriptPageQuery(
+      held ? { kind: "from", offset: held.offset } : { kind: "tail" },
+    );
+  }
+
+  /** Records the live window a read of `sid` established. */
+  function noteLiveWindow(sid: string, win: TranscriptWindow, seq: number) {
+    const prev = liveWindowBySidRef.current.get(sid);
+    liveWindowBySidRef.current.set(sid, { ...win, seq });
+    if (prev && prev.seq !== seq) {
+      // A window started over: the older pages read against the old one are
+      // released rather than joined to a window they no longer border.
+      setOlderTranscript((cur) =>
+        cur && cur.sessionId === sid && cur.generation !== seq ? null : cur,
+      );
+    }
+    if (viewedSessionIdRef.current.trim() === sid) {
+      setViewedLiveWindow({ ...win, sessionId: sid, seq });
     }
   }
 
@@ -704,6 +776,7 @@ export function App() {
   const [queueBySid, setQueueBySid] = useState<Record<string, QueuedMessage[]>>(
     {},
   );
+  const [queueMode, setQueueMode] = useState<QueueMode | undefined>();
   /**
    * Highest queue version applied per session.
    *
@@ -772,7 +845,7 @@ export function App() {
     sessionId.trim() !== "" &&
     (turnActivity.get(sessionId) ??
       activeComposerSidRef.current.has(sessionId.trim()));
-  const queuedMessages = generating ? (queueBySid[sessionId.trim()] ?? []) : [];
+  const queuedMessages = queueBySid[sessionId.trim()] ?? [];
 
   function reconcileEndedTurn(sid: string) {
     removeActiveComposer(sid);
@@ -784,9 +857,22 @@ export function App() {
     )
       return;
     noteUsageTurnEnded(sid);
+    // A window that grew through many turns starts over from its end here,
+    // where the turn is over, unless the reader is up in its history: a
+    // session that runs turn after turn is never idle long enough for the
+    // slide below, and every reload would read everything since it opened.
+    const viewing = viewedSessionIdRef.current.trim() === sid;
+    const live = liveWindowBySidRef.current.get(sid);
+    const rebase =
+      !!live &&
+      live.total - live.offset > LIVE_WINDOW_REBASE_MESSAGES &&
+      (!viewing || readerAtTailRef.current);
     void loadMessages(sid, {
       preserveOnError: true,
-      skipSetItems: viewedSessionIdRef.current.trim() !== sid,
+      skipSetItems: !viewing,
+      ...(rebase ? { rebase: true } : {}),
+    }).then(() => {
+      if (viewedSessionIdRef.current.trim() === sid) slideTranscriptToTail();
     });
     void refreshSessionStats(sid);
   }
@@ -1045,6 +1131,10 @@ export function App() {
         readSessionPref(SESSION_PREF_COOKIES.status, isSessionArchiveFilter) ??
         DEFAULT_ARCHIVE_FILTER,
     );
+  // The filter on screen now, for an archive request that settles after the
+  // operator changed it (see runArchiveSession).
+  const sessionsArchiveFilterRef = useRef(sessionsArchiveFilter);
+  sessionsArchiveFilterRef.current = sessionsArchiveFilter;
   const [sessionsSortKey, setSessionsSortKey] = useState<SessionSortKey>(
     () =>
       readSessionPref(SESSION_PREF_COOKIES.sort, isHistorySortKey) ??
@@ -1070,6 +1160,23 @@ export function App() {
   const newChatWorkspaceRef = useRef<PendingNewChatWorkspace>(null);
   // Sessions with an archive change in flight; see archiveSession.
   const archivingRef = useRef<Set<string>>(new Set());
+  // History moves a row the moment it is archived, so a listing issued before
+  // the server had the new flag must not put it back (archiveMoves.ts): the
+  // moves this tab made, the listings issued so far and the ones still out,
+  // and the points at which an archive took a loaded row out of the server's
+  // listing, which the offset of the next page has to account for.
+  const archiveMovesRef = useRef<Map<string, ArchiveMove>>(new Map());
+  const sessionsListSeqRef = useRef(0);
+  const sessionsListOpenRef = useRef<Set<number>>(new Set());
+  // The number of the latest listing read from the first page: a page issued
+  // before it belongs to the list that read replaced.
+  const sessionsListResetSeqRef = useRef(0);
+  const archiveRemovalsRef = useRef<number[]>([]);
+  // A refused archive, said on the row it put back: History is usually
+  // scrolled away from the top of the list, where a list error is shown.
+  const [sessionRowErrors, setSessionRowErrors] = useState<
+    Record<string, string>
+  >({});
   // The archive flag's last write this client made, so a transcript read that
   // was issued before the PATCH settled cannot put the older flag back (see
   // loadMessages, which compares the read's issue time against this).
@@ -1122,21 +1229,57 @@ export function App() {
   });
   const [llmReasoning, setLlmReasoning] = useState("");
   /**
-   * Raw model/reasoning stored on the opened session. Held until the backends
-   * list (`llmModelIds`) is available so the restore survives whichever of
-   * `/v1/models` and `/coddy/sessions/.../messages` resolves first on reload.
+   * The opened session's own model and reasoning, as its settings snapshot
+   * names them, with the levels the snapshot says it may hold. Held until the
+   * backends list (`llmModelIds`) is available so the restore survives
+   * whichever of `/v1/models` and `/coddy/sessions/.../messages` resolves
+   * first on reload.
    */
   const [openSessionSelection, setOpenSessionSelection] = useState<{
     sid: string;
     model: string;
     reasoning: string;
+    choices: string[];
   } | null>(null);
   /** The selection object already applied to the composer; see the effect below. */
   const appliedSessionSelectionRef = useRef<{
     sid: string;
     model: string;
     reasoning: string;
+    choices: string[];
   } | null>(null);
+  /**
+   * The reasoning levels the viewed session's last snapshot named for its
+   * model (`reasoningChoices`): the menu's levels plus `off` where the
+   * provider can turn thinking off, which `GET /v1/models` does not list. The
+   * level is checked against them wherever the composer re-validates it, so a
+   * session running with thinking off is shown and sent as such.
+   */
+  const sessionReasoningChoicesRef = useRef<{
+    sid: string;
+    model: string;
+    choices: string[];
+  }>({ sid: "", model: "", choices: [] });
+  /** The same record as state, for what renders from it (the level menu). */
+  const [sessionReasoningChoices, setSessionReasoningChoicesState] = useState<{
+    sid: string;
+    model: string;
+    choices: string[];
+  }>({ sid: "", model: "", choices: [] });
+  const setSessionReasoningChoices = useCallback(
+    (next: { sid: string; model: string; choices: string[] }) => {
+      sessionReasoningChoicesRef.current = next;
+      setSessionReasoningChoicesState(next);
+    },
+    [],
+  );
+  /**
+   * Set while the level on the chip is the one the chooser resolved for an
+   * existing session that has none of its own (a model with no
+   * `reasoning_default`): shown so the chip names what the turn runs at, and
+   * never sent, so the session is not pinned to a level nobody chose.
+   */
+  const reasoningImpliedRef = useRef(false);
   const [describePreview, setDescribePreview] = useState<{
     sessionId: string;
     title: string;
@@ -1310,6 +1453,26 @@ export function App() {
     },
     [],
   );
+
+  // What the transcript shows: the older pages read while scrolling up, then
+  // the live window. The base numbers the prompts the way the server does
+  // (an edit rewinds by that index) and says whether history lies above.
+  const olderOnScreen =
+    olderTranscript &&
+    olderTranscript.sessionId === sessionId &&
+    viewedLiveWindow?.sessionId === sessionId &&
+    olderTranscript.generation === viewedLiveWindow.seq
+      ? olderTranscript
+      : null;
+  const transcriptItems = useMemo(
+    () => (olderOnScreen ? [...olderOnScreen.items, ...items] : items),
+    [olderOnScreen, items],
+  );
+  const transcriptTopWindow: TranscriptWindow | null = olderOnScreen
+    ? olderOnScreen.window
+    : viewedLiveWindow?.sessionId === sessionId
+      ? viewedLiveWindow
+      : null;
 
   const currentTitle = useMemo(() => {
     if (!sessionId) {
@@ -1838,12 +2001,22 @@ export function App() {
     }
   }, [sessionId, sessionsOpen]);
 
+  // An open job, or its runs, back onto the list: the editor's close control,
+  // and the step Escape takes before it closes the drawer.
+  const closeSchedulerEditor = useCallback(() => {
+    setSchedulerEditor(null);
+    setSchedulerListHash();
+  }, []);
+
   const closeAllShellDrawers = useCallback(() => {
     setSessionsOpen(false);
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setTasksOpen(false);
     setDocsRoute(null);
+    // The chat's address that follows does not take the swarm screen down by
+    // itself (applyLocationHash leaves it on a session), so it goes here.
+    setSwarmRoute(false);
     if (parseAppHash().branch === "settings" || parseAppHash().branch === "docs") {
       const sid = sessionId.trim();
       if (sid) {
@@ -1867,7 +2040,9 @@ export function App() {
 
   const prevSessionsOpenRef = useRef(false);
   useEffect(() => {
-    if (prevSessionsOpenRef.current && !sessionsOpen) {
+    // Back to the chat from History: the caret returns to the composer, except
+    // on a phone or a tablet, where it would open the keyboard (composerFocus.ts).
+    if (prevSessionsOpenRef.current && !sessionsOpen && composerAutoFocusAllowed()) {
       requestAnimationFrame(() => {
         document.getElementById("composer")?.focus();
       });
@@ -2076,7 +2251,6 @@ export function App() {
   useEffect(() => {
     void (async () => {
       const res = await fetchJSON<{
-        default_agent_model?: string;
         data?: Array<{
           id?: string;
           owned_by?: string;
@@ -2155,10 +2329,12 @@ export function App() {
       return;
     }
     appliedSessionSelectionRef.current = openSessionSelection;
+    // The session's own model. What the start page picked, and the cookie that
+    // remembers it, are a new chat's default: shown here they would ride into
+    // this session with its next message (#362).
     const nextModel = pickLlmModelForOpenSession({
       backends: llmModelIds,
       sessionModel: openSessionSelection.model,
-      cookie: readLlmModelCookie(),
     });
     setLlmModel(nextModel);
     // A session carries a reasoning level only once something chose one for it,
@@ -2166,13 +2342,22 @@ export function App() {
     // effective level as empty. Applied as it comes, that empties the composer
     // while the turn still runs at the model's default - so it goes through the
     // same chooser as every other path, with the session's value as the
-    // preference rather than as the answer.
+    // preference rather than as the answer, and without the cookie.
     const openRow = modelInfos.find((m) => m.id === nextModel);
+    const choices =
+      nextModel === openSessionSelection.model ? openSessionSelection.choices : [];
+    setSessionReasoningChoices({
+      sid: openSessionSelection.sid,
+      model: nextModel,
+      choices,
+    });
+    reasoningImpliedRef.current = !openSessionSelection.reasoning.trim();
     setLlmReasoning(
       pickReasoningLevel({
         levels: openRow?.reasoningLevels ?? [],
-        cookie: readReasoningCookie(),
+        cookie: null,
         sessionLevel: openSessionSelection.reasoning,
+        sessionChoices: choices,
         modelDefault: openRow?.reasoningDefault ?? null,
       }),
     );
@@ -2183,7 +2368,7 @@ export function App() {
   }, [sessionId]);
 
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1920px)");
+    const mq = window.matchMedia(wideRailMinWidthMediaQuery);
     const apply = () => setViewportXL(mq.matches);
     apply();
     mq.addEventListener("change", apply);
@@ -2244,30 +2429,18 @@ export function App() {
     sessionsLoadingMoreRef.current = sessionsLoadingMore;
   }, [sessionsLoadingMore]);
 
-  useEffect(() => {
-    if (!sessionsOpen && !schedulerOpen) {
-      return;
-    }
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key !== "Escape") {
-        return;
-      }
-      if (schedulerEditor) {
-        setSchedulerEditor(null);
-        setSchedulerListHash();
-        return;
-      }
-      if (schedulerOpen) {
-        closeSchedulerDrawer();
-        return;
-      }
-      if (sessionsOpen) {
-        setSessionsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sessionsOpen, schedulerOpen, schedulerEditor, closeSchedulerDrawer]);
+  // Forgets the archive moves and removals that no listing still out, or yet
+  // to be issued, can be affected by (archiveMoves.ts).
+  const pruneArchiveLists = useCallback(() => {
+    const open = sessionsListOpenRef.current;
+    const oldest =
+      open.size > 0 ? Math.min(...open) : sessionsListSeqRef.current + 1;
+    archiveRemovalsRef.current = pruneArchiveBookkeeping(
+      archiveMovesRef.current,
+      archiveRemovalsRef.current,
+      oldest,
+    );
+  }, []);
 
   const loadSessionsList = useCallback(
     async (reset: boolean): Promise<SessionRow[] | null> => {
@@ -2287,7 +2460,15 @@ export function App() {
       const ps = new URLSearchParams();
       ps.set("limit", "30");
       if (!reset) {
-        const cur = sessionsCursorRef.current;
+        // An archive still in flight may reach the server before this page
+        // does and move every row after it up by one; starting a row earlier
+        // per such archive costs at worst a row fetched twice, which the merge
+        // below drops by id, where the plain offset would skip one.
+        let inFlight = 0;
+        for (const move of archiveMovesRef.current.values()) {
+          if (move.settledAtSeq === null && move.removesLoaded) inFlight++;
+        }
+        const cur = cursorAfterRemovals(sessionsCursorRef.current, inFlight);
         if (cur) {
           ps.set("cursor", cur);
         }
@@ -2302,23 +2483,49 @@ export function App() {
       ps.set("sort", sessionsSortKey);
       ps.set("order", defaultSortOrder(sessionsSortKey));
       ps.set("include_activity", "true");
-      const res = await fetchJSON<{
-        sessions: SessionRow[];
-        nextCursor?: string | null;
-        hasMore?: boolean;
-      }>(`/coddy/sessions?${ps.toString()}`, {
-        headers,
-      });
+      const seq = ++sessionsListSeqRef.current;
+      if (reset) sessionsListResetSeqRef.current = seq;
+      sessionsListOpenRef.current.add(seq);
+      let res: { ok: boolean; status: number; data?: SessionsPage };
+      try {
+        res = await fetchJSON<SessionsPage>(`/coddy/sessions?${ps.toString()}`, {
+          headers,
+        });
+      } catch {
+        // A request that never got an answer; without this the loading flag
+        // below stayed up and History never asked for the page again.
+        res = { ok: false, status: 0 };
+      } finally {
+        sessionsListOpenRef.current.delete(seq);
+      }
       if (!reset) {
         sessionsLoadingMoreRef.current = false;
         setSessionsLoadingMore(false);
+      }
+      // The list was read again from the top after this request left: its
+      // rows and its offset belong to the listing that read replaced (another
+      // filter, another order, or the same one before an archive).
+      if (seq < sessionsListResetSeqRef.current) {
+        pruneArchiveLists();
+        return null;
       }
       if (!res.ok || !res.data) {
         setSessionsError(t("app.backendUnavailable", { status: res.status }));
         return null;
       }
       setSessionsError(null);
-      const next = res.data.sessions || [];
+      // A listing issued before an archive this tab made had settled still
+      // lists the row as it was, and counts it in the offset it hands back.
+      const next = overlayArchiveMoves(
+        res.data.sessions || [],
+        archiveMovesRef.current,
+        seq,
+        sessionsArchiveFilter,
+      );
+      const removedSince = archiveRemovalsRef.current.filter(
+        (at) => at >= seq,
+      ).length;
+      pruneArchiveLists();
       setSessions((prev) => {
         if (reset) {
           return next;
@@ -2326,7 +2533,10 @@ export function App() {
         const seen = new Set(prev.map((s) => s.id));
         return [...prev, ...next.filter((s) => !seen.has(s.id))];
       });
-      const nextCur = res.data.nextCursor ?? null;
+      const nextCur = cursorAfterRemovals(
+        res.data.nextCursor ?? null,
+        removedSince,
+      );
       setSessionsCursor(nextCur);
       sessionsCursorRef.current = nextCur;
       const hm = !!res.data.hasMore;
@@ -2341,6 +2551,7 @@ export function App() {
       sessionsSortKey,
       headers,
       t,
+      pruneArchiveLists,
     ],
   );
 
@@ -2353,9 +2564,12 @@ export function App() {
         const policy = parseToolsPermissionPolicy(res.data);
         toolsPermissionPolicyRef.current = policy;
         setToolsPermissionPolicy(policy);
+        const agent = res.data.agent as { queue_mode?: QueueMode } | undefined;
+        const preferred = agent?.queue_mode;
+        setQueueMode(preferred === "steer" || preferred === "after_turn" ? preferred : undefined);
       }
     })();
-  }, [headers]);
+  }, [headers, configEpoch]);
 
   useEffect(() => {
     const ids = new Set(permissionPendingSessionIdsFromStorage());
@@ -2460,7 +2674,12 @@ export function App() {
       void turnActivity.refresh(key);
     },
     providerUsage: providerUsageState.applyPushed,
-    configReloaded: () => setConfigEpoch((e) => e + 1),
+    // The configuration swapped: every config-derived list reads again, and
+    // so does the copy of the config the Settings drawer keeps.
+    configReloaded: () => {
+      setConfigEpoch((e) => e + 1);
+      noteSettingsConfigReloaded();
+    },
     // A session is shared: this is what someone else queued, in another
     // browser or from a console attached over --remote.
     messageQueue: (sid: string, queue: QueuedMessageEvent) =>
@@ -2494,6 +2713,9 @@ export function App() {
       void loadMessages(key, { freshLoad: true });
     },
     ready: () => {
+      // A config_reloaded may have been missed while the stream was down: the
+      // Settings copy is read again if the drawer ever held one.
+      noteSettingsConfigReloaded();
       // Recovery can miss the idle edge. Retire pending acknowledgements too,
       // so an old Stop cannot re-establish the fence after this reconnect.
       stoppedTurnBySidRef.current.clear();
@@ -2552,19 +2774,80 @@ export function App() {
     new WeakMap<readonly TranscriptItem[], number>(),
   );
 
+  type LoadMessagesOpts = {
+    skipSetItems?: boolean;
+    preserveOnError?: boolean;
+    freshLoad?: boolean;
+    /** Start the live window over from the newest page while keeping the
+     *  merges of an ordinary reload (a turn has just ended). */
+    rebase?: boolean;
+  };
+
+  /**
+   * Reads a session's transcript into its live window. A session opens on
+   * its newest page (and so does a fresh load: a rewind, a switch); every
+   * later read re-reads the live window it holds, from the same message, so
+   * the server list and the local one start together and the positional
+   * merges line up. Older pages never take part: they sit above the live
+   * window in `olderTranscript` (issue #338).
+   */
   async function loadMessages(
     idOverride?: string,
-    opts?: {
-      skipSetItems?: boolean;
-      preserveOnError?: boolean;
-      freshLoad?: boolean;
-    },
+    opts?: LoadMessagesOpts,
   ): Promise<TranscriptItem[] | null> {
     const sid = (idOverride ?? sessionId).trim();
     if (!sid) {
       setItems([]);
       return null;
     }
+    const held = opts?.freshLoad ? undefined : heldLiveWindow(sid);
+    const request: TranscriptPageRequest =
+      opts?.freshLoad ||
+      opts?.rebase ||
+      !held ||
+      windowRebaseInFlightRef.current.has(sid)
+        ? { kind: "tail" }
+        : { kind: "from", offset: held.offset };
+    // A read that starts the window over supersedes every read issued before
+    // it: what they bring back was asked against a window that is gone.
+    let seq: number;
+    if (request.kind === "tail") {
+      windowRebaseSeqRef.current += 1;
+      seq = windowRebaseSeqRef.current;
+      windowRebaseInFlightRef.current.set(sid, seq);
+    } else {
+      seq = held!.seq;
+    }
+    const isCurrentWindowRead = () =>
+      request.kind === "tail"
+        ? windowRebaseInFlightRef.current.get(sid) === seq
+        : !windowRebaseInFlightRef.current.has(sid) &&
+          (liveWindowBySidRef.current.get(sid)?.seq ?? 0) === seq;
+    try {
+      return await readTranscriptWindow(
+        sid,
+        opts,
+        request,
+        seq,
+        isCurrentWindowRead,
+      );
+    } finally {
+      if (
+        request.kind === "tail" &&
+        windowRebaseInFlightRef.current.get(sid) === seq
+      ) {
+        windowRebaseInFlightRef.current.delete(sid);
+      }
+    }
+  }
+
+  async function readTranscriptWindow(
+    sid: string,
+    opts: LoadMessagesOpts | undefined,
+    request: TranscriptPageRequest,
+    seq: number,
+    isCurrentWindowRead: () => boolean,
+  ): Promise<TranscriptItem[] | null> {
     const streamGeneration = streamGenerationBySidRef.current.get(sid);
     const sameStream = () =>
       streamGenerationBySidRef.current.get(sid) === streamGeneration;
@@ -2573,6 +2856,7 @@ export function App() {
     // before the write, and the write is what must stay on screen.
     const issuedAt = Date.now();
     const res = await fetchJSON<{
+      window?: unknown;
       messages: Array<any>;
       model?: string;
       selectedModelId?: string;
@@ -2593,9 +2877,13 @@ export function App() {
         userTurnIndex?: number;
         createdAt?: string;
       }>;
-    }>(`/coddy/sessions/${encodeURIComponent(sid)}/messages`, {
-      headers: sid === sessionId ? headers : { [HDR]: sid },
-    });
+    }>(
+      `/coddy/sessions/${encodeURIComponent(sid)}/messages${transcriptPageQuery(request)}`,
+      {
+        headers: sid === sessionId ? headers : { [HDR]: sid },
+      },
+    );
+    if (!isCurrentWindowRead()) return null;
     // Re-read the viewed session after the await: the viewer may have moved
     // on while the request was in flight, and a stale response must neither
     // clear the new session's rows nor merge them into this session's shadow.
@@ -2610,17 +2898,33 @@ export function App() {
       return null;
     }
     if (viewingNow === sid) {
-      // Stash the session's saved selection; an effect applies it once the
-      // backends list is loaded (the two fetches race on reload). The reasoning
-      // level is later validated by the clamp effect against the chosen model.
-      setOpenSessionSelection({
-        sid,
-        model: (res.data.model || res.data.selectedModelId || "").trim(),
-        reasoning: (res.data.selectedReasoning || "").trim(),
-      });
-      // The whole snapshot: the mode, the permission mode, the overrides for
-      // the next turns, and the version the next send names.
+      // The whole snapshot: the model, the level, the mode, the permission
+      // mode, the overrides for the next turns, and the version the next send
+      // names.
       const snap = parseSessionSettings(res.data.settings);
+      // Stash the session's own selection; an effect applies it once the
+      // backends list is loaded (the two fetches race on reload). It is the
+      // snapshot's: the top-level model and selectedReasoning name what a
+      // running turn holds, and a turn override taken for the session's
+      // model would become it with the next message. A read whose snapshot
+      // is older than the one this tab already applied - the events stream
+      // got ahead of a slow read - says nothing new and moves nothing back.
+      const held =
+        settingsVersionRef.current.sid === sid
+          ? settingsVersionRef.current.version
+          : 0;
+      if (!snap || isNewerSettings(held, sid, snap)) {
+        setOpenSessionSelection({
+          sid,
+          model: snap
+            ? snap.model
+            : (res.data.model || res.data.selectedModelId || "").trim(),
+          reasoning: snap
+            ? snap.reasoning
+            : (res.data.selectedReasoning || "").trim(),
+          choices: snap?.reasoningChoices ?? [],
+        });
+      }
       if (snap) {
         applySessionSettings(snap);
       }
@@ -2638,239 +2942,65 @@ export function App() {
           : !!res.data.archived,
       );
     }
-    const next: TranscriptItem[] = [];
-    // Notices are stamped with the server's count of user-role messages, so
-    // every user-role row below - a compaction summary and a wake too - asks
-    // the feed for the notices that end the turn before it.
-    const notices = uiLogNoticeFeed(res.data.uiLog, newId);
-    const toolIdx = new Map<string, number>();
-    let userTurnIdx = 0;
-    let thinkingInTurn = 0;
-    let assistantInTurn = 0;
-    const stripCompactionPreamble = (s: string): string => {
-      const marker = "Summary of the compacted part:";
-      const i = s.indexOf(marker);
-      return i >= 0 ? s.slice(i + marker.length).trimStart() : s.trim();
-    };
-    for (const m of res.data.messages || []) {
-      const role = (m.role || "").trim();
-      if (role === "user") {
-        next.push(...notices.beforeUserRow());
-        // A compaction summary row is a user-role message flagged by the server;
-        // render it as its own "context compacted" foldout, not a user bubble,
-        // and do not count it as a real user turn.
-        if ((m as Record<string, unknown>).compaction_summary === true) {
-          const ccat = readMessageCreatedAtUTC(m as Record<string, unknown>);
-          next.push({
-            id: newId("compaction"),
-            type: "compaction",
-            summary: stripCompactionPreamble(m.content || ""),
-            ...(ccat ? { createdAtUtc: ccat } : {}),
-          });
-          continue;
-        }
-        userTurnIdx++;
-        thinkingInTurn = 0;
-        assistantInTurn = 0;
-        const cat = readMessageCreatedAtUTC(m as Record<string, unknown>);
-        // Nobody typed the first message of a turn a finished background
-        // task started, and nothing shows in its place: the turn reads as the
-        // agent carrying on. It still opens a turn, so the ids of the turn
-        // line up with the server's count of user messages for a rewind.
-        const wakeTasks = parseBackgroundWakeTasks(
-          (m as Record<string, unknown>).background_wake,
-        );
-        if (wakeTasks.length > 0) {
-          next.push({
-            id: stableWakeItemId(userTurnIdx),
-            type: "background_wake",
-            tasks: wakeTasks,
-            ...(cat ? { createdAtUtc: cat } : {}),
-          });
-          continue;
-        }
-        const rawContent = m.content || "";
-        const parsedAssets = sessionMessageFiles(
-          (m as Record<string, unknown>).files,
-          rawContent,
-        );
-        next.push({
-          id: stableUserItemId(userTurnIdx),
-          type: "user_message",
-          content: rawContent,
-          ...(cat ? { createdAtUtc: cat } : {}),
-          ...(parsedAssets.length > 0 ? { files: parsedAssets } : {}),
-        });
-        continue;
-      }
-      if (role === "assistant") {
-        const pdRaw = (m as Record<string, unknown>).plan_document;
-        if (pdRaw && typeof pdRaw === "object" && !Array.isArray(pdRaw)) {
-          const pd = pdRaw as Record<string, unknown>;
-          const slug = String(pd.slug ?? "").trim();
-          if (slug) {
-            next.push({
-              id: newId("pd"),
-              type: "plan_document",
-              slug,
-              name: String(pd.name ?? ""),
-              overview: String(pd.overview ?? ""),
-              content: String(pd.content ?? ""),
-              body: String(pd.body ?? ""),
-              expanded: false,
-              ...(pd.path ? { path: String(pd.path) } : {}),
-              ...(pd.discarded === true ? { discarded: true } : {}),
-              ...(pd.updatedAt ? { updatedAtUtc: String(pd.updatedAt) } : {}),
-            });
-          }
-        }
-        const reasoning = (m.reasoning || "").trim();
-        if (reasoning) {
-          const dk = reasoningDurationCacheKey(reasoning);
-          const cachedMs = dk
-            ? reasoningDurationMsByContentRef.current.get(dk)
-            : undefined;
-          const durRaw = (m as { reasoning_duration_ms?: unknown })
-            .reasoning_duration_ms;
-          let fromApi: number | undefined;
-          if (
-            typeof durRaw === "number" &&
-            Number.isFinite(durRaw) &&
-            durRaw >= 0
-          ) {
-            fromApi = Math.round(durRaw);
-          } else if (typeof durRaw === "string" && durRaw.trim() !== "") {
-            const n = Number(durRaw);
-            if (Number.isFinite(n) && n >= 0) {
-              fromApi = Math.round(n);
-            }
-          }
-          const durationMs = fromApi !== undefined ? fromApi : cachedMs;
-          if (fromApi !== undefined && dk.length > 0) {
-            reasoningDurationMsByContentRef.current.set(dk, fromApi);
-          }
-          next.push({
-            id: stableThinkingItemId(userTurnIdx, thinkingInTurn++),
-            type: "thinking",
-            status: "completed",
-            content: reasoning,
-            ...(durationMs !== undefined ? { durationMs } : {}),
-          });
-        }
-        const content = m.content || "";
-        if (content.trim()) {
-          const acat = readMessageCreatedAtUTC(m as Record<string, unknown>);
-          next.push({
-            id: stableAssistantItemId(userTurnIdx, assistantInTurn++),
-            type: "assistant_message",
-            content,
-            ...(acat ? { createdAtUtc: acat } : {}),
-          });
-        }
-        const tcs = Array.isArray(m.tool_calls) ? m.tool_calls : [];
-        for (const tc of tcs) {
-          const id = tc?.id || "";
-          const fn = tc?.function || {};
-          const name = (fn?.name || "").trim();
-          const args = fn?.arguments || "";
-          if (!id) continue;
-          if (toolIdx.has(id)) continue;
-          const it: Extract<TranscriptItem, { type: "tool_call" }> = {
-            id: stableToolCallItemId(id),
-            type: "tool_call",
-            toolCallId: id,
-            status: "pending",
-          };
-          if (name) it.title = name;
-          if (args) it.argsText = args;
-          toolIdx.set(id, next.length);
-          next.push(it);
-        }
-        continue;
-      }
-      if (role === "tool") {
-        const id = (m.tool_call_id || "").trim();
-        if (!id) continue;
-        const idx = toolIdx.get(id);
-        if (idx === undefined) {
-          const it: Extract<TranscriptItem, { type: "tool_call" }> = {
-            id: stableToolCallItemId(id),
-            type: "tool_call",
-            toolCallId: id,
-            status: "completed",
-            resultText: m.content || "",
-          };
-          toolIdx.set(id, next.length);
-          next.push(it);
-          continue;
-        }
-        const cur = next[idx] as Extract<TranscriptItem, { type: "tool_call" }>;
-        next[idx] = {
-          ...cur,
-          status: "completed",
-          resultText: m.content || "",
-        };
-      }
+    const pageMessages = res.data.messages || [];
+    const pageWindow = parseTranscriptWindow(
+      res.data.window,
+      pageMessages.length,
+    );
+    // A window re-read that finds nothing where the held one starts: the
+    // history was cut there (a rewind from another surface) or shortened
+    // under it. What the client holds no longer lines up with the server, so
+    // it starts over from the newest page.
+    if (
+      request.kind === "from" &&
+      (pageWindow.total < request.offset ||
+        (pageMessages.length === 0 &&
+          ((viewingNow === sid && itemsRef.current.length > 0) ||
+            (streamShadowBySidRef.current.get(sid)?.length ?? 0) > 0)))
+    ) {
+      return loadMessages(sid, { ...opts, freshLoad: true });
     }
-    // Notices of the last turn, and any the history no longer reaches.
-    next.push(...notices.end());
+    const mapped = transcriptItemsFromMessages({
+      messages: pageMessages,
+      window: pageWindow,
+      uiLog: res.data.uiLog,
+      newId,
+      reasoningDurations: reasoningDurationMsByContentRef.current,
+    });
+    const next = mapped.items;
 
     // Enrich tool calls with persisted previews when available.
     const tcRes = await fetchJSON<{ toolCalls: ToolCallListRow[] }>(
-      `/coddy/sessions/${encodeURIComponent(sid)}/tool-calls`,
+      `/coddy/sessions/${encodeURIComponent(sid)}/tool-calls${transcriptToolCallsQuery(pageWindow, pageMessages.length)}`,
       {
         headers: sid === sessionId ? headers : { [HDR]: sid },
       },
     );
     if (tcRes.ok && tcRes.data?.toolCalls) {
-      for (const row of tcRes.data.toolCalls) {
-        const id = (row.toolCallId || "").trim();
-        if (!id) continue;
-        const idx = toolIdx.get(id);
-        if (idx === undefined) continue;
-        const cur = next[idx] as Extract<TranscriptItem, { type: "tool_call" }>;
-        const title = (row.name || cur.title || "").trim() || undefined;
-        const kind = (row.kind || cur.kind || "").trim() || undefined;
-        const status = (row.status as any) || cur.status;
-        const merged: Extract<TranscriptItem, { type: "tool_call" }> = {
-          ...cur,
-          status,
-        };
-        if (title) merged.title = title;
-        if (kind) merged.kind = kind;
-        if (row.argsPreview) {
-          const titleLower = (title || "").trim().toLowerCase();
-          const pickedArgs =
-            titleLower === "question"
-              ? pickRicherQuestionToolArgs(cur.argsText, row.argsPreview)
-              : pickRicherToolArgs(cur.argsText, row.argsPreview);
-          if (pickedArgs) merged.argsText = pickedArgs;
-        }
-        if (row.resultPreview) merged.resultText = row.resultPreview;
-        if (row.resultPreviewTruncated === true)
-          merged.resultWasTruncated = true;
-        const todoPlan = normalizeTodoPlanSnapshot(row.planSnapshot);
-        if (todoPlan !== undefined) merged.todoPlan = todoPlan;
-        const st = parseRFC3339ms(row.startedAt);
-        const fin = parseRFC3339ms(row.finishedAt);
-        if (st != null && fin != null && fin >= st) {
-          merged.durationMs = fin - st;
-        }
-        next[idx] = merged;
-      }
+      applyToolCallRows(next, mapped.toolIndex, tcRes.data.toolCalls);
     }
+    if (!isCurrentWindowRead()) return null;
     if (!sameStream()) return null;
-    const prevShadow = streamShadowBySidRef.current.get(sid);
+    // The local lists start where the live window held so far starts. When
+    // this read starts it somewhere else (the newest page after a slide back
+    // or a rewind), they are not merged position by position with it.
+    const heldOffset = liveWindowBySidRef.current.get(sid)?.offset ?? 0;
+    const localAligned = heldOffset === pageWindow.offset;
+    const prevShadow = localAligned
+      ? streamShadowBySidRef.current.get(sid)
+      : undefined;
     // freshLoad: don't inherit stale items from a previous session (e.g. when first loading a session).
-    const localForMerge = opts?.freshLoad
-      ? prevShadow && prevShadow.length > 0
-        ? prevShadow
-        : undefined
-      : prevShadow && prevShadow.length > 0
-        ? prevShadow
-        : viewedSessionIdRef.current.trim() === sid
-          ? itemsRef.current
-          : undefined;
+    const localForMerge = !localAligned
+      ? undefined
+      : opts?.freshLoad
+        ? prevShadow && prevShadow.length > 0
+          ? prevShadow
+          : undefined
+        : prevShadow && prevShadow.length > 0
+          ? prevShadow
+          : viewedSessionIdRef.current.trim() === sid
+            ? itemsRef.current
+            : undefined;
     const mergedTranscript = mergeTranscriptPreferLocalSuffix(
       next,
       localForMerge,
@@ -2888,17 +3018,26 @@ export function App() {
     );
     merged = mergeStoredQuestionPromptsIntoTranscript(merged, sid);
     merged = patchQuestionToolArgsFromPromptRecords(merged, sid);
-    const appliedRaw =
-      keepLocalTranscriptIfServerEmpty({
-        serverNext: merged,
-        sid,
-        viewingSid: viewingNow,
-        prevShadow,
-        prevItems: itemsRef.current,
-      }) ?? merged;
+    const appliedRaw = localAligned
+      ? (keepLocalTranscriptIfServerEmpty({
+          serverNext: merged,
+          sid,
+          viewingSid: viewingNow,
+          prevShadow,
+          prevItems: itemsRef.current,
+        }) ?? merged)
+      : merged;
     const withStableIds = preserveTranscriptItemIds(
       appliedRaw,
-      localForMerge ?? prevShadow ?? itemsRef.current,
+      localAligned
+        ? (localForMerge ?? prevShadow ?? itemsRef.current)
+        : alignedTranscriptSuffix(
+            appliedRaw,
+            streamShadowBySidRef.current.get(sid) ??
+              (viewedSessionIdRef.current.trim() === sid
+                ? itemsRef.current
+                : undefined),
+          ),
     );
     const applied = dedupeAdjacentDuplicateThinkingCompleted(withStableIds);
     const snapshotRev = res.data.messagesRev;
@@ -2922,6 +3061,7 @@ export function App() {
     };
     if (opts?.skipSetItems) {
       streamShadowBySidRef.current.set(sid, applied);
+      noteLiveWindow(sid, pageWindow, seq);
       evictStaleSessionCaches(viewedSessionIdRef.current);
       noteSnapshotRev(applied);
       return applied;
@@ -2929,12 +3069,15 @@ export function App() {
 
     if (!sameStream()) return null;
     // Frames may have arrived while the messages request was in flight.
-    const finalItems = mergeTranscriptPreferLocalSuffix(
-      applied,
-      streamShadowBySidRef.current.get(sid),
-    );
+    const finalItems = localAligned
+      ? mergeTranscriptPreferLocalSuffix(
+          applied,
+          streamShadowBySidRef.current.get(sid),
+        )
+      : applied;
     if (finalItems === applied) noteSnapshotRev(finalItems);
     streamShadowBySidRef.current.set(sid, finalItems);
+    noteLiveWindow(sid, pageWindow, seq);
     evictStaleSessionCaches(viewedSessionIdRef.current);
     // The viewer moved on while this fetch was in flight (the user picked
     // another session or went home): keep the shadow for the next visit, but
@@ -2950,6 +3093,157 @@ export function App() {
     setItems(finalItems);
     setSessionLoading(false);
     return finalItems;
+  }
+
+  /**
+   * Reads the page of history just above what the session on screen holds
+   * and puts it on top, when the reader has scrolled up to the oldest row.
+   * The page is history that no longer changes: it is mapped with the same
+   * function as the live window, gets its tool previews and stored prompts,
+   * and then stays out of every reload. It is kept only if nothing moved while
+   * it was read - the session on screen, the live window it borders, the
+   * older pages it joins.
+   */
+  async function loadOlderTranscript(): Promise<void> {
+    const sid = viewedSessionIdRef.current.trim();
+    const live = sid ? liveWindowBySidRef.current.get(sid) : undefined;
+    if (!sid || !live || olderLoadInFlightRef.current) return;
+    const heldOlder = olderTranscriptRef.current;
+    const older =
+      heldOlder &&
+      heldOlder.sessionId === sid &&
+      heldOlder.generation === live.seq
+        ? heldOlder
+        : null;
+    const before = older ? older.window.offset : live.offset;
+    if (before <= 0) return;
+    olderLoadInFlightRef.current = sid;
+    setOlderTranscriptLoad("loading");
+    // Every way out settles the control: a page that arrived, a read that
+    // failed, or a read made moot by a window that moved meanwhile, which
+    // leaves the control ready to ask again rather than loading forever.
+    let settled = false;
+    const stillCurrent = () => {
+      const nowLive = liveWindowBySidRef.current.get(sid);
+      const cur = olderTranscriptRef.current;
+      const curOlder =
+        cur && cur.sessionId === sid && cur.generation === live.seq
+          ? cur
+          : null;
+      return (
+        viewedSessionIdRef.current.trim() === sid &&
+        nowLive?.seq === live.seq &&
+        (curOlder ? curOlder.window.offset : nowLive.offset) === before
+      );
+    };
+    try {
+      const reqHeaders = { [HDR]: sid };
+      const res = await fetchJSON<{
+        window?: unknown;
+        messages?: Array<any>;
+        uiLog?: RawUiLogRow[];
+      }>(
+        `/coddy/sessions/${encodeURIComponent(sid)}/messages${transcriptPageQuery({ kind: "older", before })}`,
+        { headers: reqHeaders },
+      );
+      if (!stillCurrent()) return;
+      const pageMessages = res.data?.messages ?? [];
+      const pageWindow = parseTranscriptWindow(
+        res.data?.window,
+        pageMessages.length,
+      );
+      // A server that ignores the window hands back the whole history; a page
+      // that does not end where the held rows start cannot be joined to them.
+      if (
+        !res.ok ||
+        pageMessages.length === 0 ||
+        pageWindow.offset + pageMessages.length !== before
+      ) {
+        setOlderTranscriptLoad("error");
+        settled = true;
+        return;
+      }
+      const mapped = transcriptItemsFromMessages({
+        messages: pageMessages,
+        window: pageWindow,
+        uiLog: res.data?.uiLog,
+        newId,
+        reasoningDurations: reasoningDurationMsByContentRef.current,
+      });
+      const tcRes = await fetchJSON<{ toolCalls: ToolCallListRow[] }>(
+        `/coddy/sessions/${encodeURIComponent(sid)}/tool-calls${transcriptToolCallsQuery(pageWindow, pageMessages.length)}`,
+        { headers: reqHeaders },
+      );
+      if (!stillCurrent()) return;
+      if (tcRes.ok && tcRes.data?.toolCalls) {
+        applyToolCallRows(mapped.items, mapped.toolIndex, tcRes.data.toolCalls);
+      }
+      let page = mergePermissionPromptsIntoTranscript(
+        mapped.items,
+        sid,
+        toolsPermissionPolicyRef.current,
+      );
+      page = mergeStoredQuestionPromptsIntoTranscript(page, sid);
+      page = patchQuestionToolArgsFromPromptRecords(page, sid);
+      page = dedupeAdjacentDuplicateThinkingCompleted(page);
+      const joined = prependOlderPage(
+        page,
+        older?.items ?? [],
+        itemsRef.current,
+        newId,
+      );
+      setOlderTranscript({
+        sessionId: sid,
+        generation: live.seq,
+        items: joined,
+        window: pageWindow,
+      });
+      setOlderTranscriptLoad("idle");
+      settled = true;
+    } catch {
+      if (stillCurrent()) {
+        setOlderTranscriptLoad("error");
+        settled = true;
+      }
+    } finally {
+      if (olderLoadInFlightRef.current === sid) olderLoadInFlightRef.current = "";
+      if (!settled) {
+        setOlderTranscriptLoad((cur) => (cur === "loading" ? "idle" : cur));
+      }
+    }
+  }
+
+  /**
+   * The reader is back at the newest message: what was read of the history
+   * on the way up is released, and a live window that grew through many turns
+   * starts over from the newest page. Only while nothing runs in the session,
+   * so no stream, prompt or answer in flight is touched; the rows it drops
+   * are far above the screen, which stays pinned to the newest message.
+   */
+  function slideTranscriptToTail(): void {
+    const sid = viewedSessionIdRef.current.trim();
+    if (!sid || !readerAtTailRef.current) return;
+    if (
+      turnActivity.get(sid) === true ||
+      activeComposerSidRef.current.has(sid) ||
+      postAbortBySidRef.current.has(sid) ||
+      relayAbortBySidRef.current.has(sid) ||
+      itemsRef.current.some(
+        (x) =>
+          (x.type === "permission_prompt" || x.type === "question_prompt") &&
+          !x.resolved,
+      )
+    ) {
+      return;
+    }
+    if (olderTranscriptRef.current) {
+      setOlderTranscript(null);
+      setOlderTranscriptLoad("idle");
+    }
+    const live = liveWindowBySidRef.current.get(sid);
+    if (live && live.total - live.offset > LIVE_WINDOW_REBASE_MESSAGES) {
+      void loadMessages(sid, { freshLoad: true, preserveOnError: true });
+    }
   }
 
   function persistComposerDraftBeforeLeave() {
@@ -3041,18 +3335,33 @@ export function App() {
     // Drop any stashed session selection so its restore effect cannot reapply
     // the old session's model over the new chat default.
     setOpenSessionSelection(null);
+    setSessionReasoningChoices({ sid: "", model: "", choices: [] });
+    // A new chat sends its level with the first message: that is its own.
+    reasoningImpliedRef.current = false;
     // A new chat runs under the configured permission mode until it is changed.
     settingsVersionRef.current = { sid: "", version: 0 };
     pendingPermissionModeRef.current = "";
     setPermissionMode(configuredPermissionMode);
     setSettingsOverrides([]);
     if (llmModelIds.length > 0) {
-      setLlmModel(
-        pickDefaultLlmModelForNewChat({
-          backends: llmModelIds,
-          cookie: readLlmModelCookie(),
-        }),
-      );
+      const model = pickDefaultLlmModelForNewChat({
+        backends: llmModelIds,
+        cookie: readLlmModelCookie(),
+      });
+      setLlmModel(model);
+      // A new chat starts from this surface's defaults, never from the level
+      // the session it left behind ran at (#362): the cookie, then the model's
+      // default. A model whose row has not arrived is left to the clamp effect.
+      const row = modelInfos.find((m) => m.id === model);
+      if (row) {
+        setLlmReasoning(
+          pickReasoningLevel({
+            levels: row.reasoningLevels ?? [],
+            cookie: readReasoningCookie(),
+            modelDefault: row.reasoningDefault ?? null,
+          }),
+        );
+      }
     }
   }
 
@@ -3105,11 +3414,13 @@ export function App() {
   /**
    * Puts a conversation in the archive, or takes it back out.
    *
-   * The row moves only once the server has agreed. Moving it first reads better
-   * for the half second it saves, but it is a lie the UI then has to take back:
-   * a refused PATCH would leave the drawer showing a state that is not on disk,
-   * and a listing already in flight could put the row back anyway. The request
-   * is quick, and what the drawer shows stays what the server said.
+   * The row moves at once and the PATCH goes behind it, and the list is not
+   * read again: a re-read from the first page dropped the rows scrolling had
+   * loaded, and with them the place the next conversation to archive sat at.
+   * A refused PATCH puts the row back where it stood, with the reason said on
+   * the row. Until the server has the new flag, and until every listing issued
+   * before that has come back, a listing is shown with the move applied, so a
+   * read already in flight cannot put the row back either (archiveMoves.ts).
    */
   async function archiveSession(id: string, archived: boolean) {
     // One conversation, one request at a time. Two PATCHes for the same session
@@ -3128,21 +3439,69 @@ export function App() {
   }
 
   async function runArchiveSession(id: string, archived: boolean) {
-    let res: Response;
+    const rowStays = rowVisibleUnder(sessionsArchiveFilter, archived);
+    const place = rowPlace(sessions, id);
+    const removesLoaded = !!place && !rowStays;
+    archiveMovesRef.current.set(id, {
+      archived,
+      removesLoaded,
+      settledAtSeq: null,
+    });
+    setSessionRowErrors((prev) => {
+      if (!(id in prev)) return prev;
+      const rest = { ...prev };
+      delete rest[id];
+      return rest;
+    });
+    setSessions((prev) =>
+      rowStays
+        ? prev.map((s) => (s.id === id ? { ...s, archived } : s))
+        : prev.filter((s) => s.id !== id),
+    );
+    let ok = false;
     try {
-      res = await fetch(`/coddy/sessions/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/coddy/sessions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ archived }),
       });
+      ok = res.ok;
     } catch {
-      setSessionsError(t("app.backendUnavailable", { status: 0 }));
+      ok = false;
+    }
+    if (!ok) {
+      archiveMovesRef.current.delete(id);
+      pruneArchiveLists();
+      const message = t(
+        archived ? "sessions.archiveFailed" : "sessions.unarchiveFailed",
+      );
+      // Only back into the listing it came from: the operator may have
+      // switched to the archive (or out of it) while the request was out.
+      if (
+        place &&
+        rowVisibleUnder(sessionsArchiveFilterRef.current, !!place.row.archived)
+      ) {
+        setSessions((prev) => restoreRow(prev, place));
+        setSessionRowErrors((prev) => ({ ...prev, [id]: message }));
+      } else {
+        setSessionsError(message);
+      }
       return;
     }
-    if (!res.ok) {
-      setSessionsError(t("app.backendUnavailable", { status: res.status }));
-      return;
+    archiveMovesRef.current.set(id, {
+      archived,
+      removesLoaded,
+      settledAtSeq: sessionsListSeqRef.current,
+    });
+    if (removesLoaded) {
+      // The row was part of what History had loaded and has now left the
+      // server's listing, so the next page starts one row earlier.
+      archiveRemovalsRef.current.push(sessionsListSeqRef.current);
+      const cursor = cursorAfterRemovals(sessionsCursorRef.current, 1);
+      sessionsCursorRef.current = cursor;
+      setSessionsCursor(cursor);
     }
+    pruneArchiveLists();
     // The conversation on screen learns its new state with the row: the
     // composer swaps for the archived notice (or comes back) without waiting
     // for the next transcript load. The ref is re-read here, not captured
@@ -3155,15 +3514,6 @@ export function App() {
     if (viewedSessionIdRef.current.trim() === id) {
       setViewedArchived(archived);
     }
-    const rowStays =
-      sessionsArchiveFilter === "all" ||
-      (sessionsArchiveFilter === "only") === archived;
-    setSessions((prev) =>
-      rowStays
-        ? prev.map((s) => (s.id === id ? { ...s, archived } : s))
-        : prev.filter((s) => s.id !== id),
-    );
-    await loadSessionsList(true);
   }
 
   /**
@@ -3366,6 +3716,16 @@ export function App() {
     setEditingUserMsgIdx(null);
     setEditingAssetNote("");
     setEditingFiles([]);
+    // Another conversation: the older pages read for the last one go, and the
+    // reader starts at the newest message of this one.
+    setOlderTranscript(null);
+    setOlderTranscriptLoad("idle");
+    readerAtTailRef.current = true;
+    {
+      const sid = sessionId.trim();
+      const held = sid ? liveWindowBySidRef.current.get(sid) : undefined;
+      setViewedLiveWindow(held ? { ...held, sessionId: sid } : null);
+    }
     setSubagentTranscript(null);
     setViewedArchived(false);
     if (!sessionId) {
@@ -3637,7 +3997,7 @@ export function App() {
       const syncAssistantFromServer = async () => {
         try {
           const res2 = await fetchJSON<{ messages: Array<any> }>(
-            `/coddy/sessions/${encodeURIComponent(key)}/messages`,
+            `/coddy/sessions/${encodeURIComponent(key)}/messages${liveWindowQuery(key)}`,
             { headers: { [HDR]: key } },
           );
           if (
@@ -4057,10 +4417,14 @@ export function App() {
         settingsVersionRef.current.sid === sid.trim()
           ? settingsVersionRef.current.version
           : 0;
-      if (yamlSel || reasoningSel || runSlug || heldVersion > 0) {
+      // The level the chip names for a session with none of its own is shown,
+      // not chosen: sent, it would pin the session to it (#362).
+      const sendReasoning =
+        reasoningSel !== "" && !(sid.trim() && reasoningImpliedRef.current);
+      if (yamlSel || sendReasoning || runSlug || heldVersion > 0) {
         const meta: Record<string, string> = {};
         if (yamlSel) meta.model = yamlSel;
-        if (reasoningSel) meta.reasoning = reasoningSel;
+        if (sendReasoning) meta.reasoning = reasoningSel;
         if (runSlug) meta.runPlanSlug = runSlug;
         if (heldVersion > 0) meta.settingsVersion = String(heldVersion);
         reqBody.metadata = meta;
@@ -4251,7 +4615,7 @@ export function App() {
       const syncAssistantFromServer = async () => {
         try {
           const res2 = await fetchJSON<{ messages: Array<any> }>(
-            `/coddy/sessions/${encodeURIComponent(sidEffective)}/messages`,
+            `/coddy/sessions/${encodeURIComponent(sidEffective)}/messages${liveWindowQuery(sidEffective)}`,
             { headers: { [HDR]: sidEffective } },
           );
           if (
@@ -4541,11 +4905,27 @@ export function App() {
 
   const llmReasoningLevels = useMemo(() => {
     const row = modelInfos.find((m) => m.id === llmModel);
-    return row?.reasoningLevels ?? [];
-  }, [modelInfos, llmModel]);
+    const levels = row?.reasoningLevels ?? [];
+    // Off is not a level GET /v1/models lists; the viewed session's snapshot
+    // names it where the provider can turn thinking off, and the menu offers
+    // it there, so a session can be switched back to it as well as shown so.
+    const known = sessionReasoningChoices;
+    if (
+      levels.length > 0 &&
+      known.sid !== "" &&
+      known.sid === sessionId.trim() &&
+      known.model === llmModel &&
+      known.choices.includes("off") &&
+      !levels.includes("off")
+    ) {
+      return [...levels, "off"];
+    }
+    return levels;
+  }, [modelInfos, llmModel, sessionReasoningChoices, sessionId]);
 
   // Keep the selected reasoning level valid for the current model: keep the user's
-  // pick when the new model still offers it, else fall back (cookie -> model default).
+  // pick when the new model still offers it, else fall back (the cookie for a new
+  // chat, then the model default).
   useEffect(() => {
     const row = modelInfos.find((m) => m.id === llmModel);
     // Nothing is known about a model whose row has not arrived - the list is still
@@ -4557,11 +4937,16 @@ export function App() {
       return;
     }
     const levels = row.reasoningLevels ?? [];
+    const viewed = viewedSessionIdRef.current.trim();
+    const known = sessionReasoningChoicesRef.current;
     setLlmReasoning((prev) =>
       pickReasoningLevel({
         levels,
-        cookie: readReasoningCookie(),
+        // An open session's level is its own; the cookie seeds a new chat only.
+        cookie: viewed ? null : readReasoningCookie(),
         sessionLevel: prev,
+        sessionChoices:
+          viewed && known.sid === viewed && known.model === llmModel ? known.choices : [],
         modelDefault: row.reasoningDefault ?? null,
       }),
     );
@@ -4595,7 +4980,28 @@ export function App() {
     if (snap.model && llmModelIds.includes(snap.model)) {
       setLlmModel(snap.model);
     }
-    setLlmReasoning(snap.reasoning);
+    setSessionReasoningChoices({
+      sid: snap.sessionId,
+      model: snap.model,
+      choices: snap.reasoningChoices,
+    });
+    reasoningImpliedRef.current = !snap.reasoning.trim();
+    // An empty level is the model's own default when the model names none:
+    // shown as it comes, it blanks the chip while the session still runs at
+    // that default, so it goes through the chooser the open path uses. A
+    // model whose row has not arrived is left to the clamp effect.
+    const row = modelInfos.find((m) => m.id === snap.model);
+    setLlmReasoning(
+      row
+        ? pickReasoningLevel({
+            levels: row.reasoningLevels ?? [],
+            cookie: null,
+            sessionLevel: snap.reasoning,
+            sessionChoices: snap.reasoningChoices,
+            modelDefault: row.reasoningDefault ?? null,
+          })
+        : snap.reasoning,
+    );
   });
 
   /** patchSessionSettings sends a settings change and mirrors the answer. */
@@ -4644,6 +5050,7 @@ export function App() {
       }
       setLlmReasoning(lv);
       writeReasoningCookie(lv);
+      reasoningImpliedRef.current = false;
       const sid = sessionId.trim();
       if (!sid) {
         return;
@@ -4989,7 +5396,9 @@ export function App() {
     setSettingsHash();
   }, []);
 
-  const onCloseSettings = useCallback(() => {
+  // Back to the chat on screen, or to the start screen when there is none:
+  // what closing Settings does.
+  const closeToChat = useCallback(() => {
     const sid = sessionId.trim();
     if (sid) {
       setSessionHashInLocation(sid);
@@ -4997,6 +5406,13 @@ export function App() {
       clearSessionRoute();
     }
   }, [sessionId, clearSessionRoute]);
+
+  // The swarm screen over a chat has no close control of its own: Escape
+  // takes it down as the backdrop does, back to the chat.
+  const onCloseSwarm = useCallback(() => {
+    setSwarmRoute(false);
+    closeToChat();
+  }, [closeToChat]);
 
   const onOpenHistoryFromNav = useCallback(() => {
     setSchedulerOpen(false);
@@ -5144,9 +5560,11 @@ export function App() {
     questionPendingSessionIds: questionPendingSids,
     sessions: sessionsForSidebar,
     ...(sessionsError ? { error: sessionsError } : {}),
+    rowErrors: sessionRowErrors,
     open: sessionsOpen,
     onClose: () => {
       setSessionsOpen(false);
+      setSessionRowErrors({});
       const p = parseAppHash();
       if (p.branch === "history") {
         const sid = sessionId.trim();
@@ -5206,6 +5624,21 @@ export function App() {
     onLoadMore: () => void loadSessionsList(false),
   };
 
+  // Every screen of the rail, whether it is on screen and what Escape does to
+  // it: the step its close control takes (nav/railEscape.ts).
+  useRailScreenEscape({
+    history: { open: sessionsOpen, close: sessionPanelShared.onClose },
+    scheduler: {
+      open: schedulerOpen && schedulerHttpLinked === true,
+      // An open job or its runs first, back onto the list; the drawer next.
+      close: schedulerEditor ? closeSchedulerEditor : closeSchedulerDrawer,
+    },
+    // On a relay the swarm is the home screen, with nothing under it.
+    swarm: { open: swarmRoute && !atSwarmRoot, close: onCloseSwarm },
+    docs: { open: docsRoute !== null, close: onCloseDocs },
+    settings: { open: settingsRoute, close: closeToChat },
+  });
+
   const toggleRailWidth = () => {
     setRailLabelsWide((prev) => {
       const next = !prev;
@@ -5237,12 +5670,27 @@ export function App() {
    * prompt rather than dropped. Any other refusal puts the text back in the
    * composer, because losing it is worse than a second attempt.
    */
-  const handleQueueMessage = useStableHandler((text: string) => {
+  const handleQueueModeChange = useStableHandler((mode: QueueMode) => {
+    setQueueMode(mode);
+    void (async () => {
+      const current = await fetchJSON<Record<string, unknown>>("/coddy/config", { headers });
+      if (!current.ok || !current.data) return;
+      const agent = (current.data.agent ?? {}) as Record<string, unknown>;
+      const res = await fetch("/coddy/config", {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...current.data, agent: { ...agent, queue_mode: mode } }),
+      });
+      if (res.ok) setConfigEpoch((e) => e + 1);
+    })();
+  });
+
+  const handleQueueMessage = useStableHandler((text: string, mode: QueueMode, files: File[] = []) => {
     const sid = sessionId.trim();
     const generation = turnActivity.generation(sid);
     const queueEpoch = queueOrderRef.current.capture(sid).epoch;
     const body = text.trim();
-    if (!sid || !body) return;
+    if (!sid || (!body && files.length === 0)) return;
     setDraft("");
     void (async () => {
       type QueueAnswer = {
@@ -5253,12 +5701,18 @@ export function App() {
       let payload: QueueAnswer | null = null;
       let status = 0;
       try {
+        const inlineFiles = await Promise.all(files.map((file) => new Promise<{ name: string; data_url: string }>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({ name: file.name, data_url: reader.result as string });
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        })));
         const res = await fetch(
           `/coddy/sessions/${encodeURIComponent(sid)}/queue`,
           {
             method: "POST",
             headers: { [HDR]: sid, "Content-Type": "application/json" },
-            body: JSON.stringify({ text: body }),
+            body: JSON.stringify({ text: body, mode, inline_files: inlineFiles }),
           },
         );
         status = res.status;
@@ -5280,11 +5734,13 @@ export function App() {
         // ordinary prompt; if the admission has not been released yet and that
         // is refused too, the text comes back to the composer rather than
         // being lost between the two answers.
-        void streamResponses(body, { restoreOnRefusal: true });
+        void streamResponses(body, { files, restoreOnRefusal: true });
         return;
       }
-      if (viewedSessionIdRef.current.trim() === sid)
+      if (viewedSessionIdRef.current.trim() === sid) {
         setDraft((current) => current || body);
+        setComposerFiles((current) => [...files, ...current]);
+      }
       applyStreamItemsForSession(sid, (prev) => [
         ...prev,
         {
@@ -5325,6 +5781,9 @@ export function App() {
         const data = (await res.json().catch(() => null)) as {
           messages?: QueuedMessage[];
           version?: number;
+          message?: QueuedMessage & {
+            inline_files?: { name?: string; data_url?: string }[];
+          };
         } | null;
         if (Array.isArray(data?.messages)) {
           applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
@@ -5332,11 +5791,51 @@ export function App() {
         // Taken back before the agent read it: the text returns to the composer to be
         // edited, ahead of anything typed since. A 404 means the agent read it first,
         // and it is already in the conversation.
-        const text = taken?.text ?? "";
+        const text = data?.message?.text ?? taken?.text ?? "";
         if (res.ok && text.trim() && viewedSessionIdRef.current.trim() === sid) {
           setDraft((current) =>
             current.trim() ? `${text}\n\n${current}` : text,
           );
+        }
+        // Its images come back only in this answer: the queue every client is
+        // sent names them and never carries them.
+        const files = (data?.message?.inline_files ?? [])
+          .map((f) => fileFromDataUrl(f.data_url ?? "", f.name ?? ""))
+          .filter((f): f is File => f !== null);
+        if (res.ok && files.length > 0 && viewedSessionIdRef.current.trim() === sid) {
+          setComposerFiles((current) => [...files, ...current]);
+        }
+      } catch {
+        // The next message_queue frame corrects the list.
+      }
+    })();
+  });
+  /**
+   * Switch a waiting message between steering the running turn and waiting for
+   * its answer. The answer carries the whole queue; a message the agent read a
+   * moment ago answers 404 and the next `message_queue` frame settles the list.
+   */
+  const handleSetQueuedMode = useStableHandler((id: string, mode: QueueMode) => {
+    const sid = sessionId.trim();
+    const messageID = id.trim();
+    if (!sid || !messageID) return;
+    const queueEpoch = queueOrderRef.current.capture(sid).epoch;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/coddy/sessions/${encodeURIComponent(sid)}/queue/${encodeURIComponent(messageID)}`,
+          {
+            method: "PATCH",
+            headers: { [HDR]: sid, "Content-Type": "application/json" },
+            body: JSON.stringify({ mode }),
+          },
+        );
+        const data = (await res.json().catch(() => null)) as {
+          messages?: QueuedMessage[];
+          version?: number;
+        } | null;
+        if (res.ok && Array.isArray(data?.messages)) {
+          applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
         }
       } catch {
         // The next message_queue frame corrects the list.
@@ -5511,10 +6010,7 @@ export function App() {
               availableModels={llmModelIds}
               defaultModel={llmModel}
               currentCwd={currentSessionCwd}
-              onClose={() => {
-                setSchedulerEditor(null);
-                setSchedulerListHash();
-              }}
+              onClose={closeSchedulerEditor}
               onSaved={(createdId) => {
                 void refreshSchedulerJobs({ silent: true });
                 if (createdId) {
@@ -5557,7 +6053,7 @@ export function App() {
         {settingsRoute ? (
           <div className="settings-dock-cluster">
             <Settings
-              onClose={onCloseSettings}
+              onClose={closeToChat}
               onConfigSaved={() => setConfigEpoch((e) => e + 1)}
               initialSection={settingsSection}
               initialItem={settingsItem}
@@ -5635,7 +6131,15 @@ export function App() {
             heroAccentVerb={heroAccentVerb}
             heroComposerFocusEpoch={heroHomeGeneration}
             onTitleSave={(t: string) => void saveSessionTitle(sessionId, t)}
-            items={items}
+            items={transcriptItems}
+            userMsgIndexBase={transcriptTopWindow?.turnsBefore ?? 0}
+            transcriptHasOlder={(transcriptTopWindow?.offset ?? 0) > 0}
+            olderTranscriptLoad={olderTranscriptLoad}
+            onLoadOlderTranscript={() => void loadOlderTranscript()}
+            onReaderAtTailChange={(atTail: boolean) => {
+              readerAtTailRef.current = atTail;
+              if (atTail) slideTranscriptToTail();
+            }}
             draft={draft}
             tokenUsage={tokenUsage}
             providerUsage={providerUsageState.usage}
@@ -5685,6 +6189,9 @@ export function App() {
               : {
                   queuedMessages,
                   onQueue: handleQueueMessage,
+                  ...(queueMode ? { queueMode } : {}),
+                  onQueueModeChange: handleQueueModeChange,
+                  onSetQueuedMode: handleSetQueuedMode,
                   onCancelQueued: handleCancelQueued,
                 })}
             onQuestionPromptResolved={resolveQuestionPrompt}
@@ -5747,6 +6254,14 @@ export function App() {
             {...(editingFiles.length > 0 ? { editingFiles } : {})}
             {...(knownSkillNames.size > 0 ? { knownSkillNames } : {})}
             onDocsCommand={openDocsCommand}
+            onMCPCommand={() => {
+              setDraft("");
+              setSchedulerOpen(false);
+              setSchedulerEditor(null);
+              setTasksOpen(false);
+              setSessionsOpen(false);
+              setSettingsSectionHash("mcp_servers");
+            }}
             attachedFiles={composerFiles}
             onAttachedFilesChange={setComposerFiles}
             onSend={(text: string, files?: File[]) => {

@@ -36,6 +36,11 @@ Usage:
         the swarm relay, the cron scheduler)
   coddy serve -d | --daemon (the same, in the background under a dispatcher
         that starts it again if it dies)
+  coddy serve install (Linux: run coddy serve as a systemd user service in
+        ~/Coddy - installs the unit when the package did not, enables and
+        starts it)
+  coddy serve uninstall (stop and disable that service and remove the unit
+        that install wrote; ~/.coddy and ~/Coddy are kept)
   coddy serve status | stop | restart [--home DIR]
   coddy serve set-password [--user NAME] [--config PATH] [--home DIR] (write the web
         UI sign-in account into config.yaml; the password is read from the
@@ -53,7 +58,7 @@ Usage:
   coddy plugin remove <name>
   coddy plugin enable <name> | disable <name>
   coddy mcp list | trust <name> | untrust <name> [--cwd DIR]
-  coddy providers list | login <name> [--browser] [--devin-cli] [--no-config] [--api-base URL] | logout <name> [--home DIR]
+  coddy providers list | login <name> [--type neuraldeep|codex|devin] [--browser] [--devin-cli] [--no-config] [--api-base URL] | logout <name> [--home DIR]
   coddy rules list [--cwd DIR]
   coddy agents list [--cwd DIR]
   coddy agents trust <name> [--cwd DIR]
@@ -230,6 +235,18 @@ Usage of serve (runs every subsystem enabled in config.yaml):
     	check config.yaml against the schema and the loader's rules, print every problem with its line and how to fix it, then exit without starting anything
 ```
 
+### coddy serve install
+
+```text
+Usage: coddy serve install (check ~/.coddy/config.yaml, install the systemd user unit for this binary when the package did not, enable coddy.service and start it working in ~/Coddy)
+```
+
+### coddy serve uninstall
+
+```text
+Usage: coddy serve uninstall (stop and disable coddy.service and remove the unit that install wrote; ~/.coddy and ~/Coddy are kept)
+```
+
 ### coddy serve status | stop | restart
 
 ```text
@@ -280,6 +297,8 @@ Usage of providers:
     	override CODDY_HOME
   -no-config
     	login: do not add the provider and its models to config.yaml after login
+  -type string
+    	login: type of a provider config.yaml does not list yet (neuraldeep, codex or devin), so another profile of a type is created by signing it in
 flag: help requested
 ```
 

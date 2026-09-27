@@ -45,6 +45,34 @@ describe("EnvironmentChip menu direction", () => {
     expect(menu.style.bottom).toBe("");
   });
 
+  // The menu opens from a click, so the focus stays on the chip: Escape has
+  // to reach the menu from there too.
+  it("closes on Escape with the focus still on the chip", async () => {
+    render(<EnvironmentChip />);
+    const btn = screen.getByTestId("composer-env-btn");
+    btn.getBoundingClientRect = () => rect(48);
+    fireEvent.click(btn);
+    await screen.findByTestId("composer-env-menu");
+    expect(fireEvent.keyDown(btn, { key: "Escape" })).toBe(false);
+    expect(screen.queryByTestId("composer-env-menu")).toBeNull();
+  });
+
+  // In the swarm header of a relay the chip is the last thing on the right, so
+  // a menu hung from its left edge ran past the window at 1280 px.
+  it("stays inside the window when the chip is near the right edge", async () => {
+    render(<EnvironmentChip />);
+    const btn = screen.getByTestId("composer-env-btn");
+    const right = window.innerWidth - 80;
+    btn.getBoundingClientRect = () =>
+      ({ ...rect(48), left: right - 76, right, x: right - 76, width: 76 }) as DOMRect;
+    fireEvent.click(btn);
+    const menu = await screen.findByTestId("composer-env-menu");
+    const width = Math.min(300, window.innerWidth - 24);
+    const left = parseFloat(menu.style.left);
+    expect(left + width).toBeLessThanOrEqual(window.innerWidth - 12);
+    expect(left).toBeGreaterThanOrEqual(12);
+  });
+
   it("keeps opening upward from the composer at the foot", async () => {
     render(<EnvironmentChip />);
     const btn = screen.getByTestId("composer-env-btn");

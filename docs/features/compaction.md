@@ -25,14 +25,14 @@ Over HTTP the same action is `POST /coddy/sessions/{id}/compact` with an optiona
 
 ## Automatic compaction
 
-The agent estimates the context it is about to send - system prompt, tool definitions, rules, skills, MCP and the conversation - and compares it with the context window of the session's model. When the estimate reaches `compaction.threshold_percent` of the window (80 by default) the history is compacted before the call: once before the first model call of a turn, a turn resumed after a permission answer included, and again between rounds when tool results grew the context past the threshold mid-turn. Any failure - a summariser error, a hook veto - is logged and the turn continues uncompacted.
+The agent estimates the context it is about to send - system prompt, tool definitions, rules, skills, MCP and the conversation - and compares it with the context window of the session's model. When the estimate reaches `compaction.threshold_percent` of the window (80 by default) the history is compacted before the call: once before the first model call of a turn, a turn resumed after a permission answer included, again between rounds when tool results grew the context past the threshold mid-turn, and before the first request to a model the session switched to, whose window may be smaller ([Session settings](session-settings.md#what-happens-when-you-send-one)). Any failure - a summariser error, a hook veto - is logged and the turn continues uncompacted.
 
 ### The context window
 
 Every reader resolves the window the same way - the trigger, the `usage_update` behind the console's context percentage, and the `max_context_tokens` of `GET /v1/models` that the web UI draws its context ring against - so what the ring shows is what the trigger measures:
 
 1. the model entry's `max_context_tokens`;
-2. the window the provider's model listing reports for the model: `limit.context` (the NeuralDeep hub), `context_length` (OpenRouter), `max_model_len` (vLLM), `max_context_length` (LM Studio) or `context_window`. The listing is read for `neuraldeep` providers and for `openai` providers with an explicit `api_base`, never for api.openai.com, Anthropic or Codex, whose listings carry no window. It is read when a turn starts or the model list is served, with a turn waiting at most three seconds for a listing that has never answered, and it is trusted for an hour; a failed read is retried after five minutes;
+2. the window the provider's model listing reports for the model: `limit.context` (the NeuralDeep hub), `context_length` (OpenRouter), `max_model_len` (vLLM), `max_context_length` (LM Studio) or `context_window`. The listing is read for `neuraldeep` providers and for `openai` providers with an explicit `api_base`, never for api.openai.com, Anthropic or Codex, whose listings carry no window. It is read when a turn starts, when the model list is served and when a session switches to the model, with a turn waiting at most three seconds for a listing that has never answered - the step after a switch in the middle of a turn waits the same way before it measures - and it is trusted for an hour; a failed read is retried after five minutes;
 3. 128000.
 
 Set `max_context_tokens` when the provider reports no window, or a larger one than the deployment actually serves (a local server started with a smaller context).
@@ -72,7 +72,7 @@ Such a history is now folded in passes. Each pass carries the summary of everyth
 Every compaction, whichever way it started, draws the row a tool call draws: announced as `compact_context` when it begins, updated with the pass it is on while a multi-pass fold runs (`compacting context: pass 3 of 7`), and closed with what it folded. Before this the session simply went quiet for as long as the summariser took, which a fold of several calls over a large history makes hard to sit through.
 
 ![The compact_context row while a compaction runs](../assets/compaction/compact-row-running-dark-1280.png)
-*`/compact` sent from the composer: the row says what is running, above the answer of the compaction before it. Captured from the running UI.*
+*`/compact` sent from the composer: the row says the context is being compacted while the summarizer writes, under the turns it is about to fold. Captured from the running UI.*
 
 The row a compaction draws for itself is live: it reaches whoever is watching the session - the composer that sent `/compact`, a second browser tab, a console on `--remote` - and what stays in the transcript afterwards is the compaction summary row. A compaction the model asked for is different, because there the row already exists: the `compact_context` call reuses it, so the passes appear under the call that ordered them, and it stays in the transcript like any other tool call.
 
@@ -81,6 +81,8 @@ The row a compaction draws for itself is live: it reaches whoever is watching th
 The boundary is the `keep_recent_turns`-th most recent user message (2 by default). Everything from that message on - the user turns, the replies and the tool activity after each - stays verbatim. Everything before it is sent to the summariser as a flattened transcript, tool calls rendered as labelled lines, and is replaced in the model's view by one summary row inserted at the boundary. A previous summary is part of the older history, so a second compaction folds it into the new one and the model always sees exactly one. `keep_recent_turns: 0` summarises the whole window.
 
 The summary is requested from `compaction.model` when set, otherwise from the session's model, with a fixed system prompt that asks, in order, for the user's goals and constraints, the decisions taken and the approaches rejected, the state of the work, the exact paths, names, commands and values that matter, and the open questions and next steps. The result-eviction projection below is applied to the history first, so a page the model had already moved past is not summarised in full.
+
+The project rules a tool result or a message carried are not summarised: a rule the summary folds away comes back with the next tool call or mention that touches a matching path, and one the kept tail still carries comes again only if its file has changed. A compaction is also the moment the standing rules are read again - the `AGENTS.md` and `DESIGN.md` pairs, the rules that always apply and the files of `instructions.files` - so an edit made to them during the session reaches the next system prompt ([Rules and the prompt cache](rules.md#rules-and-the-prompt-cache)).
 
 ## The summary row and the context estimate
 

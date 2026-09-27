@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 )
 
 // ToolInfo describes a tool provided by an MCP server.
@@ -53,6 +54,12 @@ type Client struct {
 
 	tools []ToolInfo
 	done  chan struct{}
+
+	// declared is the fingerprint of the configured declaration the client
+	// was started from (TrustGate.Connect), empty for a client an ACP client
+	// supplied. A reconcile compares it to the declaration on disk, so a
+	// server whose command was edited is started again.
+	declared string
 }
 
 // newClientWithTransport wraps a started transport, performs the MCP
@@ -111,6 +118,12 @@ func (c *Client) Tools() []ToolInfo {
 // Name returns the server name.
 func (c *Client) Name() string {
 	return c.name
+}
+
+// Declared returns the fingerprint of the configured declaration the client
+// was started from, or "" for one no trust gate started.
+func (c *Client) Declared() string {
+	return c.declared
 }
 
 // CallTool invokes a tool on the MCP server and returns the result.
@@ -381,6 +394,7 @@ func newStdioTransport(_ context.Context, name, command string, args []string, e
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, command, args...)
 	cmd.Env = append(os.Environ(), env...)
+	platform.AdaptCommand(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

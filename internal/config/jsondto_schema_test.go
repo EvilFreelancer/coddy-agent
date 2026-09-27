@@ -11,6 +11,21 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 )
 
+func TestQueueModeJSONRoundTripAndValidation(t *testing.T) {
+	original := &config.Config{Agent: config.Agent{QueueMode: "after_turn"}}
+	got := config.JSONDTOToConfig(config.ConfigToJSONDTO(original), config.Paths{})
+	if got.Agent.QueueMode != "after_turn" {
+		t.Fatalf("queue mode = %q", got.Agent.QueueMode)
+	}
+	if err := got.Agent.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	got.Agent.QueueMode = "unknown"
+	if err := got.Agent.Validate(); err == nil {
+		t.Fatal("invalid queue mode accepted")
+	}
+}
+
 func TestUISchemaOmitsHTTPServerFromUI(t *testing.T) {
 	doc := config.UISchemaMap()
 	props, ok := doc["properties"].(map[string]interface{})
@@ -335,4 +350,34 @@ func taggedStruct(t reflect.Type, tag string) reflect.Type {
 		}
 	}
 	return nil
+}
+
+// The settings form edits tools.http_request.default_headers as rows of a name
+// and a value: the UI schema has to say it is a map of strings, not a section
+// with keys of its own, and place it after the allowlist.
+func TestUISchemaDescribesDefaultHeadersAsAStringMap(t *testing.T) {
+	doc := config.UISchemaMap()
+	tools := doc["properties"].(map[string]interface{})["tools"].(map[string]interface{})
+	section := tools["properties"].(map[string]interface{})["http_request"].(map[string]interface{})
+	field, ok := section["properties"].(map[string]interface{})["default_headers"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tools.http_request has no default_headers field: %#v", section["properties"])
+	}
+	if field["type"] != "object" {
+		t.Errorf("type = %v, want object", field["type"])
+	}
+	if _, fixed := field["properties"]; fixed {
+		t.Error("a map of headers has no fixed properties")
+	}
+	values, ok := field["additionalProperties"].(map[string]interface{})
+	if !ok || values["type"] != "string" {
+		t.Errorf("additionalProperties = %#v, want a string schema", field["additionalProperties"])
+	}
+	if title, _ := field["title"].(string); title == "" {
+		t.Error("the field has no title")
+	}
+	order, _ := section["x-coddy-property-order"].([]interface{})
+	if len(order) != 2 || order[0] != "allowlist" || order[1] != "default_headers" {
+		t.Errorf("property order = %v", order)
+	}
 }

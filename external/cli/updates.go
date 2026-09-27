@@ -38,7 +38,11 @@ func (a *App) applyLoopMessage(msg updateMsg) {
 				if a.remoteURL != "" {
 					a.refreshRemoteControls()
 				} else {
-					a.queue.SetRows(nil)
+					if a.mgr == nil {
+						a.queue.SetRows(nil)
+					} else if rows, err := a.mgr.QueuedTurnMessages(a.sessionID); err == nil {
+						a.setQueueRows(session.QueuedMessagesWire(rows))
+					}
 				}
 			}
 			a.stopUsageResume()
@@ -117,6 +121,9 @@ func (a *App) applyLoopMessage(msg updateMsg) {
 	case sessionResumed:
 		a.switching = false
 		a.adoptSession(u.id, u.modes, u.opts)
+		if u.settings != nil {
+			a.adoptSettingsSnapshot(*u.settings)
+		}
 		a.populateHeader()
 		a.refreshFooterModel()
 		a.foot.SetSession("", a.modeID)
@@ -279,6 +286,8 @@ func (a *App) applyLoopMessage(msg updateMsg) {
 		}
 	case settingsApplied:
 		a.applySettingsSnapshot(u.settings)
+	case session.MCPConnectUpdate:
+		a.applyMCPConnect(u)
 	case acp.AvailableCommandsUpdate:
 		a.refreshServerCommands(u.AvailableCommands)
 	case acp.MemoryRunUpdate:
@@ -334,9 +343,13 @@ func memoryRunLine(u acp.MemoryRunUpdate) string {
 func (a *App) applyMessageChunk(u acp.MessageChunkUpdate) {
 	switch u.SessionUpdate {
 	case "user_message_chunk":
-		// Replay path: render as a user block (live submissions echo locally).
-		if u.Content.Text != "" {
-			a.chat.AddChild(newUserMessage(a.theme, u.Content.Text))
+		// A replayed message, a queued one the turn has just read, or a
+		// deferred one that starts a prompt of its own (live submissions echo
+		// locally). The content is the message as the model got it: what a
+		// person reads is the text with its attachments collapsed to the
+		// mentions that brought them.
+		if text := session.UserMessageDisplayText(u.Content.Text); text != "" {
+			a.chat.AddChild(newUserMessage(a.theme, text))
 			a.curAssistant = nil
 		}
 		return

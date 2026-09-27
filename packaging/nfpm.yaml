@@ -1,9 +1,11 @@
 # nfpm recipe for the Linux packages published on every release tag.
 #
-# The package installs a binary and its documentation, nothing else: no service,
-# no system account, no files under /etc. Coddy keeps every piece of state in the
-# invoking user's ~/.coddy, so one installed package serves every user on the
-# machine and what to run is the user's decision, not the packager's.
+# The package installs a binary, its documentation and a systemd user unit that
+# it does not enable: no system service, no system account, no files under /etc.
+# Coddy keeps every piece of state in the invoking user's ~/.coddy, so one
+# installed package serves every user on the machine, and whether an account
+# runs coddy serve as a service is that user's decision (`coddy serve install`),
+# not the packager's.
 #
 # Not built by hand: scripts/build-packages.sh stages every file listed below
 # into one directory, exports PKG_ARCH and PKG_VERSION, and runs nfpm from that
@@ -37,6 +39,14 @@ description: |
   and reads project rules, skills, subagents and hooks from the repository it
   is working in.
 
+# tmux is suggested, not required: Coddy runs without it, and its console runs
+# well inside it, where a session outlives a closed terminal or a dropped SSH
+# connection. A suggestion is named and never installed: apt and zypper list it
+# during the install, and it stays in the package metadata for dnf
+# (rpm -q --suggests). The Homebrew cask says the same in its caveats.
+suggests:
+  - tmux
+
 contents:
   - src: coddy
     dst: /usr/bin/coddy
@@ -55,6 +65,13 @@ contents:
 
   - src: coddy.zsh
     dst: /usr/share/zsh/site-functions/_coddy
+    file_info:
+      mode: 0644
+
+  # A user unit, installed and not enabled. `coddy serve install` enables it for
+  # the account that runs it; the post-install message says so.
+  - src: coddy.service
+    dst: /usr/lib/systemd/user/coddy.service
     file_info:
       mode: 0644
 
@@ -79,6 +96,7 @@ contents:
 
 scripts:
   postinstall: postinstall.sh
+  preremove: preremove.sh
 
 deb:
   # dpkg-query -S on /usr/bin/coddy is what `coddy update` asks to learn that

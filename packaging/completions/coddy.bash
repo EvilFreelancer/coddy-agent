@@ -43,7 +43,7 @@ _coddy() {
             ;;
         providers)
             [ "${COMP_CWORD}" -eq 2 ] && COMPREPLY=($(compgen -W "list login logout" -- "${cur}"))
-            [ "${COMP_CWORD}" -gt 2 ] && COMPREPLY=($(compgen -W "--browser --device --devin-cli --no-config --api-base --home" -- "${cur}"))
+            [ "${COMP_CWORD}" -gt 2 ] && COMPREPLY=($(compgen -W "--type --browser --device --devin-cli --no-config --api-base --home" -- "${cur}"))
             ;;
         rules)
             [ "${COMP_CWORD}" -eq 2 ] && COMPREPLY=($(compgen -W "list" -- "${cur}"))
@@ -77,7 +77,7 @@ _coddy() {
             COMPREPLY=($(compgen -W "-c --continue ${prompt_flags} --model --mode --permission-mode --session-id --cwd --remote --remote-token" -- "${cur}"))
             ;;
         serve)
-            COMPREPLY=($(compgen -W "status stop restart set-password --user -d --daemon -t --test-config --dry-run --config --home --cwd --sessions-dir --session-id --log-level --log-output --log-file --log-format -H --host -P --port --auth-token --http --gateway --swarm --scheduler --swarm-host --swarm-port --swarm-auth-token --swarm-pairing-token --swarm-allow-insecure" -- "${cur}"))
+            COMPREPLY=($(compgen -W "install uninstall status stop restart set-password --user -d --daemon -t --test-config --dry-run --config --home --cwd --sessions-dir --session-id --log-level --log-output --log-file --log-format -H --host -P --port --auth-token --http --gateway --swarm --scheduler --swarm-host --swarm-port --swarm-auth-token --swarm-pairing-token --swarm-allow-insecure" -- "${cur}"))
             ;;
     esac
 }

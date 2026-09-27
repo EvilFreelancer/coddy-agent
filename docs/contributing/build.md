@@ -67,7 +67,7 @@ Output: **`dist/coddy_<version>_linux_<arch>.deb`** and **`.rpm`**. Knobs:
 | Variable | Default | What |
 |----------|---------|------|
 | **`PKG_ARCHS`** | host **`GOARCH`** | architectures to package, e.g. **`"amd64 arm64"`** |
-| **`PKG_TAGS`** | **`http ui scheduler memory cli`** | build tags for the packaged binary |
+| **`PKG_TAGS`** | **`http ui scheduler memory cli gateway swarm`** | build tags for the packaged binary |
 | **`DIST_DIR`** | **`dist`** | where the packages land |
 
 ```bash
@@ -77,14 +77,28 @@ make rpm PKG_TAGS="http cli"      # lean binary, no npm step
 
 The recipe is **`packaging/nfpm.yaml`**, driven by **`scripts/build-packages.sh`**, which stages the
 man page (**`packaging/man/coddy.1`**), the shell completions (**`packaging/completions/`**),
+the systemd user unit (**`packaging/systemd/coddy.service`**), the maintainer scripts
+(**`packaging/scripts/postinstall.sh`**, **`preremove.sh`**),
 **`config.example.yaml`** and **`LICENSE`** into one directory and runs
 [nfpm](https://nfpm.goreleaser.com/) over it. nfpm is not a module dependency: the script uses the
 **`nfpm`** on **`PATH`** when there is one and otherwise fetches the pinned version with
 **`go run`**, so there is nothing to install first.
 
-The package installs a binary and its documentation and nothing else - no service, no system
-account, no files under **`/etc`** - because Coddy's state lives in the invoking user's
-**`~/.coddy`**.
+The user unit is installed but not enabled, and the post-install message says so; each user who
+wants the service runs **`coddy serve install`**. No system service, system account or files under
+**`/etc`** are created, because each user keeps state under **`~/.coddy`**. The unit is not
+written by hand: **`serve.PackagedUnitFile()`** (**`internal/serve/systemd.go`**) renders it, the
+same function that writes the unit for a script install, and **`TestPackagedUnitIsTheRenderedOne`**
+fails until **`packaging/systemd/coddy.service`** matches it byte for byte. The **Distribution
+packages** CI job then checks that both package formats carry that file and the maintainer
+scripts.
+
+The packages suggest **`tmux`** and require nothing. Coddy runs without it, and its console runs
+well inside it, where a session outlives a closed terminal or a dropped SSH connection. A
+suggestion is named and never installed - **`apt`** and **`zypper`** list it during the install,
+**`dnf`** keeps it in the metadata (**`rpm -q --suggests`**) - so the choice stays with the user.
+The **Distribution packages** CI job checks that the deb and the rpm suggest it and neither
+requires nor recommends it.
 
 Version strings are normalised for the two formats by **`scripts/package-version.sh`** - rpm forbids
 **`-`** in a version and dpkg reads the last one as the start of the Debian revision, so
@@ -110,7 +124,9 @@ brew install --cask dist/coddy.rb
 ```
 
 The cask links **`coddy`**, **`coddy.1`** and both completion scripts, which is why the release
-**`darwin`** and **`linux`** archives carry those files beside the binary. Each release publishes
+**`darwin`** and **`linux`** archives carry those files beside the binary. It recommends **`tmux`**
+in its **`caveats`** rather than declaring it: a cask's **`depends_on`** has no optional form, and
+Coddy runs without tmux, so the cask names it and installs nothing. Each release publishes
 **`coddy.rb`** as an asset, and **`brew install --cask <url>`** installs from it.
 
 ### Homebrew formula
@@ -152,6 +168,46 @@ make build
 ```
 
 Use this when you only need stdio ACP and want fewer dependencies and no **`npm`** step.
+
+## Android (Termux)
+
+```bash
+make android TAGS="http ui scheduler memory cli gateway swarm"   # build/coddy-android-arm64, -amd64
+make check-android                                              # go vet with GOOS=android, test files included
+```
+
+The Android build is the same sources with **`GOOS=android`** and cgo, linked by the Android NDK
+against Bionic for arm64 and x86_64: a position-independent executable that names
+**`/system/bin/linker64`** as its interpreter and needs only **`libc`**, **`libdl`** and
+**`liblog`**. That is the one shape Termux can start where it runs every program through Android's
+linker, which turns the static **`GOOS=linux`** binary away with **`has unexpected e_type: 2`**, and
+Bionic gives the binary what libc gives any program: its own arguments under the linker and
+Android's resolver. **`GOOS=android`** also keeps Go off the system calls Android's seccomp filter
+forbids. Go links android/amd64 only through a C toolchain anyway, and a build without cgo would
+ask **`127.0.0.1:53`** for every host, so **`internal/platform/android_nocgo.go`** stops it at
+compile time. What users see is on [Android (Termux)](../getting-started/android.md).
+
+**`scripts/android-cc.sh arm64|amd64`** prints the NDK clang both targets use, for API 24 (Android
+7.0, the oldest Termux runs on): it takes the NDK from **`ANDROID_NDK_HOME`**, **`ANDROID_NDK_ROOT`**
+or **`ANDROID_NDK`**, which the GitHub runners set, and otherwise the newest one under the SDK
+(**`sdkmanager "ndk;27.3.13750724"`** installs the version the runners carry).
+
+A binary built outside Termux carries none of the patches Termux applies to its own Go, so
+**`internal/platform`** makes the remaining adjustments at run time. **`android_init.go`** keeps the
+path of the binary when the linker started it, since **`/proc/self/exe`** names the linker then,
+and points **`SSL_CERT_FILE`** and **`TMPDIR`** at the Termux prefix; **`platform.AdaptCommand`**
+starts a child process the way **`termux-exec`** would, through the linker when Coddy itself came up
+that way, with **`/usr/bin/env`** and **`/bin/sh`** in a shebang taken from the prefix. Every place
+that builds an **`exec.Cmd`** calls **`AdaptCommand`** before **`Start`**, and
+**`TestEverySpawnSiteAdaptsTheCommand`** fails on one that does not.
+
+The decisions are plain functions in **`internal/platform/android.go`**, held on any Unix host by
+**`features/android_termux.feature`** and **`internal/platform/android_test.go`**. The files behind
+**`//go:build android`** are compiled only by **`make check-android`** and by the **Android
+cross-build** job of the pull request checks, which also builds both release binaries, checks that
+each is position-independent, names the Android linker and needs no library Android does not ship,
+and uploads them as the **`coddy-android-arm64`** and **`coddy-android-amd64`** artifacts to try on
+a device before the release.
 
 ## Version string (`LDFLAGS`, `print-version`)
 
@@ -206,7 +262,7 @@ Order does not matter for these tags.
 | **`gateway`** | All messenger adapters (superset of **`gateway.telegram`**; includes future Discord, Slack adapters) | [`docs/surfaces/gateway.md`](../surfaces/gateway.md) |
 | **`swarm`** | Stateless relay that aggregates nodes, started by **`coddy serve`** under **`swarm.enable`** | [`docs/operate/swarm.md`](../operate/swarm.md) · [`external/swarm/`](../../external/swarm) |
 
-**`make test`** is the express run: the whole tree once with every optional module compiled in (**`http,ui,scheduler,memory,cli,gateway,swarm`**). **`make test-matrix`** walks every combination (the **`TEST_TAG_SETS`** list in [`Makefile`](../../Makefile)); CI runs that matrix on every pull request, one job per combination. Two of those jobs also start the built binary: `cli` drives the console through a real pty (`examples/cli/cli_e2e_startup.py`), `gateway` runs the Telegram bot against the offline stand of `cmd/tgfake` (`examples/gateway/tg_e2e_offline.sh`). **`make test-race`** runs the whole tree under the Go race detector with every tag but `ui`; CI runs it on every pull request in the **Race detector** job, and `GOFLAGS=-count=3 make test-race` repeats every test locally for a race that shows up rarely.
+**`make test`** is the express run: the whole tree once with every optional module compiled in (**`http,ui,scheduler,memory,cli,gateway,swarm`**). **`make test-matrix`** walks every combination (the **`TEST_TAG_SETS`** list in [`Makefile`](../../Makefile)); CI runs that matrix on every pull request, one job per combination. Two of those jobs also start the built binary: `cli` drives the console through a real pty (`examples/cli/cli_e2e_startup.py`), `gateway` runs the Telegram bot against the offline stand of `cmd/tgfake` (`examples/gateway/tg_e2e_offline.sh`). **`make test-race`** runs the whole tree under the Go race detector with every tag but `ui`; CI runs it on every pull request in the **Race detector** job, and `GOFLAGS=-count=3 make test-race` repeats every test locally for a race that shows up rarely. Two groups can be run on their own: **`make test-cache`** is the prompt-cache group (the `features/prompt_cache_*.feature` specs and the `TestPromptCache*` tests, part of `make test`: what every request sends the provider, held byte for byte across a session), and **`make test-perf`** is the performance group (the benchmarks of the `perf_test.go` files, never part of `make test`: timings of the work a turn repeats and the context a session over this repository's own rules costs, as `system-tokens`, `request-tokens` and `duplicate-rules`).
 
 On Windows, run Make through Git Bash. The build and install targets use Go's
 executable suffix (`coddy.exe`), including the binary that `make docs` runs.
@@ -229,6 +285,7 @@ On each SemVer git tag **`X.Y.Z`** that is on **`main`**, the [**Release binarie
 |---------|----------|
 | **`coddy_X.Y.Z_linux_amd64.tar.gz`** | Linux x86_64 |
 | **`coddy_X.Y.Z_linux_arm64.tar.gz`** | Linux arm64 |
+| **`coddy_X.Y.Z_android_arm64.tar.gz`**, **`coddy_X.Y.Z_android_amd64.tar.gz`** | Android arm64 and x86_64, under Termux (see [above](#android-termux)) |
 | **`coddy_X.Y.Z_windows_amd64.zip`** | Windows x86_64 (**`coddy.exe`**) |
 | **`coddy_X.Y.Z_darwin_amd64.tar.gz`** | macOS Intel |
 | **`coddy_X.Y.Z_darwin_arm64.tar.gz`** | macOS Apple Silicon |
@@ -241,7 +298,7 @@ The **`.tar.gz`** archives carry the man page and the shell completions beside t
 packages wrap the Linux binaries the same job just built rather than compiling their own, so the
 **`.deb`**, the **`.rpm`** and the **`.tar.gz`** of one tag hold byte-identical executables.
 
-Tags match the full feature set: **`http`**, **`ui`**, **`scheduler`**, **`memory`**. Manual run after a tag exists:
+Tags match the full feature set: **`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**. Manual run after a tag exists:
 
 ```bash
 gh workflow run "Release binaries" --ref X.Y.Z -f tag=X.Y.Z

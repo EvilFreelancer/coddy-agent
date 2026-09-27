@@ -118,6 +118,48 @@ test("switching session refocuses textarea in active chat", () => {
   expect(ta).toHaveFocus();
 });
 
+// On a phone or a tablet a focused field opens the on-screen keyboard over
+// half of the screen: opening the start screen or a chat must not do that by
+// itself. The keyboard comes when the reader taps the field.
+test("a touch-only device keeps the keyboard closed on the start screen and in a chat", () => {
+  stubViewport({ narrow: true, touchOnly: true });
+  try {
+    const hero = render(
+      <Composer value="" isEmpty sessionId="" mode="agent" modes={["agent"]}
+        onModeChange={() => {}} onChange={() => {}} onSend={() => {}} />,
+    );
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveFocus();
+    hero.unmount();
+
+    const { rerender } = render(
+      <Composer value="" isEmpty={false} sessionId="sess-a" mode="agent" modes={["agent"]}
+        onModeChange={() => {}} onChange={() => {}} onSend={() => {}} />,
+    );
+    const ta = screen.getByRole("textbox", { name: "Message" });
+    expect(ta).not.toHaveFocus();
+    rerender(
+      <Composer value="" isEmpty={false} sessionId="sess-b" mode="agent" modes={["agent"]}
+        onModeChange={() => {}} onChange={() => {}} onSend={() => {}} />,
+    );
+    expect(ta).not.toHaveFocus();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("a narrow desktop window still focuses the field: it has a keyboard", () => {
+  stubViewport({ narrow: true, touchOnly: false });
+  try {
+    render(
+      <Composer value="" isEmpty sessionId="" mode="agent" modes={["agent"]}
+        onModeChange={() => {}} onChange={() => {}} onSend={() => {}} />,
+    );
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 test("yaml model menu opens down on start screen when backends exist", () => {
   renderComposerWithLlm({ isEmpty: true });
 
@@ -534,6 +576,54 @@ describe("/docs", () => {
     expect(onDocsCommand).not.toHaveBeenCalled();
     expect(onSend).toHaveBeenCalledWith("/docsify the readme");
   });
+});
+
+test("/mcp opens MCP settings without sending a prompt", () => {
+  const onSend = vi.fn();
+  const onMCPCommand = vi.fn();
+  render(
+    <Composer
+      value=" /mcp "
+      isEmpty={false}
+      mode="agent"
+      modes={["agent", "plan"]}
+      onModeChange={() => {}}
+      onChange={() => {}}
+      onSend={onSend}
+      onMCPCommand={onMCPCommand}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+  expect(onMCPCommand).toHaveBeenCalledOnce();
+  expect(onSend).not.toHaveBeenCalled();
+});
+
+// The console opens its /mcp controls whatever follows the command; the web
+// composer does the same rather than send "/mcp github" to the model. A word
+// that only starts with the command is an ordinary prompt.
+test.each([
+  ["/mcp github", true],
+  ["/mcp\tgithub tools", true],
+  ["/mcpx", false],
+  ["/mcp-servers", false],
+])("%j runs the MCP command: %s", (value, opens) => {
+  const onSend = vi.fn();
+  const onMCPCommand = vi.fn();
+  render(
+    <Composer
+      value={value}
+      isEmpty={false}
+      mode="agent"
+      modes={["agent", "plan"]}
+      onModeChange={() => {}}
+      onChange={() => {}}
+      onSend={onSend}
+      onMCPCommand={onMCPCommand}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+  expect(onMCPCommand).toHaveBeenCalledTimes(opens ? 1 : 0);
+  expect(onSend).toHaveBeenCalledTimes(opens ? 0 : 1);
 });
 
 test("generating shows stop and calls onStop", () => {
@@ -1097,6 +1187,19 @@ test("send with attached file passes files to onSend", async () => {
   await waitFor(() => screen.getByText("img.png"));
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   expect(onSend).toHaveBeenCalledWith("describe this", [file]);
+  vi.unstubAllGlobals();
+});
+
+test("Tab queues the alternate mode and clears attached images", async () => {
+  stubMatchMediaMobile(false);
+  const onQueue = vi.fn();
+  render(<Composer value="inspect this" isEmpty={false} generating={true} mode="agent" modes={["agent"]} llmModelMultimodal={true} queueMode="steer" onModeChange={() => {}} onChange={() => {}} onSend={() => {}} onQueue={onQueue} />);
+  const file = new File(["image"], "img.png", { type: "image/png" });
+  fireEvent.change(screen.getByTestId("composer-file-input"), { target: { files: [file] } });
+  await waitFor(() => screen.getByText("img.png"));
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Tab" });
+  expect(onQueue).toHaveBeenCalledWith("inspect this", "after_turn", [file]);
+  expect(screen.queryByText("img.png")).toBeNull();
   vi.unstubAllGlobals();
 });
 
@@ -2440,5 +2543,152 @@ test("a keyCode 229 long after a composition ended still takes the @ row", async
   fireEvent.keyDown(ta, { key: "Enter", keyCode: 229 });
   expect(onChange).toHaveBeenLastCalledWith("@README.md ");
   now.mockRestore();
+  vi.unstubAllGlobals();
+});
+
+// The picker's FileList is live: clearing the input empties it. React runs a
+// state update later whenever the app has other updates queued - as it does
+// all through a running turn - so the files must be copied before the input is
+// cleared, or an image picked during a turn silently goes missing.
+test("files picked from the dialog survive the input being cleared before the update runs", () => {
+  stubMatchMediaMobile(false);
+  let updater: unknown = null;
+  render(
+    <Composer
+      value=""
+      isEmpty={true}
+      mode="agent"
+      modes={["agent"]}
+      llmModelMultimodal={true}
+      attachedFiles={[]}
+      onAttachedFilesChange={(u) => {
+        updater = u;
+      }}
+      onModeChange={() => {}}
+      onChange={() => {}}
+      onSend={() => {}}
+    />,
+  );
+  const input = screen.getByTestId("composer-file-input") as HTMLInputElement;
+  const file = new File(["image"], "shot.png", { type: "image/png" });
+  const live: File[] = [file];
+  Object.defineProperty(input, "files", { configurable: true, get: () => live });
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get: () => (live.length ? "C:\\fakepath\\shot.png" : ""),
+    set: (v: string) => {
+      if (v === "") live.length = 0;
+    },
+  });
+  fireEvent.change(input);
+  // The update runs only now, after the handler cleared the input.
+  const next = typeof updater === "function" ? (updater as (p: File[]) => File[])([]) : updater;
+  expect(next).toEqual([file]);
+  vi.unstubAllGlobals();
+});
+
+// A draft emptied from outside - a send, a queued prompt - fires no change
+// event on the textarea, so the menu opened on that draft has to close by
+// itself instead of hanging over the empty composer.
+function stubCommandCatalog() {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: true,
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+    onchange: null,
+  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () =>
+          String(url).includes("/coddy/commands")
+            ? {
+                object: "coddy.commands",
+                items: [{ name: "compact", description: "Summarize history" }],
+              }
+            : { items: [], has_more: false, page: 1 },
+      }),
+    ),
+  );
+}
+
+function SentDraftHarness(props: {
+  generating?: boolean;
+  onSend: (text: string) => void;
+  onQueue?: (text: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <Composer
+      value={value}
+      isEmpty={false}
+      mode="agent"
+      modes={["agent", "plan"]}
+      onModeChange={() => {}}
+      onChange={setValue}
+      generating={props.generating ?? false}
+      onStop={() => {}}
+      queueMode="after_turn"
+      {...(props.onQueue
+        ? {
+            onQueue: (text: string) => {
+              props.onQueue?.(text);
+              setValue("");
+            },
+          }
+        : {})}
+      onSend={(text: string) => {
+        props.onSend(text);
+        setValue("");
+      }}
+    />
+  );
+}
+
+async function openCommandMenu(ta: HTMLElement, draft: string) {
+  fireEvent.change(ta, {
+    target: { value: draft, selectionStart: draft.length, selectionEnd: draft.length },
+  });
+  await waitFor(() => {
+    expect(screen.getByTestId("command-row-compact")).toBeTruthy();
+  });
+}
+
+test("Send clicked while the slash menu is open closes the menu", async () => {
+  stubCommandCatalog();
+  const onSend = vi.fn();
+  render(<SentDraftHarness onSend={onSend} />);
+  const ta = screen.getByRole("textbox", { name: "Message" });
+  await openCommandMenu(ta, "/compact");
+
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+  expect(onSend).toHaveBeenCalledWith("/compact");
+  expect((ta as HTMLTextAreaElement).value).toBe("");
+  await waitFor(() => {
+    expect(screen.queryByTestId("command-row-compact")).toBeNull();
+  });
+  vi.unstubAllGlobals();
+});
+
+test("a draft queued while the slash menu is open closes the menu", async () => {
+  stubCommandCatalog();
+  const onQueue = vi.fn();
+  render(<SentDraftHarness generating onSend={() => {}} onQueue={onQueue} />);
+  const ta = screen.getByRole("textbox", { name: "Message" });
+  await openCommandMenu(ta, "/compact");
+
+  fireEvent.click(screen.getByRole("button", { name: /queue/i }));
+
+  expect(onQueue).toHaveBeenCalledWith("/compact");
+  await waitFor(() => {
+    expect(screen.queryByTestId("command-row-compact")).toBeNull();
+  });
   vi.unstubAllGlobals();
 });

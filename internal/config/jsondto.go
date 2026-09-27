@@ -29,6 +29,13 @@ type ConfigJSON struct {
 	UI           UIJSON           `json:"ui,omitempty"`
 	Scheduler    SchedulerJSON    `json:"scheduler,omitempty"`
 	Gateways     GatewaysJSON     `json:"gateways,omitempty"`
+	// Revision names the configuration a GET /coddy/config document was read from.
+	// It is no setting: a client sends the document back with it unchanged, so a PUT
+	// can tell the values the client changed from the ones it only read, even when
+	// the live configuration moved in between (another save, the agent's
+	// config_commit, a hand edit). A document without one is measured against the
+	// configuration live when the PUT arrives.
+	Revision string `json:"revision,omitempty"`
 }
 
 // GatewaysJSON mirrors GatewayConfig for JSON APIs.
@@ -106,6 +113,7 @@ type ModelJSON struct {
 // llm_first_token_timeout_ms (0 disables the silence guard) and
 // llm_stream_idle_timeout_ms (0 disables the stall guard).
 type AgentJSON struct {
+	QueueMode              string `json:"queue_mode,omitempty"`
 	Model                  string `json:"model"`
 	MaxTurns               int    `json:"max_turns,omitempty"`
 	LLMRetryMax            *int   `json:"llm_retry_max,omitempty"`
@@ -205,9 +213,12 @@ type ToolWebSearchJSON struct {
 	BraveAPIKey          string   `json:"brave_api_key,omitempty"`
 }
 
-// ToolHTTPRequestJSON mirrors ToolHTTPRequest for JSON APIs.
+// ToolHTTPRequestJSON mirrors ToolHTTPRequest for JSON APIs. DefaultHeaders
+// travels both ways, like brave_api_key: the settings screen edits the headers,
+// and config_get is what keeps their values from the model.
 type ToolHTTPRequestJSON struct {
-	Allowlist []string `json:"allowlist,omitempty"`
+	Allowlist      []string          `json:"allowlist,omitempty"`
+	DefaultHeaders map[string]string `json:"default_headers,omitempty"`
 }
 
 // ToolBackgroundJSON mirrors ToolBackground for JSON APIs.
@@ -464,6 +475,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		out.Models = append(out.Models, mj)
 	}
 	out.Agent = AgentJSON{
+		QueueMode:              c.Agent.QueueMode,
 		Model:                  c.Agent.Model,
 		MaxTurns:               c.Agent.MaxTurns,
 		LLMRetryMax:            cloneIntPtr(c.Agent.LLMRetryMax),
@@ -536,7 +548,8 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 			PublicHost: c.Tools.PreviewServer.PublicHost,
 		},
 		HTTPRequest: ToolHTTPRequestJSON{
-			Allowlist: append([]string(nil), c.Tools.HTTPRequest.Allowlist...),
+			Allowlist:      append([]string(nil), c.Tools.HTTPRequest.Allowlist...),
+			DefaultHeaders: cloneStringMap(c.Tools.HTTPRequest.DefaultHeaders),
 		},
 	}
 	out.Logger = LoggerJSON{
@@ -691,6 +704,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		cfg.Models = append(cfg.Models, me)
 	}
 	cfg.Agent = Agent{
+		QueueMode:              j.Agent.QueueMode,
 		Model:                  j.Agent.Model,
 		MaxTurns:               j.Agent.MaxTurns,
 		LLMRetryMax:            cloneIntPtr(j.Agent.LLMRetryMax),
@@ -763,7 +777,8 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 			PublicHost: j.Tools.PreviewServer.PublicHost,
 		},
 		HTTPRequest: ToolHTTPRequest{
-			Allowlist: append([]string(nil), j.Tools.HTTPRequest.Allowlist...),
+			Allowlist:      append([]string(nil), j.Tools.HTTPRequest.Allowlist...),
+			DefaultHeaders: cloneStringMap(j.Tools.HTTPRequest.DefaultHeaders),
 		},
 	}
 	cfg.Logger = Logger{

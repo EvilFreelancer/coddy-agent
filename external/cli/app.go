@@ -72,15 +72,28 @@ type App struct {
 	status *tui.Container
 	plan   *planWidget
 	// queue shows the follow-ups waiting for the running turn (queue.go).
-	queue      *queueWidget
-	editorWrap *tui.Container
-	editor     *tui.Editor
-	foot       *footer
+	queue                 *queueWidget
+	queuePreference       session.QueueMode
+	pendingQueueText      string
+	pendingQueueAlternate bool
+	editorWrap            *tui.Container
+	editor                *tui.Editor
+	foot                  *footer
 
-	spinner       *tui.Loader
-	stepStatus    liveStatus
-	stepBlocked   string
-	turnActive    bool
+	spinner     *tui.Loader
+	stepStatus  liveStatus
+	stepBlocked string
+	turnActive  bool
+	// mcpConnected of mcpTotal configured MCP servers have answered while
+	// mcpPending (mcp_status.go); mcpReported remembers the servers whose
+	// failure or hold was already said in the visible transcript.
+	mcpConnected int
+	mcpTotal     int
+	mcpPending   bool
+	mcpReported  map[string]bool
+	// mcpGeneration is the dial the shown progress belongs to; an update of
+	// an older dial that arrives late is dropped (mcp_status.go).
+	mcpGeneration uint64
 	turnSessionID string
 	// The running turn's own numbers, which lead the status line (status.go): when it
 	// started, the tokens the model has generated in it (acp.TurnProgressUpdate) and
@@ -248,8 +261,16 @@ func (a *App) buildTree() {
 	a.status = &tui.Container{}
 	a.plan = newPlanWidget(a.theme)
 	a.queue = newQueueWidget(a.theme)
+	a.queuePreference = session.QueueMode(a.config().Agent.QueueMode)
 	a.editor = tui.NewEditor(a.term, tui.EditorTheme{BorderColor: a.theme.FgFn(roleBorderMuted)}, 0)
 	a.editor.OnSubmit = a.onSubmit
+	a.editor.OnAlternateSubmit = func(text string) bool {
+		if text == "" || (!a.turnActive && !a.remoteTurnActive) {
+			return false
+		}
+		a.submitQueueChoice(text, true)
+		return true
+	}
 	a.editor.OnChange = a.onEditorChange
 	a.editorWrap = &tui.Container{}
 	a.editorWrap.AddChild(a.editor)
@@ -395,6 +416,7 @@ func (a *App) adoptSession(id string, modes *acp.ModeState, opts []acp.ConfigOpt
 		a.modeID = modes.CurrentModeID
 	}
 	a.configOpts = opts
+	permission := ""
 	for _, opt := range opts {
 		if opt.ID == "model" {
 			a.modelID = opt.CurrentValue
@@ -402,6 +424,18 @@ func (a *App) adoptSession(id string, modes *acp.ModeState, opts []acp.ConfigOpt
 		if opt.ID == "reasoning" {
 			a.reasoning = opt.CurrentValue
 		}
+		if opt.ID == "permission_mode" {
+			permission = opt.CurrentValue
+		}
+	}
+	// The footer names the permission mode of the session on screen, never
+	// the one of the session the console left (#362). What a session entered
+	// has changed for its next turns arrives with its next snapshot.
+	switch {
+	case switched:
+		a.foot.SetSettings(permission, nil)
+	case permission != "":
+		a.foot.SetPermission(permission)
 	}
 	if a.modelID == "" {
 		a.modelID = a.config().Agent.Model
@@ -444,6 +478,17 @@ func (a *App) populateHeader() {
 		mcpNames = append(mcpNames, srv.Name)
 	}
 	a.header.SetSections(contextFiles, skillNames, rulesCount, mcpNames)
+	a.seedMCPStatus()
+}
+
+// initialTurnStatus is the first step of a turn: waiting for the model, or,
+// while the session's configured MCP servers are still connecting, the wait
+// for their tool list that comes before it.
+func (a *App) initialTurnStatus() liveStatus {
+	if a.mcpPending {
+		return newWorkingStatus(statusConnectingMCP, mcpStatusStep)
+	}
+	return newWaitingStatus()
 }
 
 // Run drives the UI loop until quit. The terminal must already be started.
@@ -621,6 +666,27 @@ func (a *App) handleGlobalKey(data []byte) bool {
 	if a.modal != nil {
 		return false
 	}
+	if a.pendingQueueText != "" {
+		switch key.String() {
+		case "1", "2":
+			mode := session.QueueModeSteer
+			if key.String() == "2" {
+				mode = session.QueueModeAfterTurn
+			}
+			text, alternate := a.pendingQueueText, a.pendingQueueAlternate
+			a.pendingQueueText = ""
+			a.queuePreference = mode
+			if alternate {
+				mode = oppositeQueueMode(mode)
+			}
+			a.enqueuePromptWithMode(text, mode, true)
+			return true
+		case "escape":
+			a.editor.SetText(a.pendingQueueText)
+			a.pendingQueueText = ""
+			return true
+		}
+	}
 	switch key.String() {
 	case "escape":
 		if a.editor.AutocompleteOpen() {
@@ -778,7 +844,7 @@ func (a *App) submitPrompt(text string) {
 		// The moment an operator knows most about what the agent should do next
 		// is while it is working, so a second prompt joins the queue the turn
 		// reads at its next step instead of being refused (queue.go).
-		a.enqueuePrompt(text)
+		a.submitQueueChoice(text, false)
 		return
 	}
 	if a.shellActive {
@@ -800,11 +866,8 @@ func (a *App) submitPrompt(text string) {
 // background wake waits on it (background.go), so the waker starts at most one
 // turn at a time and hears a busy session as busy.
 func (a *App) startTurnWorker(params acp.SessionPromptParams, opts *session.PromptRunOpts, done chan<- error) {
-	if a.remoteURL == "" {
-		a.setQueueRows(nil)
-	}
 	a.curAssistant = nil
-	a.stepStatus = newWaitingStatus()
+	a.stepStatus = a.initialTurnStatus()
 	a.stepBlocked = ""
 	a.turnStartedAt = time.Now()
 	a.turnTokens = 0
@@ -1275,6 +1338,7 @@ func (a *App) resetTranscript() {
 	a.remoteTurnActive, a.remoteActivityRevision = false, 0
 	a.queue.Reset()
 	a.chat.Clear()
+	a.mcpReported = nil
 	a.plan.SetEntries(nil)
 	a.toolBoxes = map[string]*toolBox{}
 	a.curShell, a.lastShell = nil, nil
@@ -1349,6 +1413,7 @@ func (a *App) slashCatalog() []tui.AutocompleteItem {
 		tui.AutocompleteItem{Value: "queue", Label: "queue", Description: "List, drop or clear the messages queued for the running turn"},
 		tui.AutocompleteItem{Value: "usage", Label: "usage", Description: "Show the provider's account usage and limits"},
 		tui.AutocompleteItem{Value: "tasks", Label: "tasks", Description: "List the session's background tasks, read their output, stop one"},
+		tui.AutocompleteItem{Value: "mcp", Label: "mcp", Description: "Manage MCP servers, tools and workspace trust"},
 		tui.AutocompleteItem{Value: "docs", Label: "docs", Description: "Search and read Coddy's built-in documentation (F1); /docs <words or page>"},
 		tui.AutocompleteItem{Value: "quit", Label: "quit", Description: "Exit coddy"},
 	)

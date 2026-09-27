@@ -56,11 +56,11 @@ export const messagesEn: Record<string, string> = {
   "settings.fieldHint.aria": "About {label}",
   "settings.fieldHint.ariaGeneric": "About this field",
   "settings.loading": "Loading…",
-  "settings.toast.saved": "Saved all sections. In-process config reloaded.",
   "settings.reload.title": "Reload from server",
   "settings.reload.aria": "Reload configuration from server",
   "settings.save.title": "Save all sections",
   "settings.save.aria": "Save all configuration sections",
+  "settings.save.saved": "Saved",
   "settings.error.schemaLoadFailed": "schema",
   "settings.error.configLoadFailed": "config",
   "settings.error.validationFailed": "validation failed",
@@ -141,6 +141,10 @@ export const messagesEn: Record<string, string> = {
   "settings.item.models": "Model settings",
   "settings.array.backTitle": "Back to list",
   "settings.array.empty": "Nothing here yet. Use Add to create one.",
+  "settings.map.namePlaceholder": "Name",
+  "settings.map.valuePlaceholder": "Value",
+  "settings.map.nameAria": "{label} {n}: name",
+  "settings.map.valueAria": "{label} {n}: value",
 
   "settings.field.apiBaseFallback": "API base URL",
   "settings.field.modelIdFallback": "Model id",
@@ -270,6 +274,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.agent.model.label": "Default model",
   "settings.schema.agent.model.desc":
     "Logical model id from the models list used when the client omits a model.",
+  "settings.schema.agent.queue_mode.label": "Queue mode",
+  "settings.schema.agent.queue_mode.desc":
+    "What Enter does with a message written while a turn runs: steer joins the running turn at its next step, after_turn starts a prompt of its own after the answer. Tab sends the other way. Unset, the browser and the console ask on the first such message.",
   "settings.schema.agent.max_turns.label": "Max turns",
   "settings.schema.agent.max_turns.desc":
     "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request; 0 means no limit.",
@@ -369,6 +376,15 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.tools.preview_server.public_host.ph": "The bind host",
   "settings.schema.tools.websearch.brave_api_key.ph": "Read from BRAVE_API_KEY",
   "settings.schema.tools.websearch.searxng_url.ph": "http://localhost:8888",
+  "settings.schema.tools.http_request.label": "HTTP requests",
+  "settings.schema.tools.http_request.desc":
+    "Policy of the http_request tool, the agent's curl: where it goes without asking and the headers every request sends. Under ask and accept_edits a request asks unless its destination is allowed here or was approved in the session; bypass never asks.",
+  "settings.schema.tools.http_request.allowlist.label": "Allowlist",
+  "settings.schema.tools.http_request.allowlist.desc":
+    'Destinations reached without asking: a host (api.github.com), *.example.com, an origin (http://localhost:8080) or an address prefix (https://api.example.com/v1/); "*" allows all. Covers uploads and an unchecked certificate; a proxy needs its own entry, and a saved response follows the write policy.',
+  "settings.schema.tools.http_request.default_headers.label": "Default headers",
+  "settings.schema.tools.http_request.default_headers.desc":
+    "Headers every request sends unless the call names them itself, such as a browser User-Agent for a site that turns tools away. A call's own headers win, and an empty value leaves a header out. They go to every destination, so keep credentials out unless that is the intent; Host, Content-Type, Content-Length, Transfer-Encoding, the hop-by-hop headers and Proxy-Authorization are refused, and webfetch and the model providers never send these.",
 
   "settings.schema.subagents.desc":
     "User-defined child agents the model can delegate to with spawn_agent. Definitions are markdown files with YAML frontmatter; each run is a background task of the parent session with its own child session and transcript.",
@@ -443,7 +459,7 @@ export const messagesEn: Record<string, string> = {
     "Hard limit of one memory run, capped by the background task pool's maximum (default 300).",
   "settings.schema.memory.keep_runs.label": "Runs kept per session",
   "settings.schema.memory.keep_runs.desc":
-    "Finished memory runs kept in the Tasks drawer per session, task record and child transcript alike; 0 keeps all (default 20).",
+    "Finished memory runs kept in the Tasks panel per session, task record and child transcript alike; 0 keeps all (default 20).",
   "settings.schema.memory.recall_max_turns.label": "Recall max turns",
   "settings.schema.memory.recall_max_turns.desc":
     "Bounds the memory subagent's rounds together with persist max turns; the cap is the larger of the two.",
@@ -615,6 +631,8 @@ export const messagesEn: Record<string, string> = {
   "codexAuth.connected.viaCli":
     "Connected via the Codex CLI login on this server.",
   "codexAuth.connected.withChatGpt": "Connected with ChatGPT.",
+  "codexAuth.cliLoginOtherRow":
+    "The Codex CLI login on this server is used by the row {row}. Sign in to give this row an account of its own.",
   "codexAuth.fieldLabel": "ChatGPT account",
   "codexAuth.description":
     "Codex uses your ChatGPT subscription through OAuth. Credentials are stored on the Coddy server and are never added to config.yaml.",
@@ -643,6 +661,8 @@ export const messagesEn: Record<string, string> = {
   "neuralDeepAuth.connected": "Signed in to NeuralDeep ({masked}).",
   "neuralDeepAuth.shadowedByKey":
     "An explicit API key is configured, so requests use it instead of this login. Clear the api_key field to use the login.",
+  "neuralDeepAuth.shadowedByEnv":
+    "The {env} environment variable is set on the Coddy server, so requests use it instead of this login. Unset it, or give the provider a name whose variable is not set.",
   "neuralDeepAuth.hubMismatch":
     "This login was issued by {hub}, but {endpoint} is served by a different hub, so requests with it are rejected. Sign in again to get a key for this endpoint.",
   "neuralDeepAuth.enterCode":
@@ -672,6 +692,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.error.delete": "Failed to delete {name}",
   "mcp.error.invalidEntry": "Invalid entry.",
   "mcp.error.saveServer": "Failed to save server",
+  "mcp.error.load": "Could not load the MCP servers: {message}",
   "mcp.discovery.legend": "MCP discovery",
   "mcp.discovery.projectServersLabel": "Project servers",
   "mcp.servers.legend": "MCP servers",
@@ -718,7 +739,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.discovery.description":
     "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from config.yaml and ~/.coddy/mcp.json are yours and are never gated.",
   "mcp.servers.description":
-    "Model Context Protocol servers from three levels: config.yaml (mcp_servers) and the global ~/.coddy/mcp.json, merged with the local ./.coddy/mcp.json of the project (Cursor-compatible; later levels override by name). Switch off a whole server or individual tools — toggles persist into the file that defines the server and reach running sessions on their next turn.",
+    "Model Context Protocol servers from three levels: config.yaml (mcp_servers) and the global ~/.coddy/mcp.json, merged with the local ./.coddy/mcp.json of the project (Cursor-compatible; later levels override by name). Switch off a whole server or individual tools. A global server's switch is saved in the file that defines it, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn.",
   "mcp.empty":
     "No MCP servers configured. Add one here (saved to the local ./.coddy/mcp.json or the global ~/.coddy/mcp.json) or declare it under mcp_servers in config.yaml.",
   "mcp.note.declaredBy":
@@ -980,6 +1001,9 @@ export const messagesEn: Record<string, string> = {
   "sessions.tags.addHint": "Enter files it as {tag}",
   "sessions.tags.add": "Add a tag",
   "sessions.tags.failed": "The tags were not saved",
+  "sessions.archiveFailed": "The conversation was not archived",
+  "sessions.unarchiveFailed":
+    "The conversation was not taken out of the archive",
   "sessions.tags.editRow": "Edit the tags",
   "sessions.tags.done": "Done",
   "sessions.tagFilterClear": "Clear the tag filter",
@@ -1021,6 +1045,10 @@ export const messagesEn: Record<string, string> = {
   "chat.heroVerb.plan": "plan",
   "chat.runPlanMessage": "Implement the plan.",
   "chat.scrollToBottom": "Scroll to the latest message",
+  "chat.transcriptEarlier.show": "Show earlier messages",
+  "chat.transcriptEarlier.loading": "Loading earlier messages…",
+  "chat.transcriptEarlier.failed": "Earlier messages did not load.",
+  "chat.transcriptEarlier.retry": "Retry",
   "chat.contextTitle": "Context",
   "chat.contextClose": "Close",
   "chat.contextCloseBreakdown": "Close context breakdown",
@@ -1044,6 +1072,19 @@ export const messagesEn: Record<string, string> = {
   "composer.queueSend": "Queue this message",
   "composer.queueLabel": "Queued messages",
   "composer.queueRemove": "Remove from the queue",
+  "composer.queueModeSteer": "Steer",
+  "composer.queueModeAfterTurn": "After turn",
+  "composer.queueChoiceLabel": "Choose the default queue mode",
+  "composer.queueChoiceQuestion":
+    "When a turn is running, how should Enter send your message?",
+  "composer.queueChoiceSteer": "Steer now",
+  "composer.queueChoiceAfterTurn": "After this turn",
+  "composer.queueModeSteerTitle":
+    "Joins the running turn at its next step. Click to send it after the answer instead.",
+  "composer.queueModeAfterTurnTitle":
+    "Starts a prompt of its own after the answer. Click to join the running turn instead.",
+  "composer.queueImages.one": "{count} image attached",
+  "composer.queueImages.other": "{count} images attached",
   "composer.queueFull":
     "The queue is full: wait for the agent to read what is waiting.",
   "composer.attachReadFailed":
@@ -1153,6 +1194,7 @@ export const messagesEn: Record<string, string> = {
   "composer.mentionKindScheme": "search",
   "composer.docsCommand":
     "Open the built-in documentation: /docs [page or words]",
+  "composer.mcpCommand": "Open MCP server settings",
   "composer.mentionKindDoc": "docs",
   "composer.mentionSchemeSession": "Another session, with its latest messages",
   "composer.mentionSchemeRule": "A project rule",
@@ -1458,12 +1500,14 @@ export const messagesEn: Record<string, string> = {
   "structuredTool.noTasks": "No background tasks",
   "structuredTool.noLeftovers": "No processes left over from an earlier run",
   "structuredTool.stillRunning": "Still running after a {seconds}s wait",
-  "structuredTool.earlierDropped": "Earlier output was dropped; the full log is in the session bundle",
+  "structuredTool.earlierDropped":
+    "Earlier output was dropped; the full log is in the session bundle",
   "structuredTool.noOutput": "No output yet",
   "structuredTool.stops": "Stops",
   "structuredTool.stopsAfter": "{seconds}s after it started",
   "structuredTool.stopsManually": "when it is stopped",
-  "structuredTool.alreadyRunning": "The server for this folder was already running",
+  "structuredTool.alreadyRunning":
+    "The server for this folder was already running",
   "structuredTool.noDocsHits": "No section matches",
   "structuredTool.docsContents": "Documentation contents",
   "structuredTool.docsLines": "lines {from}-{to} of {total}",

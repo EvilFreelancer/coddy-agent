@@ -1191,6 +1191,49 @@ test("an MCP call names the server and the tool, never the registry id", () => {
   expect(screen.getByTestId("tool-summary-target")).toHaveTextContent("Crash on start");
 });
 
+test("the target, the failure marker and the duration trail the label as one group", () => {
+  // The head wraps: a label that leaves no room on its line - an MCP tool names
+  // its server and its tool in a sentence - keeps the line, and the group moves
+  // under it as a whole instead of the duration landing on a line of its own.
+  const { container } = render(
+    <ToolCallMessage
+      toolCallId="tc-mcp-trail"
+      title="github__search_repositories_with_extended_filters"
+      status="failed"
+      argsText={JSON.stringify({ query: "language:go" })}
+      resultText="boom"
+      durationMs={12}
+    />,
+  );
+  const head = container.querySelector(".thinking-head");
+  expect([...(head?.children ?? [])].map((el) => el.className)).toEqual([
+    "thinking-label",
+    "thinking-trail thinking-trail--failed",
+  ]);
+  expect(head?.querySelector(".thinking-label")?.textContent).toBe(
+    "calling search_repositories_with_extended_filters on the MCP server github",
+  );
+  const trail = head?.querySelector(".thinking-trail");
+  expect([...(trail?.children ?? [])].map((el) => el.className)).toEqual([
+    "tool-summary-target",
+    "tool-failed-marker",
+    "thinking-dur",
+  ]);
+});
+
+test("a row with nothing to trail its label renders no empty group", () => {
+  const { container } = render(
+    <ToolCallMessage
+      toolCallId="tc-question"
+      title="question"
+      status="completed"
+      argsText={JSON.stringify({ questions: [] })}
+      resultText=""
+    />,
+  );
+  expect(container.querySelector(".thinking-trail")).toBeNull();
+});
+
 test("a tool outside the catalogue keeps its own id in the summary row", () => {
   render(
     <ToolCallMessage
@@ -1412,6 +1455,56 @@ test("the row spells a path against the worktree it lives in, the tooltip keeps 
     "title",
     "/storage/Repository/coddy/coddy-agent/.coddy/worktrees/fix-session-stop-queue/DESIGN.md",
   );
+});
+
+test("a read of part of a file shows the lines next to the path, like a mention", () => {
+  const { container } = render(
+    <ToolCallMessage
+      toolCallId="tc-read-range"
+      title="read"
+      kind="read"
+      status="completed"
+      pathRoots={["/storage/Repository/coddy/coddy-agent"]}
+      argsText={JSON.stringify({
+        path: "/storage/Repository/coddy/coddy-agent/internal/tools/fs/read.go",
+        offset: 120,
+        limit: 61,
+      })}
+      resultText="ok"
+      durationMs={3}
+    />,
+  );
+  const target = screen.getByTestId("tool-summary-target");
+  expect(target.textContent).toBe("internal/tools/fs/read.go:120-180");
+  expect(target).toHaveAttribute(
+    "title",
+    "/storage/Repository/coddy/coddy-agent/internal/tools/fs/read.go:120-180",
+  );
+  // The path is what gives way to the ellipsis; the range never does.
+  expect(container.querySelector(".tool-summary-target-path")?.textContent).toBe(
+    "internal/tools/fs/read.go",
+  );
+  expect(container.querySelector(".tool-summary-target-range")?.textContent).toBe(
+    ":120-180",
+  );
+});
+
+test("a read of the whole file shows the path alone, as before", () => {
+  const { container } = render(
+    <ToolCallMessage
+      toolCallId="tc-read-whole"
+      title="read"
+      kind="read"
+      status="completed"
+      argsText={JSON.stringify({ path: "internal/tools/fs/read.go" })}
+      resultText="ok"
+      durationMs={3}
+    />,
+  );
+  const target = screen.getByTestId("tool-summary-target");
+  expect(target.textContent).toBe("internal/tools/fs/read.go");
+  expect(target).toHaveAttribute("title", "internal/tools/fs/read.go");
+  expect(container.querySelector(".tool-summary-target-range")).toBeNull();
 });
 
 test("a command is never respelt against the session directory", () => {

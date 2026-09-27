@@ -197,6 +197,11 @@ func printUsage(w io.Writer) {
         the swarm relay, the cron scheduler)
   %[1]s serve -d | --daemon (the same, in the background under a dispatcher
         that starts it again if it dies)
+  %[1]s serve install (Linux: run coddy serve as a systemd user service in
+        ~/Coddy - installs the unit when the package did not, enables and
+        starts it)
+  %[1]s serve uninstall (stop and disable that service and remove the unit
+        that install wrote; ~/.coddy and ~/Coddy are kept)
   %[1]s serve status | stop | restart [--home DIR]
   %[1]s serve set-password [--user NAME] [--config PATH] [--home DIR] (write the web
         UI sign-in account into config.yaml; the password is read from the
@@ -214,7 +219,7 @@ func printUsage(w io.Writer) {
   %[1]s plugin remove <name>
   %[1]s plugin enable <name> | disable <name>
   %[1]s mcp list | trust <name> | untrust <name> [--cwd DIR]
-  %[1]s providers list | login <name> [--browser] [--devin-cli] [--no-config] [--api-base URL] | logout <name> [--home DIR]
+  %[1]s providers list | login <name> [--type neuraldeep|codex|devin] [--browser] [--devin-cli] [--no-config] [--api-base URL] | logout <name> [--home DIR]
   %[1]s rules list [--cwd DIR]
   %[1]s agents list [--cwd DIR]
   %[1]s agents trust <name> [--cwd DIR]

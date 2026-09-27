@@ -28,6 +28,7 @@ import type { BackgroundTask } from "../tasks/types";
 import {
   buildToolCallPreview,
   toolCallTargetIsPath,
+  toolCallTargetRange,
   toolCallTargetText,
 } from "../chat/permissionToolPreview";
 import type { TodoPlanEntry } from "../chat/todoToolPreview";
@@ -228,6 +229,9 @@ function WebSearchEngines(props: { report: WebSearchReport }) {
 
 export const ToolCallMessage = memo(function ToolCallMessage(props: {
   toolCallId: string;
+  /** The transcript row id, stamped on the row so the transcript window can
+   *  find it on screen. */
+  rowId?: string;
   title?: string | undefined;
   kind?: string | undefined;
   status: string;
@@ -328,6 +332,13 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
         ? relativeToolTarget(summaryTargetFull, props.pathRoots || [])
         : summaryTargetFull,
     [props.pathRoots, summaryTargetFull, targetContext],
+  );
+  // The lines a read takes, in a mention's spelling (":120-180"), so a collapsed
+  // row tells two pages of one file apart. Empty for a whole file and for every
+  // tool but read.
+  const summaryTargetRange = useMemo(
+    () => (summaryTargetFull ? toolCallTargetRange(targetContext) : ""),
+    [summaryTargetFull, targetContext],
   );
   const isPatchTool = rawNameLower === "apply_patch";
   const isWriteTool =
@@ -681,11 +692,73 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
     !!toggleButton ||
     !!backgroundTask;
 
+  // What trails the label on the summary row: the target, the failure marker and
+  // the duration. They travel together (.thinking-trail), so a label that leaves no
+  // room on its line moves all three under it rather than the duration alone.
+  const trailElements: ReactElement[] = [];
+  if (summaryTarget && summaryTargetRange) {
+    // The path gives way to the ellipsis and the range never does: a long path
+    // clipped at its end would take the range with it.
+    trailElements.push(
+      <span
+        key="target"
+        className="tool-summary-target tool-summary-target--ranged"
+        data-testid="tool-summary-target"
+        title={summaryTargetFull + summaryTargetRange}
+      >
+        <span className="tool-summary-target-path">{summaryTarget}</span>
+        <span className="tool-summary-target-range">{summaryTargetRange}</span>
+      </span>,
+    );
+  } else if (summaryTarget) {
+    trailElements.push(
+      <span
+        key="target"
+        className="tool-summary-target"
+        data-testid="tool-summary-target"
+        title={summaryTargetFull}
+      >
+        {summaryTarget}
+      </span>,
+    );
+  }
+  if (status === "failed") {
+    trailElements.push(
+      <span
+        key="failed"
+        className="tool-failed-marker"
+        data-testid="tool-failed-marker"
+      >
+        {t("messages.toolFailedMarker")}
+      </span>,
+    );
+  }
+  if (backgroundTask) {
+    if (backgroundElapsed) {
+      trailElements.push(
+        <span
+          key="dur"
+          className="thinking-dur"
+          data-testid={`tool-bgtask-elapsed-${backgroundTask.id}`}
+        >
+          {backgroundElapsed}
+        </span>,
+      );
+    }
+  } else if (durationLabel.trim() !== "") {
+    trailElements.push(
+      <span key="dur" className="thinking-dur" aria-hidden="true">
+        {durationLabel}
+      </span>,
+    );
+  }
+
   return (
     <div
       className="thinking-row coddy-tool-call-row"
       data-kind={props.kind || ""}
       data-status={props.status}
+      data-row-id={props.rowId}
     >
       <details
         className="thinking-details coddy-tool-details"
@@ -700,35 +773,15 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
             <Chevron className="thinking-chevron" />
             <span className="thinking-head">
               <span className="thinking-label">{displayLabel}</span>
-              {summaryTarget ? (
+              {trailElements.length > 0 ? (
                 <span
-                  className="tool-summary-target"
-                  data-testid="tool-summary-target"
-                  title={summaryTargetFull}
+                  className={
+                    status === "failed"
+                      ? "thinking-trail thinking-trail--failed"
+                      : "thinking-trail"
+                  }
                 >
-                  {summaryTarget}
-                </span>
-              ) : null}
-              {status === "failed" ? (
-                <span
-                  className="tool-failed-marker"
-                  data-testid="tool-failed-marker"
-                >
-                  {t("messages.toolFailedMarker")}
-                </span>
-              ) : null}
-              {backgroundTask ? (
-                backgroundElapsed ? (
-                  <span
-                    className="thinking-dur"
-                    data-testid={`tool-bgtask-elapsed-${backgroundTask.id}`}
-                  >
-                    {backgroundElapsed}
-                  </span>
-                ) : null
-              ) : durationLabel.trim() !== "" ? (
-                <span className="thinking-dur" aria-hidden="true">
-                  {durationLabel}
+                  {trailElements}
                 </span>
               ) : null}
             </span>

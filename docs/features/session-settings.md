@@ -1,6 +1,6 @@
 # Session settings
 
-A session runs on four settings: the model, its reasoning level, the [operating mode](modes.md) and the permission mode. Each of them can be changed from the conversation itself, with a slash command typed in any surface, for the rest of the session or only for the next few turns. The permission dialog can switch the session out of `ask`, and the model can move itself to a stronger or a cheaper model when a step calls for it. Every change goes through one setter in the session manager (`Manager.ApplySessionSettings`, `internal/session/settings.go`), and every surface watching the session - the browser tab, a console, an editor - shows the new values.
+A session runs on four settings: the model, its reasoning level, the [operating mode](modes.md) and the permission mode. Each of them can be changed from the conversation itself, with a slash command typed in any surface, for the rest of the session or only for the next few turns. The permission dialog can switch the session out of `ask`, and the agent changes the model or the reasoning level itself when the user asks it to, never on its own. Every change goes through one setter in the session manager (`Manager.ApplySessionSettings`, `internal/session/settings.go`), and every surface watching the session - the browser tab, a console, an editor - shows the new values.
 
 ## The commands
 
@@ -29,7 +29,7 @@ Commands are read only at the start of what you type, and several may follow one
 
 A change without a flag is the session's and lasts until the next change. A change with `--once` or `--count=N` is counted in turns you start: each prompt you send takes one turn from every override, and that turn keeps the values for its whole length, including the steps after a queued follow-up and after a permission prompt. A background wake and a subagent's turn take nothing. A change for the session clears that setting's turn override, the running turn's included, so the last command you typed is the one that holds.
 
-Turn overrides live in the process's memory: a restart of the console or of `coddy serve` forgets them. The model, the reasoning level and the mode of a session are kept in its `session.json`. The permission mode is not: after a restart every session asks again as `tools.permission_mode` says, so a bypass switched on for one task does not outlive the process.
+The model, the reasoning level (thinking switched off included) and the mode of a session are kept in its `session.json`. Its permission mode and its turn overrides live in the process's memory: a restart of the console or of `coddy serve` forgets them, so after a restart every session asks again as `tools.permission_mode` says and a bypass switched on for one task does not outlive the process. Until then they stay with the session, also while no surface holds it: the console lets go of a session on `/new` and `/resume`, and coming back to it brings its permission mode and its overrides back.
 
 ## What happens when you send one
 
@@ -37,7 +37,9 @@ A message that is nothing but commands runs no turn. The settings are applied, t
 
 A message with text after the commands applies the session-wide changes and runs the text as a turn with the turn-scoped ones. The override travels with that prompt and is installed only once the turn is admitted, so a second tab or a background wake cannot take it first.
 
-While a turn is running, a session-wide command applies at once and any text after it goes to the [message queue](message-queue.md) as an ordinary follow-up. A turn-scoped command with text is refused there (`409 turn_scoped_follow_up` over HTTP), since a queued message has no turn of its own to scope it to. A new model or reasoning level is used from the next model request of the running turn, never in the middle of a stream; the permission mode is read on every tool call; a new operating mode starts with the next turn. A subagent already running keeps what it was spawned with.
+While a turn is running, a session-wide command applies at once and any text after it goes to the [message queue](message-queue.md) as an ordinary follow-up. A turn-scoped command with text is refused there (`409 turn_scoped_follow_up` over HTTP), because the queued message can change mode or be cancelled before delivery, so the command has no stable target turn. A new model or reasoning level is used from the next model request of the running turn, never in the middle of a stream: the answer that was streaming when it changed is finished by the model that started it and stored under that model's name, and the transcript names the new model from the next answer on. The permission mode is read on every tool call; a new operating mode starts with the next turn. A subagent already running keeps what it was spawned with.
+
+A model switched to has its context window read at once, the window its provider's model listing reports included, so the next request - the running turn's next step, or the first request of the next prompt - is measured against it. When the context crosses `compaction.threshold_percent` of the new window, it is compacted before that request ([Compaction](compaction.md#the-context-window)).
 
 ## Thinking off
 
@@ -58,13 +60,13 @@ While the session asks (`ask`), a permission prompt that belongs to the session 
 
 *The permission prompt of a session in `ask`: the session switch sits in red before Reject.*
 
-## The model switches itself
+## Changing the model on request
 
-The model can change its own settings in three ways:
+The agent changes its model or reasoning level with `switch_model` only when the user asks in the current conversation. It does not pick a different model or level for a difficult step or routine work on its own, and it names a summarizer for `compact_context` only when the user named one. A subagent is different: the agent may run a child on another model or reasoning level than its own, which is expected. The system prompt describes `switch_model` only in a turn that is offered it. The related settings have three sources:
 
-- the `switch_model` tool sets the model, the reasoning level or both, from its next request, until the turn ends or, with `scope: session`, for the session. Its description lists the configured models with their levels, so the choice is made among what exists. It is offered in every mode when there is something to switch (more than one model, or one with reasoning levels), and never to a subagent;
+- the `switch_model` tool sets the model, the reasoning level or both, from its next request. A user's request lasts for the session by default, like `/model`; `scope: turn` applies only when the user limited the change to this turn or task. Its description lists the configured models with their levels, so the choice is made among what exists. It is offered in every mode when there is something to switch (more than one model, or one with reasoning levels), and never to a subagent;
 - a skill's frontmatter `model` and `reasoning` (alias `effort`) apply for the rest of the turn, whether you typed `/skill` or the model called `load_skill`, unless the turn already runs on a value set for it by a command or by `switch_model` ([Skills](skills.md#yaml-frontmatter));
-- `spawn_agent` takes `model` and `reasoning` for the child, and a subagent definition takes `reasoning` next to `model`; the child's model is the argument, then the definition's, then the parent's ([Subagents](subagents.md#the-spawn_agent-tool)).
+- `spawn_agent` takes `model` and `reasoning` for the child, which the agent may pick itself, and a subagent definition takes `reasoning` next to `model`; the child's model is the argument, then the definition's, then the parent's ([Subagents](subagents.md#the-spawn_agent-tool)).
 
 A model id or a level the configuration does not offer is an error in a `switch_model` or a `spawn_agent` call, for the model to correct. In a skill or a definition file it is a warning in the agent log, and the session's own value stays.
 
@@ -72,7 +74,7 @@ A model id or a level the configuration does not offer is an error in a `switch_
 
 ### Web UI
 
-The composer's **Mode**, **Permissions** and **Model** selectors show the session's settings as the server has them. The permission chip reads **Ask first**, **Accept edits** or **Bypass**, the last in red; a line next to the selectors lists what is changed for the next turns. A change made anywhere else - a command, the dialog, the model's own `switch_model`, a console on the same session - reaches the tab as `event: session_settings` and moves the selectors. A browser that has not seen the latest change yet does not undo it when it sends: the request carries `metadata.settingsVersion`, and an older version leaves the session's settings alone.
+The composer's **Mode**, **Permissions** and **Model** selectors show the session's settings as the server has them. Entering a session shows its own model, its level (a session running with thinking off shows **Off**) and its permission mode, from the snapshot `GET /coddy/sessions/{id}/messages` answers with. What the start page picked, and the cookies `coddy_llm_model` and `coddy_llm_reasoning` that remember it, are the default of a new chat only: they never replace a session's value on screen, so they never ride into it with the next message. A session with no level of its own, on a model that names no `reasoning_default`, shows the level it runs at, `medium` or else the model's first level, and sends none with the next message, so it is not pinned to a level nobody picked. Where the provider can turn thinking off, the **Reasoning** menu of the session offers **Off** as well. A setting the running turn holds (`--once`, `--count=N`) stays on the line of overrides, and the selectors keep the session's own value. The permission chip reads **Ask first**, **Accept edits** or **Bypass**, the last in red; a line next to the selectors lists what is changed for the next turns. A change made anywhere else - a command, the dialog, a user-requested `switch_model` call, a console on the same session - reaches the tab as `event: session_settings` and moves the selectors. A browser that has not seen the latest change yet does not undo it when it sends: the request carries `metadata.settingsVersion`, and an older version leaves the session's settings alone.
 
 ![The composer after a bypass from the dialog: the selectors end with a red Bypass chip, followed by "stub/qwen3.8-27b, 2 turns left"](../assets/session-settings/session-settings-composer-bypass-dark-1280.png)
 
@@ -86,7 +88,7 @@ Typing `/` lists the commands with their arguments. Picking `/model`, `/reasonin
 
 ### Console
 
-The console runs the same commands through the same parser. A bare `/model`, `/reasoning` or `/permissions` opens its picker. The footer shows the permission mode next to the folder, in the warning colour for `bypass`, and a line of the turn overrides under the model.
+The console runs the same commands through the same parser. A bare `/model`, `/reasoning` or `/permissions` opens its picker. The footer shows the permission mode next to the folder, in the warning colour for `bypass`, and a line of the turn overrides under the model. Both belong to the session on screen: after `/new` or `/resume` the footer names the permission mode and the overrides of the session entered.
 
 ![The console after /permissions bypass and a chained /model --once and /reasoning --count=3: three notices, bypass in the footer, and "next turn: model stub/coddy-mini • next 3 turns: reasoning high"](../assets/session-settings/session-settings-console-footer-dark.png)
 
@@ -100,7 +102,7 @@ An editor sends the commands as prompt text, and `available_commands_update` lis
 
 ### Telegram
 
-The bot passes `/model <id>`, `/reasoning`, `/think`, `/nothink`, `/agent`, `/plan` and `/ask` to the session; a command alone is answered with its notice, and a bare `/model` still opens its keyboard. `/permissions` is not a bot command: the bot approves its chat agent's tools itself ([Telegram gateway](../surfaces/gateway.md#commands)).
+The bot passes `/model <id>`, `/reasoning`, `/think`, `/nothink`, `/agent`, `/plan` and `/ask` to the session; a command alone is answered with its notice, and a bare `/model` still opens its keyboard. `/resume` answers with the model and the reasoning level the resumed session runs on (`default` when neither the session nor its model names one), its own and not the model last picked on the bot, which only a fresh chat starts on. `/permissions` is not a bot command: the bot approves its chat agent's tools itself ([Telegram gateway](../surfaces/gateway.md#commands)).
 
 ### HTTP
 

@@ -24,9 +24,10 @@ func SpawnAgentTool() *tooling.Tool {
 			Description: "Delegate a self-contained task to a subagent listed in the Subagents section. " +
 				"The child starts with an empty context and sees none of this conversation, so the prompt must carry everything it needs. " +
 				"By default the call waits and returns the child's final report; the user does not see that report, so restate what matters in your reply. " +
-				"With background:true it returns a task id at once and you collect the report later with background_wait or background_output " +
-				"(background_stop terminates it). Use it for work that would flood this context or for independent pieces that can run in parallel; " +
-				"do not delegate a one-step task you can do directly.",
+				"With background:true it returns a task id at once, and the finished run wakes you with its report by default, so you can end your turn; " +
+				"background_wait or background_output collect it sooner and background_stop terminates it. Use it for work that would flood this context or for independent pieces that can run in parallel; " +
+				"do not delegate a one-step task you can do directly. " +
+				"A run that stopped before its report (a provider failure, its timeout, its turn limit) keeps its transcript: continue it with resume instead of starting a new subagent on the same task.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -44,7 +45,7 @@ func SpawnAgentTool() *tooling.Tool {
 					},
 					"background": map[string]interface{}{
 						"type":        "boolean",
-						"description": "Return the task id immediately instead of waiting for the report; collect it later with background_wait or background_output",
+						"description": "Return the task id immediately instead of waiting for the report; the finished run wakes you with it by default, or collect it sooner with background_wait or background_output",
 					},
 					"expected_seconds": map[string]interface{}{
 						"type":        "integer",
@@ -65,7 +66,13 @@ func SpawnAgentTool() *tooling.Tool {
 					},
 					"notify_on_finish": map[string]interface{}{
 						"type":        "boolean",
-						"description": "For a background run: wake yourself with the outcome when it finishes, so you can end your turn now",
+						"description": "For a background run: wake yourself with the outcome when it finishes (default true where available); set false explicitly to prevent a wake. A completed result you collect or a task you stop does not wake you again",
+					},
+					"resume": map[string]interface{}{
+						"type": "string",
+						"description": "Continue a finished run of this session instead of starting a new subagent: its task id (bg_...) or its child session id (sess_...) from an earlier spawn_agent result. " +
+							"The child keeps its transcript and takes prompt as its next message, so say only what it should do now (for example, go on from where it stopped). " +
+							"agent must name the same subagent; a run still in flight cannot be resumed",
 					},
 				},
 				"required": []interface{}{"agent", "prompt"},
@@ -84,7 +91,8 @@ type spawnAgentArgs struct {
 	Background      bool   `json:"background"`
 	ExpectedSeconds int    `json:"expected_seconds"`
 	TimeoutSeconds  int    `json:"timeout_seconds"`
-	NotifyOnFinish  bool   `json:"notify_on_finish"`
+	NotifyOnFinish  *bool  `json:"notify_on_finish"`
+	Resume          string `json:"resume"`
 }
 
 func executeSpawnAgent(ctx context.Context, argsJSON string, env *tooling.Env) (string, error) {
@@ -111,6 +119,7 @@ func executeSpawnAgent(ctx context.Context, argsJSON string, env *tooling.Env) (
 		Background:      args.Background,
 		ExpectedSeconds: args.ExpectedSeconds,
 		TimeoutSeconds:  args.TimeoutSeconds,
-		NotifyOnFinish:  args.NotifyOnFinish,
+		NotifyOnFinish:  args.NotifyOnFinish == nil || *args.NotifyOnFinish,
+		Resume:          strings.TrimSpace(args.Resume),
 	})
 }

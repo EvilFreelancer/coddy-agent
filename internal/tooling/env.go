@@ -26,6 +26,11 @@ type Env struct {
 	// http_request call reaches without a permission prompt.
 	HTTPAllowlist []string
 
+	// HTTPDefaultHeaders is tools.http_request.default_headers: headers every
+	// http_request call sends unless the call names them itself. An empty
+	// value leaves the header out. Nothing but http_request reads them.
+	HTTPDefaultHeaders map[string]string
+
 	// SessionID is the current session identifier (used by plan tools).
 	SessionID string
 
@@ -199,6 +204,13 @@ func (e *Env) CommandAllowed(command string) bool {
 	return false
 }
 
+// ModelChoiceRule is part of the description of the tool arguments that pick
+// the model or the reasoning level the session itself runs on (switch_model)
+// or summarizes with (compact_context): that choice is the user's, and the
+// model never makes it on its own for a hard step or a routine one. A
+// subagent is different - spawn_agent lets the model pick the child's.
+const ModelChoiceRule = "only when the user asked for it"
+
 // SpawnRequest is what the spawn_agent tool asks the runtime to run.
 type SpawnRequest struct {
 	// Agent is the definition name.
@@ -219,6 +231,11 @@ type SpawnRequest struct {
 	ExpectedSeconds int
 	TimeoutSeconds  int
 	NotifyOnFinish  bool
+	// Resume names an earlier run of this session to continue instead of
+	// starting a new child: the task id or the child session id a spawn_agent
+	// result named. The child keeps its transcript and takes Prompt as its
+	// next message.
+	Resume string
 }
 
 // CompactRequest is one compact_context call.

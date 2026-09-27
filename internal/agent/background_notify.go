@@ -111,9 +111,8 @@ func (w Wake) Record(now time.Time) *llm.BackgroundWake {
 // BackgroundWaker turns finished background tasks into agent turns, so a
 // session keeps moving while nobody is watching it.
 //
-// Only tasks the model explicitly marked with notify_on_finish are eligible:
-// the model decides what is worth a turn, so a batch of quick commands cannot
-// each start one behind the operator's back.
+// Tasks with notify_on_finish are eligible unless their outcome was already
+// collected or they were stopped. A batch of nearby completions shares a turn.
 type BackgroundWaker struct {
 	log  *slog.Logger
 	run  RunTurnFunc
@@ -254,6 +253,11 @@ func (w *BackgroundWaker) startTurn(sessionID string, batch []bgtask.Snapshot) b
 		// turn: a wait of minutes must not leave the model a stale batch and a
 		// second turn queued behind it.
 		batch = w.absorbPending(sessionID, batch)
+		batch = w.unclaimedResults(sessionID, batch)
+		if len(batch) == 0 {
+			w.refundWake(sessionID)
+			return true
+		}
 
 		w.log.Info("background_wake_start", "session_id", sessionID, "tasks", len(batch), "attempt", attempt)
 		err := w.run(context.Background(), Wake{SessionID: sessionID, Tasks: batch})
@@ -282,6 +286,23 @@ func (w *BackgroundWaker) startTurn(sessionID string, batch []bgtask.Snapshot) b
 		time.Sleep(delay)
 		delay = min(delay*2, w.busyRetryMax)
 	}
+}
+
+// unclaimedResults rechecks the pool before each wake attempt. A task may have
+// finished while its parent turn was busy, then been collected in that same
+// turn; the completion snapshot queued earlier is stale by then.
+func (w *BackgroundWaker) unclaimedResults(sessionID string, batch []bgtask.Snapshot) []bgtask.Snapshot {
+	if w.pool == nil {
+		return batch
+	}
+	kept := make([]bgtask.Snapshot, 0, len(batch))
+	for _, snap := range batch {
+		if !w.pool.WakePending(sessionID, snap.ID) {
+			continue
+		}
+		kept = append(kept, snap)
+	}
+	return kept
 }
 
 // absorbPending folds everything queued for the session into the batch in
@@ -316,9 +337,9 @@ func (w *BackgroundWaker) refundWake(sessionID string) {
 func WakeInstruction(batch []bgtask.Snapshot) string {
 	var b strings.Builder
 	if len(batch) == 1 {
-		b.WriteString("A background task you asked to be notified about has finished.\n\n")
+		b.WriteString("A background task you started has finished.\n\n")
 	} else {
-		fmt.Fprintf(&b, "%d background tasks you asked to be notified about have finished.\n\n", len(batch))
+		fmt.Fprintf(&b, "%d background tasks you started have finished.\n\n", len(batch))
 	}
 
 	for _, t := range batch {
@@ -337,6 +358,37 @@ func WakeInstruction(batch []bgtask.Snapshot) string {
 	b.WriteString("\nRead the output with background_output when you need it. ")
 	b.WriteString("Continue the work this task was part of, and report the outcome honestly: ")
 	b.WriteString("a task that failed, timed out, or was stopped did not succeed.")
+
+	// A subagent run that ended without its report kept its transcript, and
+	// the way on is that same child, not a second one on the same task
+	// (issue #389). Each child is judged by its latest run in the batch, which
+	// holds the tasks in the order they finished (Wake): a child whose latest
+	// run succeeded needs nothing, and a run whose child session was never
+	// created has nothing to continue.
+	latest := map[string]int{}
+	var children []string
+	for i, t := range batch {
+		if t.Kind != bgtask.KindAgent || t.Agent == nil || t.Agent.System || t.Agent.SessionID == "" {
+			continue
+		}
+		if _, seen := latest[t.Agent.SessionID]; !seen {
+			children = append(children, t.Agent.SessionID)
+		}
+		latest[t.Agent.SessionID] = i
+	}
+	var resumable []string
+	for _, child := range children {
+		t := batch[latest[child]]
+		if !t.Status.Finished() || t.Status == bgtask.StatusSucceeded || strings.HasPrefix(t.Error, errCreateChildSession) {
+			continue
+		}
+		resumable = append(resumable, fmt.Sprintf("spawn_agent with resume=%q and agent %q", t.ID, t.Agent.Name))
+	}
+	if len(resumable) > 0 {
+		b.WriteString(" A subagent that did not finish keeps its transcript: to go on with its task, call ")
+		b.WriteString(strings.Join(resumable, ", or "))
+		b.WriteString(" instead of starting a new subagent.")
+	}
 	return b.String()
 }
 

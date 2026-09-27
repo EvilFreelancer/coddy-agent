@@ -16,6 +16,9 @@ curl -fsSL https://coddy.dev/install.sh | bash
 irm https://coddy.dev/install.ps1 | iex
 ```
 
+**Android (Termux)**: the same **`install.sh`** fetches the Android build; see
+[Android (Termux)](#android-termux).
+
 Creates **`~/.coddy/config.yaml`** from the release **`config.example.yaml`** when missing.
 
 On Linux and macOS the script installs more than the binary. The release archive carries the man
@@ -42,6 +45,12 @@ installer never duplicates it. Skip it with **`--no-shell-setup`**. A system pre
 source ~/.zshrc   # or open a new terminal
 coddy -v
 ```
+
+The script installs no systemd unit. On Linux, to keep **`coddy serve`** running as a service of
+your account, run **`coddy serve install`** once the configuration has a provider key: it writes
+**`~/.config/systemd/user/coddy.service`** for the binary the script installed, enables it and
+starts it in **`~/Coddy`**. The script ends by saying so. See
+[the service guide](../operate/serve.md#as-a-systemd-user-service-on-linux).
 
 ## Linux packages (deb, rpm)
 
@@ -73,21 +82,30 @@ published, and **`SHA256SUMS`** beside them covers the packages too:
 sha256sum -c --ignore-missing SHA256SUMS
 ```
 
+The packages suggest **`tmux`** and do not install it. Coddy runs without it, and its console runs
+well inside it: a session there outlives a closed terminal or a dropped SSH connection. **`apt`**
+lists it under *Suggested packages*; add it with **`sudo apt-get install tmux`** or
+**`sudo dnf install tmux`**.
+
 ### What the package installs
 
 | Path | What |
 |------|------|
-| **`/usr/bin/coddy`** | The full binary (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**) |
+| **`/usr/bin/coddy`** | The full binary (**`http`**, **`ui`**, **`scheduler`**, **`memory`**, **`cli`**, **`gateway`**, **`swarm`**) |
 | **`/usr/share/man/man1/coddy.1.gz`** | **`man coddy`** |
 | **`/usr/share/bash-completion/completions/coddy`** | bash completion |
 | **`/usr/share/zsh/site-functions/_coddy`** | zsh completion |
+| **`/usr/lib/systemd/user/coddy.service`** | systemd user unit for **`coddy serve`**, installed and **not enabled** |
 | **`/usr/share/doc/coddy/config.example.yaml`** | starting point for **`~/.coddy/config.yaml`** |
 | **`/usr/share/doc/coddy/LICENSE`**, **`copyright`** | licence |
 
-That is the whole package: a binary and its documentation. No service, no system account, nothing
-under **`/etc`**. Configuration, sessions, skills and credentials stay in the invoking user's
-**`~/.coddy`**, so one installed package serves every user on the machine, each with their own
-state, and what to run - the console, the HTTP gateway, an editor over ACP - stays your decision.
+The package enables the unit for nobody, and there is no system service, no system account and
+nothing under **`/etc`**. Configuration, sessions, skills and credentials stay in the invoking
+user's **`~/.coddy`**, so one installed package serves every user on the machine, each with their
+own state, and what to run - the console, the HTTP gateway, an editor over ACP, a service - stays
+each user's decision. The message printed at installation says the unit is there and not enabled;
+**`coddy serve install`**, run as the user the service is for, enables and starts it (see
+[the service guide](../operate/serve.md#as-a-systemd-user-service-on-linux)).
 
 ### First run
 
@@ -107,12 +125,21 @@ replacing a packaged file (see [update.md](update.md#installations-owned-by-a-pa
 ```bash
 sudo apt-get install ./coddy_<newer>_linux_amd64.deb   # or dnf install ./...rpm
 sudo coddy update -y                                   # downloads and installs the package
+coddy serve install                                    # if you run the service: restart it on the new binary
 ```
 
+A running service keeps the binary it started with until it restarts, which is what the last line
+does; the upgrade prints the same reminder.
+
 ```bash
+coddy serve uninstall        # first, as each user that enabled the service
 sudo apt-get remove coddy    # or: sudo dnf remove coddy
-rm -rf ~/.coddy              # only if you also want the sessions and config gone
+rm -rf ~/.coddy ~/Coddy      # only if you also want the sessions, config and workspace gone
 ```
+
+The package removal cannot reach into each account's **`~/.config`**, so it leaves an enabled
+service enabled and prints the commands that clear it
+([Removing the service](../operate/serve.md#removing-the-service)).
 
 There is no apt or dnf repository to subscribe to: the packages are release assets, so a new version
 arrives when you install the newer file or run **`sudo coddy update`**, not from a background
@@ -135,7 +162,9 @@ brew install --cask https://github.com/coddy-project/coddy-agent/releases/latest
 
 Every release publishes **`coddy.rb`** beside the archives, rendered with the checksums of the macOS
 archives of that same tag. The cask installs the same **`coddy`** binary the macOS archive carries,
-plus **`man coddy`** and the bash and zsh completions. Removal goes through Homebrew:
+plus **`man coddy`** and the bash and zsh completions. It does not install **`tmux`**: its caveats,
+printed after the install and by **`brew info --cask coddy`**, recommend **`brew install tmux`**
+for a console session that outlives the terminal. Removal goes through Homebrew:
 
 ```bash
 brew uninstall --cask coddy      # brew zap --cask coddy also removes ~/.coddy
@@ -157,6 +186,22 @@ privileged shortcut there.
 If macOS blocks the first run because the binary is not notarised, clear the quarantine flag:
 **`xattr -d com.apple.quarantine "$(which coddy)"`**.
 
+## Android (Termux)
+
+```bash
+pkg install curl
+curl -fsSL https://coddy.dev/install.sh | bash
+```
+
+In Termux the script fetches the build for Android, **`coddy_X.Y.Z_android_arm64.tar.gz`** on a
+64-bit ARM device and **`coddy_X.Y.Z_android_amd64.tar.gz`** on x86_64. The Linux archive does not
+start there: a Termux that targets Android 10 or later runs every
+program through Android's linker, which turns a static executable away with
+**`has unexpected e_type: 2`**. The rest of the install is the Linux one: **`~/.local/bin`**, the
+man page and the completions in **`~/.local/share`**, and the block in **`~/.bashrc`**. What differs
+on the device (the programs Coddy starts, certificates, running **`coddy serve`** in the background)
+is on its own page: [Android (Termux)](android.md).
+
 ## After install
 
 ```bash
@@ -165,12 +210,15 @@ coddy -v
 # edit ~/.coddy/config.yaml
 coddy serve            # in this terminal
 coddy serve --daemon   # in the background, restarted if it dies
+coddy serve install    # Linux: as a systemd user service
 ```
 
-The packages install no service unit, because Coddy's state is per-user under
-**`~/.coddy`**. **`coddy serve --daemon`** is the built-in way to keep it running without
-one; under a supervisor that already owns process lifetimes (`systemd`, Docker) use the
-foreground form and let that supervisor restart it. See [the daemon guide](../operate/serve.md).
+On Linux with systemd, **`coddy serve install`** runs it as a user service of your account instead:
+it enables the unit a package installed, or writes one for a binary the install script put in
+place, and starts it working in **`~/Coddy`**. **`coddy serve uninstall`** takes it away again. See
+[the service guide](../operate/serve.md#as-a-systemd-user-service-on-linux) for the log, keeping it
+running after logout and removing it. **`coddy serve --daemon`** is the route where there is no
+systemd.
 
 ## Windows
 

@@ -51,11 +51,11 @@ export const messagesRu: Record<string, string> = {
   "settings.fieldHint.aria": "Пояснение: {label}",
   "settings.fieldHint.ariaGeneric": "Пояснение к полю",
   "settings.loading": "Загрузка…",
-  "settings.toast.saved": "Все разделы сохранены. Конфигурация перезагружена.",
   "settings.reload.title": "Перезагрузить с сервера",
   "settings.reload.aria": "Перезагрузить конфигурацию с сервера",
   "settings.save.title": "Сохранить все разделы",
   "settings.save.aria": "Сохранить все разделы конфигурации",
+  "settings.save.saved": "Сохранено",
   "settings.error.schemaLoadFailed": "схема",
   "settings.error.configLoadFailed": "конфиг",
   "settings.error.validationFailed": "ошибка валидации",
@@ -137,6 +137,10 @@ export const messagesRu: Record<string, string> = {
   "settings.array.backTitle": "Назад к списку",
   "settings.array.empty":
     "Здесь пока пусто. Используйте «Добавить», чтобы создать.",
+  "settings.map.namePlaceholder": "Имя",
+  "settings.map.valuePlaceholder": "Значение",
+  "settings.map.nameAria": "{label} {n}, имя",
+  "settings.map.valueAria": "{label} {n}, значение",
 
   "settings.field.apiBaseFallback": "Базовый URL API",
   "settings.field.modelIdFallback": "Идентификатор модели",
@@ -269,6 +273,9 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.agent.model.label": "Модель по умолчанию",
   "settings.schema.agent.model.desc":
     "Логический идентификатор модели из списка моделей, используемый, когда клиент не указал модель.",
+  "settings.schema.agent.queue_mode.label": "Режим очереди",
+  "settings.schema.agent.queue_mode.desc":
+    "Определяет, что делает Enter с сообщением, написанным во время хода. В режиме steer сообщение встраивается в текущий ход на ближайшем шаге, в режиме after_turn запускает отдельный промпт после ответа. Tab отправляет в другом режиме. Если режим не задан, браузер и консоль спросят при первом таком сообщении.",
   "settings.schema.agent.max_turns.label": "Максимум итераций",
   "settings.schema.agent.max_turns.desc":
     "Предел итераций ReAct (вызовы LLM плюс раунды инструментов) на один запрос пользователя; 0 снимает предел.",
@@ -370,6 +377,16 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.tools.websearch.brave_api_key.ph":
     "Берётся из BRAVE_API_KEY",
   "settings.schema.tools.websearch.searxng_url.ph": "http://localhost:8888",
+  "settings.schema.tools.http_request.label": "HTTP-запросы",
+  "settings.schema.tools.http_request.desc":
+    "Политика инструмента http_request, curl агента. Здесь задано, куда запрос идёт без вопроса и какие заголовки несёт каждый запрос. В режимах ask и accept_edits запрос спрашивает разрешение, если адрес не разрешён здесь и не одобрен в сессии, а bypass не спрашивает никогда.",
+  "settings.schema.tools.http_request.allowlist.label": "Белый список адресов",
+  "settings.schema.tools.http_request.allowlist.desc":
+    'Адреса, куда запрос идёт без вопроса. Хост (api.github.com), *.example.com, origin (http://localhost:8080) или префикс адреса (https://api.example.com/v1/), а "*" разрешает всё. Запись покрывает и загрузку файлов, и непроверенный сертификат. Прокси нужна своя запись, а сохранение ответа в файл следует политике записи.',
+  "settings.schema.tools.http_request.default_headers.label":
+    "Заголовки по умолчанию",
+  "settings.schema.tools.http_request.default_headers.desc":
+    "Заголовки, которые уходят с каждым запросом, если вызов не задал их сам. Например, браузерный User-Agent для сайта, который не отдаёт файлы инструментам. Заголовки вызова важнее, пустое значение убирает заголовок. Они уходят на любой адрес, поэтому учётные данные здесь уместны только намеренно. Host, Content-Type, Content-Length, Transfer-Encoding, hop-by-hop заголовки и Proxy-Authorization не принимаются, а webfetch и провайдеры моделей эти заголовки не отправляют.",
 
   "settings.schema.subagents.desc":
     "Пользовательские дочерние агенты, которым модель может делегировать работу через spawn_agent. Определения хранятся в markdown-файлах с YAML-фронтматтером; каждый запуск выполняется как фоновая задача родительской сессии со своей дочерней сессией и транскриптом.",
@@ -623,6 +640,8 @@ export const messagesRu: Record<string, string> = {
   "codexAuth.connected.viaCli":
     "Подключено через вход Codex CLI на этом сервере.",
   "codexAuth.connected.withChatGpt": "Подключено через ChatGPT.",
+  "codexAuth.cliLoginOtherRow":
+    "Вход Codex CLI на этом сервере закреплён за строкой {row}. Войдите, чтобы у этой строки был свой аккаунт.",
   "codexAuth.fieldLabel": "Аккаунт ChatGPT",
   "codexAuth.description":
     "Codex использует вашу подписку ChatGPT через OAuth. Учётные данные хранятся на сервере Coddy и никогда не добавляются в config.yaml.",
@@ -651,6 +670,8 @@ export const messagesRu: Record<string, string> = {
   "neuralDeepAuth.connected": "Выполнен вход в NeuralDeep ({masked}).",
   "neuralDeepAuth.shadowedByKey":
     "Задан явный API-ключ, поэтому запросы используют его, а не этот вход. Очистите поле api_key, чтобы использовать вход.",
+  "neuralDeepAuth.shadowedByEnv":
+    "На сервере Coddy задана переменная окружения {env}, поэтому запросы используют её, а не этот вход. Уберите её или дайте провайдеру имя, для которого переменная не задана.",
   "neuralDeepAuth.hubMismatch":
     "Этот вход выдан хабом {hub}, а {endpoint} обслуживает другой хаб, поэтому запросы с этим ключом отклоняются. Войдите заново, чтобы получить ключ для этого эндпоинта.",
   "neuralDeepAuth.enterCode":
@@ -679,6 +700,7 @@ export const messagesRu: Record<string, string> = {
   "mcp.error.delete": "Не удалось удалить {name}",
   "mcp.error.invalidEntry": "Некорректная запись.",
   "mcp.error.saveServer": "Не удалось сохранить сервер",
+  "mcp.error.load": "Не удалось загрузить серверы MCP: {message}",
   "mcp.discovery.legend": "Обнаружение MCP",
   "mcp.discovery.projectServersLabel": "Проектные серверы",
   "mcp.servers.legend": "Серверы MCP",
@@ -726,7 +748,7 @@ export const messagesRu: Record<string, string> = {
   "mcp.discovery.description":
     "Проектный ./.coddy/mcp.json приходит вместе с чекаутом, поэтому команду, которую запустит сессия, выбирает репозиторий, а не вы. В режиме «Спрашивать» его серверы не запускаются и не опрашиваются, пока вы не одобрите именно это объявление для данного рабочего пространства (кнопка-щит в списке ниже); изменение одобренной записи снова потребует одобрения. Серверы, добавленные здесь, одобряются самим фактом записи. Записи из config.yaml и ~/.coddy/mcp.json — ваши и никогда не блокируются.",
   "mcp.servers.description":
-    "Серверы Model Context Protocol из трёх уровней: config.yaml (mcp_servers) и глобальный ~/.coddy/mcp.json, объединённые с локальным ./.coddy/mcp.json проекта (формат Cursor; более поздние уровни переопределяют по имени). Можно отключить весь сервер или отдельные инструменты — переключатели сохраняются в файл, определяющий сервер, и применяются в работающих сессиях на следующем ходе.",
+    "Серверы Model Context Protocol берутся из трёх уровней, это config.yaml (mcp_servers), глобальный ~/.coddy/mcp.json и локальный ./.coddy/mcp.json проекта (формат Cursor, более поздний уровень переопределяет запись с тем же именем). Можно отключить весь сервер или отдельные инструменты. Переключатель глобального сервера сохраняется в файл, где сервер объявлен, переключатель проектного в ~/.coddy/mcp-overrides.json, поэтому checkout остаётся как есть. Переключатель сервера применяется в работающих сессиях сразу, переключатель инструмента на их следующем ходе.",
   "mcp.empty":
     "Серверы MCP не настроены. Добавьте сервер здесь (сохранится в локальный ./.coddy/mcp.json или глобальный ~/.coddy/mcp.json) либо объявите его в mcp_servers в config.yaml.",
   "mcp.note.declaredBy":
@@ -998,6 +1020,8 @@ export const messagesRu: Record<string, string> = {
   "sessions.tags.addHint": "Enter добавит как {tag}",
   "sessions.tags.add": "Добавить тег",
   "sessions.tags.failed": "Теги не сохранились",
+  "sessions.archiveFailed": "Диалог не заархивирован",
+  "sessions.unarchiveFailed": "Диалог не вернулся из архива",
   "sessions.tags.editRow": "Править теги",
   "sessions.tags.done": "Готово",
   "sessions.tagFilterClear": "Сбросить фильтр по тегам",
@@ -1038,6 +1062,10 @@ export const messagesRu: Record<string, string> = {
   "chat.heroVerb.plan": "спланировать",
   "chat.runPlanMessage": "Реализуй план.",
   "chat.scrollToBottom": "Перейти к последнему сообщению",
+  "chat.transcriptEarlier.show": "Показать более ранние сообщения",
+  "chat.transcriptEarlier.loading": "Загружаю более ранние сообщения…",
+  "chat.transcriptEarlier.failed": "Более ранние сообщения не загрузились.",
+  "chat.transcriptEarlier.retry": "Повторить",
   "chat.contextTitle": "Контекст",
   "chat.contextClose": "Закрыть",
   "chat.contextCloseBreakdown": "Закрыть разбор контекста",
@@ -1061,6 +1089,21 @@ export const messagesRu: Record<string, string> = {
   "composer.queueSend": "Поставить сообщение в очередь",
   "composer.queueLabel": "Сообщения в очереди",
   "composer.queueRemove": "Убрать из очереди",
+  "composer.queueModeSteer": "В текущий ход",
+  "composer.queueModeAfterTurn": "После хода",
+  "composer.queueChoiceLabel": "Режим очереди по умолчанию",
+  "composer.queueChoiceQuestion":
+    "Куда Enter отправляет сообщение во время хода?",
+  "composer.queueChoiceSteer": "В текущий ход",
+  "composer.queueChoiceAfterTurn": "После этого хода",
+  "composer.queueModeSteerTitle":
+    "Попадёт в текущий ход на ближайшем шаге. Нажмите, чтобы отправить после ответа.",
+  "composer.queueModeAfterTurnTitle":
+    "Запустит отдельный промпт после ответа. Нажмите, чтобы отправить в текущий ход.",
+  "composer.queueImages.one": "{count} картинка во вложении",
+  "composer.queueImages.few": "{count} картинки во вложении",
+  "composer.queueImages.many": "{count} картинок во вложении",
+  "composer.queueImages.other": "{count} картинки во вложении",
   "composer.queueFull":
     "Очередь заполнена: дождитесь, пока агент прочитает то, что уже стоит.",
   "composer.attachReadFailed":
@@ -1164,20 +1207,21 @@ export const messagesRu: Record<string, string> = {
   "composer.slashCommandsAriaLabel": "Команды со слэшем",
   "composer.workspaceFilesTitle": "Упоминание",
   "composer.workspaceFilesAriaLabel":
-    "Упомянуть файл, папку, сессию, правило или сабагента",
+    "Упомянуть файл, папку, сессию, правило или субагента",
   "composer.mentionKindFile": "файл",
   "composer.mentionKindDirectory": "папка",
   "composer.mentionKindSession": "сессия",
   "composer.mentionKindRule": "правило",
-  "composer.mentionKindAgent": "сабагент",
+  "composer.mentionKindAgent": "субагент",
   "composer.mentionKindPlan": "план",
   "composer.mentionKindScheme": "поиск",
   "composer.docsCommand":
     "Открыть встроенную документацию: /docs [страница или слова]",
+  "composer.mcpCommand": "Открыть настройки MCP-серверов",
   "composer.mentionKindDoc": "документация",
   "composer.mentionSchemeSession": "Другая сессия и её последние сообщения",
   "composer.mentionSchemeRule": "Правило проекта",
-  "composer.mentionSchemeAgent": "Передать работу сабагенту",
+  "composer.mentionSchemeAgent": "Передать работу субагенту",
   "composer.mentionSchemeCoddy": "Страница документации Coddy",
   "composer.mentionMore": "{shown} из {total}, уточните запрос",
   "composer.atRangeTitle": "Строки файла",
@@ -1392,7 +1436,7 @@ export const messagesRu: Record<string, string> = {
   "tool.name.rm": "удаляю",
   "tool.name.rmdir": "удаляю каталог",
   "tool.name.load_skill": "загружаю скил",
-  "tool.name.spawn_agent": "запускаю сабагента",
+  "tool.name.spawn_agent": "запускаю субагента",
   "tool.name.switch_model": "переключаю модель",
   "tool.name.question": "задаю вопрос",
   "tool.name.webfetch": "загружаю страницу",
@@ -1462,7 +1506,8 @@ export const messagesRu: Record<string, string> = {
   "structuredTool.tls": "Сертификат TLS",
   "structuredTool.tlsNotVerified": "не проверяется",
   "structuredTool.redirects": "Редиректы",
-  "structuredTool.redirectsFollowed": "выполняются в пределах того же источника",
+  "structuredTool.redirectsFollowed":
+    "выполняются в пределах того же источника",
   "structuredTool.responseHeaders": "Заголовки ответа",
   "structuredTool.outputFile": "Сохранено в",
   "structuredTool.status": "Ответ",
@@ -1479,7 +1524,8 @@ export const messagesRu: Record<string, string> = {
   "structuredTool.noTasks": "Фоновых задач нет",
   "structuredTool.noLeftovers": "Процессов от прошлого запуска не осталось",
   "structuredTool.stillRunning": "Ещё выполняется после ожидания {seconds} с",
-  "structuredTool.earlierDropped": "Начало вывода отброшено, полный лог лежит в бандле сессии",
+  "structuredTool.earlierDropped":
+    "Начало вывода отброшено, полный лог лежит в бандле сессии",
   "structuredTool.noOutput": "Вывода пока нет",
   "structuredTool.stops": "Остановка",
   "structuredTool.stopsAfter": "через {seconds} с после запуска",
@@ -1605,11 +1651,10 @@ export const messagesRu: Record<string, string> = {
   "sessions.draftEmpty": "Черновик: Новый чат",
 
   "workspace.detached": "отсоединённая",
-  "workspace.worktree": "рабочее дерево",
-  "workspace.worktreeActiveTitle":
-    "Эта сессия работает в отдельном рабочем дереве",
+  "workspace.worktree": "worktree",
+  "workspace.worktreeActiveTitle": "Эта сессия работает в отдельном worktree",
   "workspace.worktreeInactiveTitle":
-    "Переход на другую ветку откроется в отдельном рабочем дереве",
+    "Переход на другую ветку откроется в отдельном worktree",
   "workspace.recent": "Недавние",
   "workspace.openFolder": "Открыть папку…",
   "workspace.noBranches": "Веток нет",

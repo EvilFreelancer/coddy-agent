@@ -125,6 +125,7 @@ func (m *Manager) PublishSessionSettings(sessionID string, st *State, notice, so
 		Source:        source,
 	}
 	st.publishedSettings.Store(snap.Version)
+	m.readSettingsWindows(st, snap)
 	sender := st.TurnSender()
 	if sender == nil {
 		sender = m.server
@@ -143,6 +144,27 @@ func (m *Manager) PublishSessionSettings(sessionID string, st *State, notice, so
 		fn(update)
 	}
 	return snap
+}
+
+// readSettingsWindows starts reading the context windows of the models a
+// published snapshot names: the session's own, the running turn's and the ones
+// armed for the next turns. Every change of a model is published, so this is
+// where a switch is seen, and the window it brings is read at once instead of
+// at the next turn: the running turn's next step and the next prompt compact
+// against it (#362). Nothing here waits; a listing that is cached, fresh or
+// not reported at all costs a map lookup.
+func (m *Manager) readSettingsWindows(st *State, snap acp.SessionSettings) {
+	cfg := m.activeCfg()
+	if cfg == nil {
+		return
+	}
+	models := []string{snap.Model, st.EffectiveModelID(cfg)}
+	for _, o := range snap.Overrides {
+		if o.Setting == SettingModel {
+			models = append(models, o.Value)
+		}
+	}
+	m.AwaitContextWindows(context.Background(), cfg, models, 0)
 }
 
 // ApplySessionSettings is the one way a session's settings change: the ACP
@@ -175,6 +197,7 @@ func (m *Manager) applySessionSettings(_ context.Context, sessionID string, ch S
 		return acp.SessionSettings{}, "", err
 	}
 	notice := m.writeSettings(sessionID, st, ch, values)
+	m.keepIfLetGo(sessionID, st)
 	source := strings.TrimSpace(ch.Source)
 	if source == "" {
 		source = "unknown"
@@ -545,7 +568,8 @@ func AnnounceSettingsNotice(sender acp.UpdateSender, sessionID, notice string) {
 }
 
 // ApplyTurnSettings changes settings for the rest of the running turn only:
-// the model's own switch_model call, the frontmatter of a skill. It validates
+// a switch_model call the user limited to the turn, the frontmatter of a
+// skill. It validates
 // like ApplySessionSettings, against the model the turn runs on, takes effect
 // from the turn's next model request, and is gone when the turn ends.
 func (m *Manager) ApplyTurnSettings(_ context.Context, sessionID string, ch SettingsChange) (acp.SessionSettings, error) {

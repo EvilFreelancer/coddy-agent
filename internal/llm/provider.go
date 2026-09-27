@@ -50,6 +50,13 @@ type Message struct {
 	ReasoningDurationMs int64      `json:"reasoning_duration_ms,omitempty"`
 	ToolCalls           []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID          string     `json:"tool_call_id,omitempty"` // for RoleTool messages
+	// Rules, on a RoleTool message, are the project rules the call brought
+	// into play for the first time, rendered as the model reads them after
+	// Content. They are kept apart from the output, which every surface shows
+	// and the result eviction replaces, and are joined to it only in what the
+	// provider is sent; written once with the result, they replay byte for
+	// byte on every later request.
+	Rules string `json:"rules,omitempty"`
 	// Model is the YAML models[].model selector used to generate this assistant message (HTTP/Coddy), if set.
 	Model string `json:"model,omitempty"`
 	// CreatedAt is RFC3339 timestamp in UTC when the message was appended to history (UI and Coddy REST).
@@ -158,7 +165,12 @@ type ProviderInput struct {
 	ProxyURL string
 	// AuthPath is the Coddy-managed OAuth credential file for providers that use
 	// browser sign-in instead of an API key.
-	AuthPath    string
+	AuthPath string
+	// NoCLILogin keeps a codex or devin row with no credential at AuthPath off
+	// the machine-wide CLI login of its type (the Codex CLI's auth.json, the
+	// Devin CLI's credentials): that login is one account and serves one row,
+	// config.Config.CLILoginRow. The zero value lets the row use it.
+	NoCLILogin  bool
 	MaxTokens   int
 	Temperature float64
 	// TemperatureSet marks Temperature as asked for on the request rather than
@@ -268,7 +280,7 @@ func NewProvider(p ProviderInput) (Provider, error) {
 		// Codex uses ChatGPT OAuth credentials. APIKey and the configured BaseURL are
 		// intentionally ignored: OAuth tokens go to the official Codex backend unless
 		// the process itself opts out through CODDY_CODEX_BASE_URL.
-		inner = newCodexProvider(p.Model, p.AuthPath, codexBaseURL(), hc, p.MaxTokens, p.ReasoningEffort)
+		inner = newCodexProvider(p.Model, p.AuthPath, !p.NoCLILogin, codexBaseURL(), hc, p.MaxTokens, p.ReasoningEffort)
 	case "devin":
 		// A Devin session token reaches the Devin API server only: api_base is
 		// ignored, and CODDY_DEVIN_API_SERVER_URL moves the process as a whole.

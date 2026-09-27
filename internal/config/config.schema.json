@@ -133,6 +133,11 @@
       "description": "Defaults for the main agent loop (model id and safety caps).",
       "additionalProperties": false,
       "properties": {
+        "queue_mode": {
+          "type": "string",
+          "description": "Preferred queue mode for Enter during a running turn: steer joins the next ReAct step, after_turn starts a new turn after the current answer. When absent, interactive surfaces ask on first use.",
+          "enum": ["steer", "after_turn"]
+        },
         "model": {
           "type": "string",
           "description": "Optional default models[].model id. Interactive surfaces (web UI, console) pick a model per session; unattended calls that name no model (coddy -p, coddy acp, API requests without a model selector) need it set - they report 'no model configured' when it is empty."
@@ -319,7 +324,7 @@
     "rules": {
       "type": "object",
       "title": "Project rules",
-      "description": "Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules under the session CWD, plus the AGENTS.md and DESIGN.md of a folder a tool enters; .mdc files are Cursor rules, .md files Claude Code rules. See https://coddy.dev/docs/features/rules.",
+      "description": "Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from one project folder under the session CWD, the first of .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules that holds a rule file, plus the AGENTS.md and DESIGN.md of a folder a tool enters; .mdc files are Cursor rules, .md files Claude Code rules. See https://coddy.dev/docs/features/rules.",
       "additionalProperties": false,
       "properties": {
         "auto_discover": {
@@ -332,7 +337,7 @@
         },
         "systems": {
           "type": "array",
-          "description": "Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex, agents (nested AGENTS.md and DESIGN.md). Empty means all.",
+          "description": "Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex, agents (nested AGENTS.md and DESIGN.md). Empty means all. A project folder left out drops out of the chain; of the ones admitted, the first that holds a rule file is read.",
           "default": [],
           "items": {
             "type": "string"
@@ -698,7 +703,7 @@
         "http_request": {
           "type": "object",
           "title": "HTTP requests",
-          "description": "Policy of the http_request tool, the agent's curl. Under permission_mode ask or accept_edits a request asks the operator unless its destination is allowed here or was approved in the session; bypass never asks. See https://coddy.dev/docs/features/http-requests.",
+          "description": "Policy of the http_request tool, the agent's curl: the destinations it reaches without asking and the headers every request sends. Under permission_mode ask or accept_edits a request asks the operator unless its destination is allowed here or was approved in the session; bypass never asks. See https://coddy.dev/docs/features/http-requests.",
           "additionalProperties": false,
           "properties": {
             "allowlist": {
@@ -708,6 +713,14 @@
               },
               "description": "Destinations a request reaches without asking: a host (api.github.com), a subdomain wildcard (*.example.com), either with an optional :port, an origin (http://localhost:8080) or an address prefix (https://api.example.com/v1/). \"*\" allows every destination. An entry also covers the files a request uploads and an unchecked certificate; a proxy needs an entry of its own, and a file the response is saved to follows the write policy.",
               "default": []
+            },
+            "default_headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Headers every http_request call sends unless the call names the header itself: a browser User-Agent for a site that turns tools away, an Accept an internal service expects. They take the place of the tool's own defaults (its coddy-agent User-Agent), a call's headers take the place of them - an empty value in the call removes one - and an empty value here leaves the header out of every call that does not set it. A name is letters, digits, - and _, starting with a letter. Host, Content-Type, Content-Length and Transfer-Encoding describe a single request and are refused, and so are the hop-by-hop headers (Connection, Keep-Alive, Proxy-Connection, TE, Trailer, Upgrade) and Proxy-Authorization, which an https request would carry through the proxy's tunnel to every origin. The headers go to every destination the tool reaches, so a credential here reaches all of them; the permission prompt names them and shows the value only of one that describes the client (User-Agent, Accept...), config_get keeps their values from the model, and webfetch, URL mentions and the model providers never send them. See https://coddy.dev/docs/features/http-requests#default-headers.",
+              "default": {}
             }
           }
         }
@@ -1059,7 +1072,7 @@
             "integer",
             "null"
           ],
-          "description": "How long a user turn waits for the memory subagent's report before its first model call. An explicit 0 never waits: the report then reaches the turn only through a later step, or stays in the Tasks drawer.",
+          "description": "How long a user turn waits for the memory subagent's report before its first model call. An explicit 0 never waits: the report then reaches the turn only through a later step, or stays in the Tasks panel.",
           "default": 20
         },
         "timeout_seconds": {

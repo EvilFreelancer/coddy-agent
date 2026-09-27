@@ -58,7 +58,7 @@ func newRemoteControlStandOver(t *testing.T, wrap func(backend) backend) *remote
 	srv := httptest.NewServer(http.HandlerFunc(f.serveHTTP))
 	t.Cleanup(srv.Close)
 	var err error
-	f.app, err = buildRemoteApp(&config.Config{Paths: config.Paths{CWD: t.TempDir()}}, &remote.Options{
+	f.app, err = buildRemoteApp(&config.Config{Paths: config.Paths{CWD: t.TempDir()}, Agent: config.Agent{QueueMode: "steer"}}, &remote.Options{
 		BaseURL: srv.URL, Log: slog.New(slog.DiscardHandler),
 	}, slog.New(slog.DiscardHandler), &bddTerminal{cols: 100, rows: 30}, "dark", true)
 	if err != nil {
@@ -98,7 +98,7 @@ func (f *remoteControlStand) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.URL.Path == "/v1/models":
-		_, _ = io.WriteString(w, `{"default_agent_model":"test","data":[{"id":"test","owned_by":"stub"}]}`)
+		_, _ = io.WriteString(w, `{"data":[{"id":"test","default":true,"owned_by":"stub"}]}`)
 	case strings.HasSuffix(r.URL.Path, "/messages"):
 		_, _ = io.WriteString(w, `{"messages":[]}`)
 	case strings.HasSuffix(r.URL.Path, "/activity"):

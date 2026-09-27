@@ -74,7 +74,7 @@ coddy serve --dry-run         # binds each listen address once and releases it
 coddy serve -P 12346          # or httpserver.port in the file
 ```
 
-For access from other machines bind wider and require a token: `coddy serve -H 0.0.0.0 --auth-token <secret>` (also `CODDY_HTTP_TOKEN` or `httpserver.auth_token`); without a token the process warns that it is reachable without authentication. A listen address is the one setting a running process cannot adopt: under `--daemon` the worker restarts on the new address by itself (exit status 75 asks the dispatcher for a replacement), in the foreground restart it yourself. Under `--daemon` a port that is held is reported in the terminal that typed the command and retried until it frees. See [coddy serve and the daemon](../operate/serve.md) and [HTTP API](../reference/http-api.md#cli-flags).
+For access from other machines bind wider and require a token: `coddy serve -H 0.0.0.0 --auth-token <secret>` (also `CODDY_HTTP_TOKEN` or `httpserver.auth_token`); without a token the process warns that it is reachable without authentication. A listen address is the one setting a running process cannot adopt: under `--daemon` the worker restarts on the new address by itself (exit status 75 asks the dispatcher for a replacement), and so does the systemd user service of `coddy serve install`; in the foreground restart it yourself. Under `--daemon` a port that is held is reported in the terminal that typed the command and retried until it frees. See [coddy serve and the daemon](../operate/serve.md) and [HTTP API](../reference/http-api.md#cli-flags).
 
 ## A surface is missing from the build
 
@@ -233,14 +233,14 @@ Field reference: [`agent`](../reference/config.md#agent), [`providers`](../refer
 
 **Symptom.** The answer stops mid-sentence, and the session log shows a notice such as `The provider failed mid-turn (... server error 500: litellm.MidStreamFallbackError ...). The turn went on after a 5s pause (recovery 1 of 2).` The turn then continues on its own. Before this, such a turn ended with the error and waited for the user to type "continue" ([issue #246](https://github.com/coddy-project/coddy-agent/issues/246)).
 
-**Cause.** The provider's lane failed, not the request: a 5xx from a proxy whose fallback also failed, a connection cut, a stream gone silent. The resilient wrapper retries a call only while nothing has reached the user, so a failure after the first words, or one that outlasts its backoff, reaches the turn. The turn treats it as a breaker:
+**Cause.** The provider's lane failed, not the request: a 5xx from a proxy whose fallback also failed, a connection cut, a stream gone silent. A connection the remote host closed reads `connection reset by peer` on Linux and `wsarecv: An existing connection was forcibly closed by the remote host.` on Windows; both are a cut ([issue #389](https://github.com/coddy-project/coddy-agent/issues/389)). The resilient wrapper retries a call only while nothing has reached the user, so a failure after the first words, or one that outlasts its backoff, reaches the turn. The turn treats it as a breaker:
 
 - the text the user already saw stays in the transcript, and the model is asked to go on from where it stopped rather than start over;
-- the pause before the first recovery is five times `agent.llm_retry_base_ms` (5 s by default) and four times longer before the second (20 s), or the pause the provider asked for in `Retry-After` when that is longer, at most 2 minutes;
-- after two recoveries in a row the breaker opens and the turn ends with the provider's error, and a call that succeeds closes it again;
+- the pause before the first recovery is five times `agent.llm_retry_base_ms` (5 s by default) and four times longer before each next one (20 s, 80 s), or the pause the provider asked for in `Retry-After` when that is longer, at most 2 minutes;
+- after two recoveries in a row the breaker opens and the turn ends with the provider's error, and a call that succeeds closes it again. A subagent and a scheduled run, which nobody can tell to continue, ride out up to five in a row (about six minutes when their hard timeout and turn limit leave room) and write each reconnect into their task log ([Subagents](../features/subagents.md#when-the-provider-connection-drops)). A top-level turn keeps two even in `coddy -p`: whoever runs it sees the error and decides whether to run it again;
 - a request the provider refused (a 4xx) is never repeated, a usage or rate limit (429) is left to the backoff and to [`wait_for_limit_reset`](#a-turn-stops-with-a-usage-limit), a Stop during the pause ends the turn as a stop (a deadline ends it with the provider's error), and `agent.llm_retry_max: 0` turns the recovery off together with every other retry.
 
-**Fix.** Nothing is needed for a lane that recovers in seconds. For one that keeps failing, check the provider's status, or put the model behind a gateway with healthier deployments. A longer outage is a reason to raise `agent.llm_retry_base_ms`, which stretches the pauses.
+**Fix.** Nothing is needed for a lane that recovers in seconds. For one that keeps failing, check the provider's status, or put the model behind a gateway with healthier deployments. A longer outage is a reason to raise `agent.llm_retry_base_ms`, which stretches the pauses. A subagent that failed this way keeps its transcript, and its report tells the parent to continue it with `spawn_agent` `resume` rather than start a second subagent on the same task ([Resuming a run](../features/subagents.md#resuming-a-run)).
 
 ## A turn stops before the task is done
 
@@ -273,6 +273,21 @@ brew upgrade --cask coddy                               # the cask; a formula in
 ```
 
 A copy under `~/.local/bin` or a build of your own is untouched by any of this and keeps updating itself. See [Update](update.md#installations-owned-by-a-package-manager).
+
+## Termux says `has unexpected e_type: 2` or `Bad system call`
+
+**Symptom.** In Termux on Android, `coddy` stops at once with `error: ".../coddy" has unexpected e_type: 2`. Or it starts, but a provider request fails with `x509: certificate signed by unknown authority` or `lookup ... on [::1]:53: ... connection refused`, or the process dies with `Bad system call`.
+
+**Cause.** That is the Linux build. A Termux that targets Android 10 or later starts every program through Android's linker, which loads position-independent executables only, and the Linux build is a static one. Where Termux starts it directly, it looks for certificates and for `/etc/resolv.conf` at Linux paths Android does not have, and some Android versions forbid a system call it makes.
+
+**Fix.** Install the Android build, `coddy_X.Y.Z_android_arm64.tar.gz` (or `_amd64` on x86_64), which the install script picks in Termux. Running the script again replaces the Linux binary in place:
+
+```bash
+curl -fsSL https://coddy.dev/install.sh | bash
+coddy -v
+```
+
+In a Termux session that was open during the install, `coddy` is found only after `source ~/.bashrc` or in a new session. See [Android (Termux)](android.md).
 
 ## Windows notes
 

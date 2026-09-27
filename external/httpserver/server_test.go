@@ -36,6 +36,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 	"github.com/EvilFreelancer/coddy-agent/internal/version"
@@ -78,13 +79,13 @@ func TestGETModelsMergedOrderAndOwnedBy(t *testing.T) {
 		t.Fatalf("status %d", res.StatusCode)
 	}
 	var body struct {
-		Object            string `json:"object"`
-		DefaultAgentModel string `json:"default_agent_model"`
-		Data              []struct {
+		Object string `json:"object"`
+		Data   []struct {
 			ID               string `json:"id"`
 			Object           string `json:"object"`
 			OwnedBy          string `json:"owned_by"`
 			MaxContextTokens int    `json:"max_context_tokens"`
+			Default          bool   `json:"default"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
@@ -102,8 +103,8 @@ func TestGETModelsMergedOrderAndOwnedBy(t *testing.T) {
 	if body.Object != "list" || len(body.Data) != len(want) {
 		t.Fatalf("unexpected body %+v", body)
 	}
-	if body.DefaultAgentModel != "openai/gpt-4o" {
-		t.Fatalf("default_agent_model: want openai/gpt-4o got %q", body.DefaultAgentModel)
+	if !body.Data[3].Default {
+		t.Fatalf("the agent.model row is not marked default: %+v", body.Data[3])
 	}
 	for i, w := range want {
 		item := body.Data[i]
@@ -120,6 +121,63 @@ func TestGETModelsMergedOrderAndOwnedBy(t *testing.T) {
 // its compaction threshold against: its own max_context_tokens, the window its
 // provider's listing reports, or the default - never the default agent
 // model's number borrowed for a model that has none (#245).
+// The row a session with no model of its own runs on carries "default": the
+// configured agent.model, the first row when agent.model names a model the
+// configuration does not list (the session falls back the same way), and no
+// row at all while agent.model is empty. The response has no separate
+// default_agent_model field: it only repeated agent.model.
+func TestGETModelsMarksTheRowASessionRunsOnByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name, agentModel, want string
+	}{
+		{"agent.model", "vendor/b", "vendor/b"},
+		{"unknown agent.model falls back to the first row", "vendor/gone", "vendor/a"},
+		{"no agent.model", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Agent:  config.Agent{Model: tc.agentModel},
+				Models: []config.ModelEntry{{Model: "vendor/a", MaxTokens: 100}, {Model: "vendor/b", MaxTokens: 100}},
+			}
+			runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+				return "", nil
+			}
+			mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), t.TempDir(), nil)
+			srv := New(cfg, mgr, slog.Default(), t.TempDir())
+			ts := httptest.NewServer(srv.Handler())
+			defer ts.Close()
+			res, err := http.Get(ts.URL + "/v1/models")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := raw["default_agent_model"]; ok {
+				t.Fatal("the response still carries default_agent_model")
+			}
+			var rows []struct {
+				ID      string `json:"id"`
+				Default bool   `json:"default"`
+			}
+			if err := json.Unmarshal(raw["data"], &rows); err != nil {
+				t.Fatal(err)
+			}
+			var marked []string
+			for _, row := range rows {
+				if row.Default {
+					marked = append(marked, row.ID)
+				}
+			}
+			if tc.want == "" && len(marked) != 0 || tc.want != "" && (len(marked) != 1 || marked[0] != tc.want) {
+				t.Fatalf("rows marked default = %v, want %q", marked, tc.want)
+			}
+		})
+	}
+}
+
 func TestGETModelsReportsEachModelsOwnContextWindow(t *testing.T) {
 	listing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/models" {
@@ -3591,6 +3649,54 @@ mcp_servers:
 		t.Errorf("DELETE home-sourced status %d, want 200", status)
 	}
 
+	// An approval names the declaration the operator was shown: a checkout
+	// rewritten between the listing and the click answers 409 and records
+	// nothing, the fingerprint listed now is accepted, and a body without one
+	// approves the current declaration as before.
+	projectPath := config.MCPJSONPath(home)
+	if err := config.UpsertMCPJSONServer(projectPath, "proj", config.MCPJSONServer{Command: "/nonexistent-proj-mcp"}); err != nil {
+		t.Fatal(err)
+	}
+	listedFingerprint := func() string {
+		t.Helper()
+		_, b := do(http.MethodGet, "/coddy/mcp", "")
+		var list struct {
+			Items []struct {
+				Name        string `json:"name"`
+				Fingerprint string `json:"fingerprint"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(b, &list); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range list.Items {
+			if item.Name == "proj" {
+				return item.Fingerprint
+			}
+		}
+		t.Fatalf("proj missing from %s", b)
+		return ""
+	}
+	shown := listedFingerprint()
+	if err := config.UpsertMCPJSONServer(projectPath, "proj", config.MCPJSONServer{Command: "/nonexistent-other-mcp"}); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := do(http.MethodPost, "/coddy/mcp/proj/trust", `{"fingerprint":"`+shown+`"}`); status != http.StatusConflict {
+		t.Errorf("trust a rewritten declaration = %d %s, want 409", status, body)
+	}
+	if records := mcp.NewTrustStore(home).Records(home); len(records) != 0 {
+		t.Errorf("a refused approval was recorded: %+v", records)
+	}
+	if status, body := do(http.MethodPost, "/coddy/mcp/proj/trust", `{"fingerprint":"`+listedFingerprint()+`"}`); status != http.StatusOK {
+		t.Errorf("trust the listed declaration = %d %s, want 200", status, body)
+	}
+	if status, body := do(http.MethodPost, "/coddy/mcp/proj/trust", ""); status != http.StatusOK {
+		t.Errorf("trust without a fingerprint = %d %s, want 200", status, body)
+	}
+	if status, body := do(http.MethodPost, "/coddy/mcp/proj/trust", `{broken`); status != http.StatusBadRequest {
+		t.Errorf("trust with a malformed body = %d %s, want 400", status, body)
+	}
+
 	// Trust applies to project entries only: config.yaml servers are the
 	// operator's own, so approving one is refused rather than silently stored.
 	if status, _ := do(http.MethodPost, "/coddy/mcp/broken/trust", ""); status != http.StatusBadRequest {
@@ -4874,7 +4980,7 @@ func TestSessionMessagesMarkOnlyTheWake(t *testing.T) {
 	two := 2
 	rows := llmMsgsToCoddyOpenAIForSession("sess_x", "", []llm.Message{
 		{Role: llm.RoleUser, Content: "start the tests"},
-		{Role: llm.RoleUser, Content: "A background task you asked to be notified about has finished.", BackgroundWake: &llm.BackgroundWake{
+		{Role: llm.RoleUser, Content: "A background task you started has finished.", BackgroundWake: &llm.BackgroundWake{
 			Tasks: []llm.BackgroundWakeTask{{ID: "bg_1", Status: "failed", ExitCode: &two, DurationMs: 1200}},
 		}},
 	})

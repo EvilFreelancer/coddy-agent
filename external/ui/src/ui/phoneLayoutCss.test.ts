@@ -3,6 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
+import { PHONE_MAX_WIDTH_PX } from "./shellBreakpoint";
+
 // jsdom does no layout, so the phone layout is pinned here by its rules; the
 // live check at 360-430px (docs/surfaces/web-ui.md, Phone layout) measures it.
 
@@ -69,7 +71,7 @@ function mediaBlocks(query: RegExp): Block[] {
 }
 
 const topLevel = sheet.filter((b) => !b.prelude.startsWith("@"));
-const phone = mediaBlocks(/^@media\s*\(max-width:\s*520px\)\s*$/);
+const phone = mediaBlocks(new RegExp(`^@media\\s*\\(max-width:\\s*${PHONE_MAX_WIDTH_PX}px\\)\\s*$`));
 
 function expectDecl(body: string, prop: string, value: RegExp) {
   const re = new RegExp(`(?:^|[;{\\s])${prop}\\s*:\\s*([^;]+)`, "g");
@@ -88,7 +90,7 @@ describe("the start screen never widens the page", () => {
   });
 });
 
-describe("phone top bar (max-width: 520px)", () => {
+describe("phone top bar", () => {
   test("the brand is what gives way: it may shrink and clips, the icons never slide over it", () => {
     // The narrow rail wraps the brand in a tip host, and that host is the
     // flex item of the bar: both have to be allowed to shrink.
@@ -111,7 +113,7 @@ describe("phone top bar (max-width: 520px)", () => {
   });
 });
 
-describe("phone composer (max-width: 520px)", () => {
+describe("phone composer", () => {
   test("the selector chips are one sideways-scrolling strip beside the send button", () => {
     const tabs = declarations(phone, ".composer-tabs");
     expectDecl(tabs, "flex", /^1 1 auto$/);
@@ -154,9 +156,46 @@ describe("phone composer (max-width: 520px)", () => {
   });
 });
 
+describe("phone settings", () => {
+  test("a section tile spells its whole name: the title wraps to two lines instead of an ellipsis", () => {
+    // A phone has no hover, so the title tooltip behind a cut name is out of
+    // reach; Logical models, Context compaction and Tools and permissions were
+    // cut at 360px.
+    const title = declarations(phone, ".settings-tile-title");
+    expectDecl(title, "white-space", /^normal$/);
+    expectDecl(title, "-webkit-line-clamp", /^2$/);
+    expectDecl(title, "display", /^-webkit-box$/);
+    expectDecl(title, "overflow-wrap", /^anywhere$/);
+    // A clamp paints past its last line without it; the phone rule does not
+    // lean on the ellipsis rule it overrides to keep it.
+    expectDecl(title, "overflow", /^hidden$/);
+  });
+
+  test("an MCP server row puts its controls under the name instead of squeezing it", () => {
+    // Four 40px controls beside the name left it 35px at 390px and broke
+    // project-search in two. On a phone the name and its command line take
+    // the first line of the row, and the controls wrap to the row's end below.
+    const head = declarations(phone, ".mcp-list-item-head");
+    expectDecl(head, "flex-wrap", /^wrap$/);
+    expectDecl(head, "justify-content", /^flex-end$/);
+    expectDecl(declarations(phone, ".mcp-list-item-text"), "flex-basis", /^calc\(100% - var\(--mcp-row-inset\)\)$/);
+  });
+
+  test("a map row puts the value under the name instead of squeezing both", () => {
+    // Side by side the name of a default header was 82px at 390px and
+    // User-Agent read "User-Ag". On a phone the pair stacks, and the pairs
+    // stand further apart than the two fields of one pair.
+    expectDecl(declarations(topLevel, ".settings-map-entry"), "grid-template-columns", /^minmax\(0,\s*2fr\) minmax\(0,\s*3fr\)$/);
+    expectDecl(declarations(phone, ".settings-map-entry"), "grid-template-columns", /^minmax\(0,\s*1fr\)$/);
+    expectDecl(declarations(phone, ".settings-map"), "gap", /^16px$/);
+  });
+});
+
 describe("text fields do not make iOS Safari zoom", () => {
   const touchOrPhone = mediaBlocks(
-    /^@media\s*\(max-width:\s*520px\),\s*\(any-hover:\s*none\)\s*and\s*\(any-pointer:\s*coarse\)\s*$/,
+    new RegExp(
+      `^@media\\s*\\(max-width:\\s*${PHONE_MAX_WIDTH_PX}px\\),\\s*\\(any-hover:\\s*none\\)\\s*and\\s*\\(any-pointer:\\s*coarse\\)\\s*$`,
+    ),
   );
 
   test("the composer and its highlight mirror are 16px together", () => {
