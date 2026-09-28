@@ -79,6 +79,65 @@ describe("HeroFooter", () => {
     }
   });
 
+  // A token rotated in the configuration starts the app over with the new one
+  // (EnvScope) without a switch; a version the old token failed to read must
+  // not stay cached for the new one.
+  it("asks again with a rotated token after a read that failed", async () => {
+    setEnv({ mode: "remote", baseUrl: "http://a:1", token: "stale" });
+    answer({}, 401);
+    const first = render(<HeroFooter />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(first.container.querySelector(".hero-footer-version")).toBeNull();
+    first.unmount();
+    setEnv({ mode: "remote", baseUrl: "http://a:1", token: "fresh" });
+    answer({ version: "1.2.37" });
+    render(<HeroFooter />);
+    expect(await screen.findByRole("link", { name: "v1.2.37" })).toBeTruthy();
+    setEnv({ mode: "local" });
+  });
+
+  // Choosing the remote the page is on again is how everything is read again,
+  // the version included: the server behind the same address may have been
+  // upgraded meanwhile.
+  it("asks again when the same remote is chosen again", async () => {
+    const realLocation = window.location;
+    Object.defineProperty(window, "location", {
+      value: { hash: "", reload: vi.fn() },
+      writable: true,
+      configurable: true,
+    });
+    try {
+      setEnv({ mode: "remote", baseUrl: "http://a:1", token: "t" });
+      answer({ version: "1.2.35" });
+      const first = render(<HeroFooter />);
+      await screen.findByRole("link", { name: "v1.2.35" });
+      first.unmount();
+      connectRemote("http://a:1", "t", "a");
+      answer({ version: "1.2.36" });
+      render(<HeroFooter />);
+      expect(await screen.findByRole("link", { name: "v1.2.36" })).toBeTruthy();
+    } finally {
+      setEnv({ mode: "local" });
+      Object.defineProperty(window, "location", {
+        value: realLocation,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  // A read that got no version is not kept: the next footer asks again.
+  it("asks again after a read that got no version", async () => {
+    answer({}, 503);
+    const first = render(<HeroFooter />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(first.container.querySelector(".hero-footer-version")).toBeNull();
+    first.unmount();
+    answer({ version: "1.2.36" });
+    render(<HeroFooter />);
+    expect(await screen.findByRole("link", { name: "v1.2.36" })).toBeTruthy();
+  });
+
   it("keeps the two links alone when the server does not say", async () => {
     answer({}, 404);
     const { container } = render(<HeroFooter />);

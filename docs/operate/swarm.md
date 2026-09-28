@@ -294,8 +294,9 @@ drawer edits the relay's deployment and its log: the **Swarm relay** tab (name, 
 client and pairing tokens, CORS, TLS, lease and fan-out timeouts, upstreams, joins) and **Logger**.
 There is no Sessions tab, because a relay holds no sessions. The routes are the agent's own -
 `GET /coddy/config/schema`, `GET /coddy/config`, `POST /coddy/config/validate`, `PUT
-/coddy/config` - served by the relay behind its client token, and the schema it serves describes
-only those two sections.
+/coddy/config` - served by the relay behind its client token, and they carry only those two
+sections: the rest of the host's configuration - a model provider's key, the HTTP server - is
+neither shown nor written through the relay, and a save naming another section is refused.
 
 ![The Settings drawer on a relay](../assets/swarm/relay-settings-dark-1280.png)
 
@@ -306,7 +307,9 @@ is set, an empty field keeps it, a value replaces it. Pairing tokens are a list 
 A save is written over the relay's `config.yaml` with its comments and spellings kept, and the
 relay is rebuilt on it: nodes register and open their tunnels again within seconds, and a stream
 in flight through the relay is cut and resumed by the client. A new listen address takes a
-restart, which a relay under the dispatcher or systemd gets by itself. A new client token signs
+restart, which a relay under the dispatcher or systemd gets by itself. So does turning on the
+HTTP server, the gateway or the scheduler in the file of a process started as a relay alone: it
+opened no session store, and those surfaces run agent turns. A new client token signs
 out every client, the page you are saving from included: enter the new one in the environment menu.
 The **Logger** tab is saved like the rest, and the relay reads it when it starts next, as an agent
 does with its own logger settings.

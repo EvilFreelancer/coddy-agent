@@ -36,6 +36,13 @@ type Supervisor struct {
 	// and the operator restarts when it suits them.
 	Restartable bool
 
+	// Sessionless is a process started with no session store and no manager,
+	// because nothing it ran at start needed one (a bare swarm relay). A
+	// surface that needs sessions is not started in it by a reload: the
+	// process asks to be replaced when something will start it again, and says
+	// a restart is due otherwise.
+	Sessionless bool
+
 	mu      sync.Mutex
 	running map[Kind]*instance
 }
@@ -186,6 +193,27 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 				s.log.Error("subsystem enabled by a configuration change but missing from this build",
 					"subsystem", string(sub.Kind), "key", sub.ConfigKey,
 					"hint", "rebuild with -tags "+sub.BuildTag)
+				continue
+			}
+			if sub.NeedsSessions && s.Sessionless {
+				// Started on no manager it would fail at once, and its failure
+				// ends every surface of the process, the relay included. The
+				// fresh process has to be able to run the whole configuration:
+				// one its pre-flight refuses would be restarted into again and
+				// again with nothing serving, so that one is refused here.
+				if _, err := Resolve(cfg, s.subs); err != nil {
+					s.log.Error("configuration change refused: the process it needs could not start on it",
+						"subsystem", string(sub.Kind), "error", err)
+					return false
+				}
+				if s.Restartable {
+					s.log.Info("subsystem enabled by a configuration change needs sessions, restarting the process",
+						"subsystem", string(sub.Kind))
+					return true
+				}
+				s.log.Error("subsystem enabled by a configuration change needs the session store this process was started without",
+					"subsystem", string(sub.Kind), "key", sub.ConfigKey,
+					"hint", "restart coddy serve to apply")
 				continue
 			}
 			s.log.Info("subsystem enabled by a configuration change", "subsystem", string(sub.Kind))

@@ -59,9 +59,18 @@ func (s *settingsFeatureState) relayWithSettingsFile(name, token string) error {
 	}
 	s.dir, s.token = dir, token
 	s.path = filepath.Join(dir, "config.yaml")
+	// The host this relay runs on has a model provider too: its key is none of
+	// a relay client's business.
+	if err := os.Setenv("RELAY_TEST_PROVIDER_KEY", "sk-host-secret"); err != nil {
+		return err
+	}
 	raw := fmt.Sprintf(`# the relay in the office rack
 httpserver:
   enable: false
+providers:
+  - name: openai
+    type: openai
+    api_key: "${RELAY_TEST_PROVIDER_KEY}"
 swarm:
   enable: true
   host: "127.0.0.1"
@@ -201,6 +210,37 @@ func (s *settingsFeatureState) settingsHideTheToken() error {
 	return nil
 }
 
+func (s *settingsFeatureState) settingsCarryOnly(list string) error {
+	doc, err := s.okBody()
+	if err != nil {
+		return err
+	}
+	want := map[string]bool{"revision": true}
+	for _, k := range strings.Split(list, ", ") {
+		want[k] = true
+	}
+	for k := range doc {
+		if !want[k] {
+			return fmt.Errorf("the settings carry the section %q: %s", k, s.body)
+		}
+	}
+	if strings.Contains(string(s.body), "sk-host-secret") {
+		return fmt.Errorf("the settings carry the host's provider key: %s", s.body)
+	}
+	return nil
+}
+
+func (s *settingsFeatureState) fileKeepsProvider() error {
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(raw), `api_key: "${RELAY_TEST_PROVIDER_KEY}"`) {
+		return fmt.Errorf("the saved file lost the provider as written:\n%s", raw)
+	}
+	return nil
+}
+
 func (s *settingsFeatureState) saveAllowingOrigin(origin string) error {
 	if err := s.readSettings(); err != nil {
 		return err
@@ -295,6 +335,8 @@ func TestSwarmRelaySettingsFeature(t *testing.T) {
 			sc.Step(`^the relay's file allows the origin "([^"]+)"$`, s.fileAllowsOrigin)
 			sc.Step(`^the relay's file keeps its comments and its client token$`, s.fileKeepsCommentsAndToken)
 			sc.Step(`^the relay was handed the new settings$`, s.relayWasHandedTheSettings)
+			sc.Step(`^the settings carry only the sections "([^"]+)"$`, s.settingsCarryOnly)
+			sc.Step(`^the relay's file keeps the provider the settings do not show$`, s.fileKeepsProvider)
 			sc.Step(`^the settings request is rejected as unauthorized$`, s.rejectedAsUnauthorized)
 		},
 		Options: &godog.Options{

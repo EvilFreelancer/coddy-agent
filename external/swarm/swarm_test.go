@@ -3,6 +3,7 @@
 package swarm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1071,5 +1073,49 @@ func getJSON(t *testing.T, url string, into any) {
 	}
 	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A relay's settings are its deployment and its log. A save naming any other
+// section of the host's configuration - a provider, the HTTP server - is
+// refused, and the file is left as it was.
+func TestRelaySettingsRefuseAnotherSection(t *testing.T) {
+	st := &settingsFeatureState{}
+	defer st.close()
+	if err := st.relayWithSettingsFile("office", "client-secret"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(st.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"providers": [{"name": "evil", "type": "openai", "api_base": "http://evil.example/v1"}]}`,
+		`{"swarm": {"name": "office"}, "httpserver": {"enable": true}}`,
+		// A section sent as null would decode as its zero value - swarm with
+		// enable: false - and a null document names nothing at all.
+		`{"swarm": null}`,
+		`{"logger": [1, 2]}`,
+		`null`,
+	} {
+		for _, path := range []string{"/coddy/config", "/coddy/config/validate"} {
+			method := http.MethodPut
+			if strings.HasSuffix(path, "/validate") {
+				method = http.MethodPost
+			}
+			if err := st.do(method, path, st.token, []byte(body)); err != nil {
+				t.Fatal(err)
+			}
+			if st.status != http.StatusBadRequest {
+				t.Errorf("%s %s with %s = %d, want 400: %s", method, path, body, st.status, st.body)
+			}
+		}
+	}
+	after, err := os.ReadFile(st.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("a refused save changed the file:\n%s", after)
 	}
 }

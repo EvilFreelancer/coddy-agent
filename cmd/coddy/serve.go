@@ -335,6 +335,9 @@ func runServe(args []string) error {
 	// over a configuration change. In the foreground the operator is the only
 	// one who would bring it back, so they are told instead.
 	sup.Restartable = serve.Supervised()
+	// A bare relay opened no session store; a reload that turns on a surface
+	// running agent turns needs a fresh process (Supervisor.Sessionless).
+	sup.Sessionless = rt.Mgr == nil
 	// The role is this process's, not its children's: a `coddy serve` the
 	// agent starts from a tool call must not believe a dispatcher or systemd
 	// will bring it back.
@@ -436,11 +439,12 @@ type subsystemDeps struct {
 func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 	return []serve.Subsystem{
 		{
-			Kind:      serve.KindHTTP,
-			ConfigKey: "httpserver.enable",
-			BuildTag:  "http",
-			Available: httpserver.Available,
-			Enabled:   func(c *config.Config) bool { return c.HTTPServer.IsEnabled() },
+			Kind:          serve.KindHTTP,
+			ConfigKey:     "httpserver.enable",
+			BuildTag:      "http",
+			Available:     httpserver.Available,
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.HTTPServer.IsEnabled() },
 			// No Fingerprint: the listener is what the caller is talking
 			// through, so it is not rebuilt underneath them. Moving it takes a
 			// fresh process, which under a dispatcher is exactly what happens -
@@ -472,11 +476,12 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			},
 		},
 		{
-			Kind:      serve.KindGateway,
-			ConfigKey: "gateways.telegram.enable",
-			BuildTag:  "gateway",
-			Available: gateway.Available,
-			Enabled:   func(c *config.Config) bool { return c.Gateways.Telegram.Enabled },
+			Kind:          serve.KindGateway,
+			ConfigKey:     "gateways.telegram.enable",
+			BuildTag:      "gateway",
+			Available:     gateway.Available,
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.Gateways.Telegram.Enabled },
 			// A bot is a client of somebody else's server, so it can be rebuilt
 			// in place: that is how a token rotated from the settings screen
 			// takes effect without anyone reaching the machine.
@@ -520,11 +525,12 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			},
 		},
 		{
-			Kind:      serve.KindScheduler,
-			ConfigKey: "scheduler.enable",
-			BuildTag:  "scheduler",
-			Available: scheduler.Available,
-			Enabled:   func(c *config.Config) bool { return c.SchedulerEffectiveEnabled() },
+			Kind:          serve.KindScheduler,
+			ConfigKey:     "scheduler.enable",
+			BuildTag:      "scheduler",
+			Available:     scheduler.Available,
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.SchedulerEffectiveEnabled() },
 			// The daemon reads its jobs from disk, so a change to where it
 			// looks or how long a run may take needs a fresh one.
 			Fingerprint: schedulerFingerprint,
@@ -589,7 +595,7 @@ func schedulerFingerprint(c *config.Config) string {
 // that only relays a swarm opens no session store and builds no manager.
 func needsSessions(enabled []serve.Subsystem) bool {
 	for _, sub := range enabled {
-		if sub.Kind != serve.KindSwarm {
+		if sub.NeedsSessions {
 			return true
 		}
 	}

@@ -41,6 +41,9 @@ type serveFeatureState struct {
 	// what decides between exiting for a replacement and logging that a restart
 	// is due.
 	restartable bool
+	// sessionless is a process started as a bare relay, which opened no
+	// session store.
+	sessionless bool
 	runErr      error
 }
 
@@ -79,15 +82,17 @@ func (s *serveFeatureState) describe(gatewayAvailable bool) []Subsystem {
 	return []Subsystem{
 		{
 			Kind: KindHTTP, ConfigKey: "httpserver.enable", BuildTag: "http", Available: true,
-			Enabled:    func(c *config.Config) bool { return c.HTTPServer.IsEnabled() },
-			RestartKey: func(c *config.Config) string { return c.HTTPServer.DefaultListenPortString() },
-			Run:        block(KindHTTP),
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.HTTPServer.IsEnabled() },
+			RestartKey:    func(c *config.Config) string { return c.HTTPServer.DefaultListenPortString() },
+			Run:           block(KindHTTP),
 		},
 		{
 			Kind: KindGateway, ConfigKey: "gateways.telegram.enable", BuildTag: "gateway", Available: gatewayAvailable,
-			Enabled:     func(c *config.Config) bool { return c.Gateways.Telegram.Enabled },
-			Fingerprint: func(c *config.Config) string { return c.Gateways.Telegram.Token },
-			Run:         block(KindGateway),
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.Gateways.Telegram.Enabled },
+			Fingerprint:   func(c *config.Config) string { return c.Gateways.Telegram.Token },
+			Run:           block(KindGateway),
 		},
 		{
 			Kind: KindSwarm, ConfigKey: "swarm.enable", BuildTag: "swarm", Available: true,
@@ -96,9 +101,10 @@ func (s *serveFeatureState) describe(gatewayAvailable bool) []Subsystem {
 		},
 		{
 			Kind: KindScheduler, ConfigKey: "scheduler.enable", BuildTag: "scheduler", Available: true,
-			Enabled:     func(c *config.Config) bool { return c.Scheduler.Enabled },
-			Fingerprint: func(c *config.Config) string { return c.Scheduler.Dir },
-			Run:         block(KindScheduler),
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.Scheduler.Enabled },
+			Fingerprint:   func(c *config.Config) string { return c.Scheduler.Dir },
+			Run:           block(KindScheduler),
 		},
 	}
 }
@@ -181,6 +187,7 @@ func (s *serveFeatureState) launch() error {
 	s.reloads = make(chan *config.Config, 1)
 	s.sup = NewSupervisor(slog.New(slog.NewTextHandler(io.Discard, nil)), s.subs)
 	s.sup.Restartable = s.restartable
+	s.sup.Sessionless = s.sessionless
 	go func() {
 		defer close(s.done)
 		s.runErr = s.sup.Run(ctx, s.cfg, s.reloads)
@@ -747,5 +754,83 @@ func TestServeDispatcherFeature(t *testing.T) {
 	}
 	if suite.Run() != 0 {
 		t.Fatal("serve dispatcher feature suite failed")
+	}
+}
+
+// A process started as a bare relay opened no session store, and a surface
+// that runs agent turns cannot start without one. A reload that enables such a
+// surface there asks for a fresh process when something will start one, and
+// otherwise says a restart is due - never starting the surface on nothing,
+// which failed it and took the relay down with it.
+func TestReloadEnablingASessionSurfaceInARelayOnlyProcess(t *testing.T) {
+	for _, restartable := range []bool{false, true} {
+		s := &serveFeatureState{}
+		s.reset()
+		s.restartable = restartable
+		s.sessionless = true
+		off := false
+		s.cfg.HTTPServer.Enabled = &off
+		s.cfg.Swarm.Enabled = true
+		if err := s.launch(); err != nil {
+			t.Fatal(err)
+		}
+		next := *s.cfg
+		on := true
+		next.HTTPServer.Enabled = &on
+		s.reloads <- &next
+		if restartable {
+			select {
+			case <-s.done:
+				if !errors.Is(s.runErr, ErrRestartRequested) {
+					t.Errorf("run ended with %v, want a restart request", s.runErr)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("a restartable relay-only process did not ask for a restart")
+			}
+		} else {
+			time.Sleep(200 * time.Millisecond)
+			select {
+			case <-s.done:
+				t.Fatalf("the relay stopped: %v", s.runErr)
+			default:
+			}
+		}
+		if n := s.startCount(KindHTTP); n != 0 {
+			t.Errorf("restartable=%v: the HTTP surface was started %d times without a session store", restartable, n)
+		}
+		s.stopSupervisor()
+	}
+}
+
+// The fresh process a sessionless relay asks for has to be able to start: a
+// reload that also enables a surface this binary was built without would make
+// the replacement refuse its configuration at the pre-flight, again and
+// again, with no relay serving. That reload is refused where it stands.
+func TestSessionlessRelayDoesNotRestartIntoAConfigurationItCannotRun(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.subs = s.describe(false) // no gateway in this build
+	s.restartable = true
+	s.sessionless = true
+	off := false
+	s.cfg.HTTPServer.Enabled = &off
+	s.cfg.Swarm.Enabled = true
+	if err := s.launch(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.stopSupervisor()
+	next := *s.cfg
+	on := true
+	next.HTTPServer.Enabled = &on
+	next.Gateways.Telegram.Enabled = true
+	s.reloads <- &next
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-s.done:
+		t.Fatalf("the relay stopped for a configuration its replacement cannot run: %v", s.runErr)
+	default:
+	}
+	if n := s.startCount(KindSwarm); n != 1 {
+		t.Errorf("the relay was started %d times, want it left running", n)
 	}
 }

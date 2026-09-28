@@ -19,11 +19,16 @@ Feature: The settings page of a relay
     Then the settings name the relay "office"
     And the settings say a client token is set without carrying it
 
+  Scenario: A relay's settings carry the relay and nothing else of its host
+    When I read the relay's settings with the client token
+    Then the settings carry only the sections "swarm, logger"
+
   Scenario: A page's origin allowed from the settings reaches the file and the relay
     When I save the relay's settings allowing the origin "http://laptop.lan:12345" with the client token
     Then the save succeeds
     And the relay's file allows the origin "http://laptop.lan:12345"
     And the relay's file keeps its comments and its client token
+    And the relay's file keeps the provider the settings do not show
     And the relay was handed the new settings
 
   Scenario: The settings need the client token

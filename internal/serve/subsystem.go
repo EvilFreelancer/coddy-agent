@@ -51,6 +51,11 @@ type Subsystem struct {
 	// descriptor still exists so the configuration can be read and refused
 	// honestly instead of silently doing nothing.
 	Available bool
+	// NeedsSessions is true for a surface that runs agent turns through the
+	// runtime's session manager. A process whose enabled surfaces need none -
+	// a bare swarm relay - opens no session store, and such a surface cannot
+	// start in it (Supervisor.Sessionless).
+	NeedsSessions bool
 	// Enabled reports whether cfg asks for this surface.
 	Enabled func(*config.Config) bool
 	// Fingerprint returns the part of the configuration the surface is built

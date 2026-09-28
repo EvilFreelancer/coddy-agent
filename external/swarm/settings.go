@@ -33,7 +33,11 @@ func (s *Server) EnableSettings(live func() *config.Config, install func(*config
 			dto.Swarm.AuthConfigured = len(s.clientTokens()) > 0
 		},
 		Revisions: configapi.NewRevisions(),
-		Log:       s.log,
+		// The form is the relay's deployment and its log, and so is the
+		// document: the rest of the host's configuration (a provider's key,
+		// the HTTP server) is neither served nor taken here.
+		Sections: []string{"swarm", "logger"},
+		Log:      s.log,
 	}
 	backend.Register(s.mux)
 }
