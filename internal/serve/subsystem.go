@@ -69,8 +69,12 @@ type Subsystem struct {
 	// so when this changes the whole process asks to be replaced instead. A nil
 	// RestartKey means nothing about this surface needs that.
 	RestartKey func(*config.Config) string
-	// Run blocks until ctx is cancelled or the surface fails.
-	Run func(ctx context.Context) error
+	// Run blocks until ctx is cancelled or the surface fails. cfg is the
+	// configuration it is started from - the one its Fingerprint and
+	// RestartKey were read from - so a surface a reload turns on is built, and
+	// listens, where that configuration says rather than where the process
+	// started.
+	Run func(ctx context.Context, cfg *config.Config) error
 }
 
 // enabled answers the descriptor's own question, tolerating a missing func.

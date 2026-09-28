@@ -135,7 +135,7 @@ func (s *Supervisor) start(ctx context.Context, sub Subsystem, cfg *config.Confi
 	s.log.Info("subsystem starting", "subsystem", string(sub.Kind))
 	go func() {
 		defer close(inst.done)
-		err := runGuarded(child, sub)
+		err := runGuarded(child, sub, cfg)
 		if child.Err() != nil {
 			// Stopping was the instruction, so whatever the surface returned on
 			// the way out is noise, not a failure.
@@ -153,7 +153,7 @@ func (s *Supervisor) start(ctx context.Context, sub Subsystem, cfg *config.Confi
 // runGuarded turns a panic inside a surface into an ordinary error, so one
 // misbehaving subsystem takes the process down through the same path as a
 // failed listen instead of unwinding past every other subsystem's cleanup.
-func runGuarded(ctx context.Context, sub Subsystem) (err error) {
+func runGuarded(ctx context.Context, sub Subsystem, cfg *config.Config) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v\n%s", r, debug.Stack())
@@ -162,7 +162,7 @@ func runGuarded(ctx context.Context, sub Subsystem) (err error) {
 	if sub.Run == nil {
 		return errors.New("subsystem has no Run")
 	}
-	return sub.Run(ctx)
+	return sub.Run(ctx, cfg)
 }
 
 // applyConfig brings the running set in line with a configuration that was
@@ -178,6 +178,21 @@ func runGuarded(ctx context.Context, sub Subsystem) (err error) {
 func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failures chan<- error) (restart bool) {
 	if cfg == nil {
 		return false
+	}
+	// What only a fresh process can adopt is weighed before anything moves.
+	// Applying the rest first would leave a refused change half done - a
+	// surface it turned off already stopped, the others as they were - and a
+	// process that matches neither configuration. A change the replacement can
+	// start on is left to it whole: it reads the same file.
+	if kind, ok := s.needsFreshProcess(cfg); ok {
+		if !s.canRunFresh(cfg, kind) {
+			return false
+		}
+		if s.Restartable {
+			s.log.Info("configuration change needs a fresh process, restarting",
+				"subsystem", string(kind))
+			return true
+		}
 	}
 	for _, sub := range s.subs {
 		s.mu.Lock()
@@ -197,15 +212,8 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 			}
 			if sub.NeedsSessions && s.Sessionless {
 				// Started on no manager it would fail at once, and its failure
-				// ends every surface of the process, the relay included.
-				if !s.canRunFresh(cfg, sub.Kind) {
-					return false
-				}
-				if s.Restartable {
-					s.log.Info("subsystem enabled by a configuration change needs sessions, restarting the process",
-						"subsystem", string(sub.Kind))
-					return true
-				}
+				// ends every surface of the process, the relay included. A
+				// process something would start again was replaced above.
 				s.log.Error("subsystem enabled by a configuration change needs the session store this process was started without",
 					"subsystem", string(sub.Kind), "key", sub.ConfigKey,
 					"hint", "restart coddy serve to apply")
@@ -229,16 +237,9 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 		case sub.restartKey(cfg) != inst.restartKey:
 			// A listener cannot be moved under the caller that is talking
 			// through it. With a dispatcher behind this process the whole thing
-			// comes back on the new address, which is how an operator moves a
-			// port from the settings screen of the very server they are moving.
-			if s.Restartable {
-				if !s.canRunFresh(cfg, sub.Kind) {
-					return false
-				}
-				s.log.Info("subsystem listen settings changed, restarting the process",
-					"subsystem", string(sub.Kind))
-				return true
-			}
+			// came back on the new address above, which is how an operator
+			// moves a port from the settings screen of the very server they
+			// are moving; without one the operator is told.
 			s.log.Info("subsystem listen settings changed, restart required",
 				"subsystem", string(sub.Kind), "hint", "restart coddy serve to apply")
 		case sub.Fingerprint == nil:
@@ -253,11 +254,35 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 	return false
 }
 
+// needsFreshProcess names a surface cfg asks for that this process cannot
+// give it in place: one that runs agent turns while the process was started
+// without a session store, or a listener whose address moved. ok is false when
+// every change can be applied where it stands.
+func (s *Supervisor) needsFreshProcess(cfg *config.Config) (kind Kind, ok bool) {
+	for _, sub := range s.subs {
+		if !sub.enabled(cfg) {
+			continue
+		}
+		s.mu.Lock()
+		inst := s.running[sub.Kind]
+		s.mu.Unlock()
+		switch {
+		case inst == nil:
+			if sub.Available && sub.NeedsSessions && s.Sessionless {
+				return sub.Kind, true
+			}
+		case sub.restartKey(cfg) != inst.restartKey:
+			return sub.Kind, true
+		}
+	}
+	return "", false
+}
+
 // canRunFresh reports whether a fresh process could start on cfg, and says why
 // not when it could not. A configuration change that needs a new process is
 // only worth one the new process can run: one its pre-flight (Resolve)
 // refuses would be restarted into again and again with nothing serving, so
-// that change is refused where it stands and the running surfaces are kept.
+// that change is refused whole and every running surface is left as it was.
 func (s *Supervisor) canRunFresh(cfg *config.Config, kind Kind) bool {
 	if _, err := Resolve(cfg, s.subs); err != nil {
 		s.log.Error("configuration change refused: a fresh process could not start on it",

@@ -214,8 +214,6 @@ func runServe(args []string) error {
 
 	rt := &serve.Runtime{}
 	all := subsystems(rt, subsystemDeps{
-		httpAddr:        httpAddr,
-		swarmAddr:       swarmAddr,
 		httpListenAddr:  httpListenAddr,
 		swarmListenAddr: swarmListenAddr,
 		home:            paths.Home,
@@ -415,11 +413,11 @@ func httpAuthSummary(cfg *config.Config, extraAuth, extraLogin bool) string {
 
 // subsystemDeps are the already-resolved values the descriptors close over.
 type subsystemDeps struct {
-	httpAddr  string
-	swarmAddr string
-	// httpListenAddr and swarmListenAddr answer where a surface would bind under
-	// some other configuration, which is what tells a reload that moved an
-	// address from one that left it alone.
+	// httpListenAddr and swarmListenAddr answer where a surface binds under a
+	// configuration: the one it is started from, and the one a reload brings,
+	// which is what tells a reload that moved an address from one that left it
+	// alone. No address is captured at startup - a surface a reload turns on
+	// listens where that reload says.
 	httpListenAddr  func(*config.Config) string
 	swarmListenAddr func(*config.Config) string
 	home            string
@@ -451,14 +449,14 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// that is how an operator changes the port of the very server whose
 			// settings screen they are typing into.
 			RestartKey: deps.httpListenAddr,
-			Run: func(ctx context.Context) error {
+			Run: func(ctx context.Context, cfg *config.Config) error {
 				// OnServer is called with the live server and then with nil,
 				// both from this instance's goroutine.
 				withdrawPrompts := func() {}
 				return httpserver.Serve(ctx, httpserver.Options{
-					Cfg: rt.Cfg(), Mgr: rt.Mgr, Log: rt.Log,
+					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
 					DefaultCWD: rt.Paths.CWD, Home: deps.home,
-					ListenAddr: deps.httpAddr, ExtraAuthTokens: deps.httpAuthTokens,
+					ListenAddr: deps.httpListenAddr(cfg), ExtraAuthTokens: deps.httpAuthTokens,
 					ExtraLogin: deps.httpLogin, DetachedPrompts: rt, Wakes: rt,
 					OnServer: func(s *httpserver.Server) {
 						if s == nil {
@@ -486,9 +484,9 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// in place: that is how a token rotated from the settings screen
 			// takes effect without anyone reaching the machine.
 			Fingerprint: gatewayFingerprint,
-			Run: func(ctx context.Context) error {
+			Run: func(ctx context.Context, cfg *config.Config) error {
 				return gateway.Serve(ctx, gateway.Options{
-					Cfg: rt.Cfg(), Mgr: rt.Mgr, Log: rt.Log,
+					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
 					DefaultCWD: rt.Paths.CWD, Mirror: rt, Prompts: rt, Wakes: rt,
 				})
 			},
@@ -505,10 +503,10 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// is rebuilt on them. Its registry lives in memory: the nodes
 			// register and open their tunnels again within seconds.
 			Fingerprint: swarmFingerprint,
-			Run: func(ctx context.Context) error {
+			Run: func(ctx context.Context, cfg *config.Config) error {
 				return swarm.Serve(ctx, swarm.Options{
-					Cfg: rt.Cfg(), Log: rt.Log, Home: deps.home,
-					ListenAddr: deps.swarmAddr, ExtraAuthTokens: deps.swarmAuthTokens,
+					Cfg: cfg, Log: rt.Log, Home: deps.home,
+					ListenAddr: deps.swarmListenAddr(cfg), ExtraAuthTokens: deps.swarmAuthTokens,
 					// The relay's own settings page saves through the runtime,
 					// which the supervisor watches like every other reload.
 					Live: rt.Cfg,
@@ -534,7 +532,8 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// The daemon reads its jobs from disk, so a change to where it
 			// looks or how long a run may take needs a fresh one.
 			Fingerprint: schedulerFingerprint,
-			Run: func(ctx context.Context) error {
+			// The daemon follows the live configuration (rt.Cfg) itself.
+			Run: func(ctx context.Context, _ *config.Config) error {
 				return scheduler.Serve(ctx, scheduler.Options{
 					Cfg: rt.Cfg, Log: rt.Log, ProcessCWD: rt.Paths.CWD,
 					Mgr: rt.Mgr, Pool: bgtask.Default(),
