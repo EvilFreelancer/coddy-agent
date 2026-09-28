@@ -23,6 +23,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/configapi"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
@@ -70,7 +71,7 @@ type Server struct {
 	loginThrottle *webauth.Throttle
 	// served remembers the configurations GET /coddy/config handed out, so a
 	// PUT is measured against what its client read (config_revisions.go).
-	served *servedConfigs
+	served *configapi.Revisions
 
 	slashMu    sync.Mutex
 	slashCache map[string]slashListCacheEntry
@@ -169,7 +170,7 @@ func New(cfg *config.Config, mgr *session.Manager, log *slog.Logger, defaultCWD 
 		codexAuthLogins:      make(map[string]*codexAuthLoginAttempt),
 		neuralDeepAuthLogins: make(map[string]*codexAuthLoginAttempt),
 		events:               newServerEventsHub(),
-		served:               newServedConfigs(),
+		served:               configapi.NewRevisions(),
 		sessions:             webauth.NewSessionStore(),
 		loginThrottle:        &webauth.Throttle{},
 	}

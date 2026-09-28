@@ -158,6 +158,7 @@ func describePickPhraseFromLLM(llmRaw string, userWords []string) string {
 }
 
 func (s *Server) registerCoddyRoutes() {
+	s.mux.HandleFunc("GET /coddy/info", s.coddyInfoGet)
 	s.mux.HandleFunc("GET /coddy/workspace/files", s.coddyWorkspaceFilesGet)
 	s.mux.HandleFunc("GET /coddy/workspace/context", s.coddyWorkspaceContextGet)
 	s.mux.HandleFunc("GET /coddy/workspace/folders", s.coddyWorkspaceFoldersGet)

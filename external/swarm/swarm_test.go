@@ -333,6 +333,40 @@ func TestAttachTransportReplacesTheOldConnection(t *testing.T) {
 	}
 }
 
+// A relay that stops - a shutdown, or a rebuild after its settings were saved
+// (issue #401) - closes the tunnels its nodes opened. They are hijacked
+// connections the HTTP server does not own, so left alone they stayed open and
+// kept answering pings, and a node never noticed it had to dial the relay
+// that replaced this one.
+func TestClosingTheRelayClosesItsTunnels(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Swarm.Host = "127.0.0.1"
+	cfg.Swarm.PairingTokens = []string{"pair"}
+	cfg.Swarm.AuthToken = "client"
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tunnels []*fakeTunnel
+	for _, name := range []string{"worker-a", "worker-b"} {
+		res, err := srv.registry.Register(tunnelRequest(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tun := &fakeTunnel{alive: true}
+		if err := srv.registry.AttachTransport(name, res.LeaseSecret, tun); err != nil {
+			t.Fatal(err)
+		}
+		tunnels = append(tunnels, tun)
+	}
+	srv.Close()
+	for i, tun := range tunnels {
+		if tun.closed == 0 || tun.Alive() {
+			t.Errorf("tunnel %d was left open", i)
+		}
+	}
+}
+
 // For a tunnel node the connection is the liveness signal, so losing it must
 // take the node offline without waiting for a heartbeat clock.
 func TestATunnelNodeGoesOfflineWhenItsConnectionDies(t *testing.T) {
@@ -962,5 +996,80 @@ func TestRenewalKeepsTheWorkingRouteWhenTheNewOneCannotBeBuilt(t *testing.T) {
 	}
 	if !after.Info.Online {
 		t.Fatal("a failed renewal took the node offline")
+	}
+}
+
+// A relay carries the swarm: its own routes, the mounts of its nodes, its page
+// and its settings. Nothing else of an agent's API is served at its root - not
+// the documentation, not a model catalog - so a client talks to a node for
+// those (issue #401).
+func TestRelayServesNothingOfAnAgentAtItsRoot(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Swarm.Host = "127.0.0.1"
+	cfg.Swarm.AuthToken = "client"
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	for _, path := range []string{"/coddy/docs", "/coddy/docs/page?ref=operate/swarm", "/v1/models", "/coddy/sessions"} {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer client")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s at the relay's root = %d, want 404", path, res.StatusCode)
+		}
+	}
+}
+
+// A relay whose configuration names it nothing goes by the host name it runs
+// on, the way a node that joins without a name does: in /swarm/info, on the
+// map, and in the path of the sessions it lists.
+func TestARelayWithoutANameGoesByItsHostName(t *testing.T) {
+	host := swarmdto.HostNodeName()
+	if host == "" {
+		t.Skip("this machine reports no host name")
+	}
+	cfg := &config.Config{}
+	cfg.Swarm.Host = "127.0.0.1"
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	var info swarmdto.Info
+	getJSON(t, ts.URL+"/swarm/info", &info)
+	if info.Name != host {
+		t.Errorf("/swarm/info name = %q, want the host name %q", info.Name, host)
+	}
+	var topo struct {
+		Root struct {
+			Name string `json:"name"`
+		} `json:"root"`
+	}
+	getJSON(t, ts.URL+"/swarm/topology", &topo)
+	if topo.Root.Name != host {
+		t.Errorf("topology root = %q, want the host name %q", topo.Root.Name, host)
+	}
+}
+
+func getJSON(t *testing.T, url string, into any) {
+	t.Helper()
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s = %d", url, res.StatusCode)
+	}
+	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
+		t.Fatal(err)
 	}
 }

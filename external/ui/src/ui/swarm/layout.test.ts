@@ -505,3 +505,55 @@ describe("a node with no route", () => {
     expect(orphan.depth).toBeGreaterThan(placed(layout, "r1").depth);
   });
 });
+
+// The machine the page runs on is where the connection starts: drawn above the
+// relay, one tier up, wired to it (issue #401). Everything else moves down one
+// tier and keeps its shape.
+describe("layoutTopology with the local machine", () => {
+  it("puts the local machine above the relay, wired to it, and moves the rest down a tier", () => {
+    const plain = layoutTopology(chain);
+    const withClient = layoutTopology(chain, { client: { name: "Local" } });
+    const client = placed(withClient, "Local");
+    const relay = placed(withClient, "outer");
+    expect(client.kind).toBe("client");
+    expect(client.depth).toBe(-1);
+    expect(client.x).toBe(relay.x);
+    expect(client.y).toBeLessThan(relay.y);
+    for (const name of ["outer", "middle", "agent7"]) {
+      expect(placed(withClient, name).y - placed(plain, name).y).toBe(
+        relay.y - placed(plain, "outer").y,
+      );
+      expect(placed(withClient, name).depth).toBe(placed(plain, name).depth);
+    }
+    const wire = withClient.edges.find((e) => e.from.uuid === client.uuid);
+    expect(wire?.to.uuid).toBe(relay.uuid);
+    expect(withClient.tiers[0]).toMatchObject({ depth: -1, count: 1 });
+    expect(withClient.height - plain.height).toBe(relay.y - placed(plain, "outer").y);
+  });
+
+  // The live route runs from where the page is to where the app is.
+  it("starts the route to the node the app is on at the local machine", () => {
+    const layout = layoutTopology(chain, { client: { name: "Local" } });
+    const client = placed(layout, "Local");
+    const wire = layout.edges.find((e) => e.from.uuid === client.uuid);
+    const route = routeEdgeIds(layout, "middle/agent7");
+    expect(route.has(wire!.id)).toBe(true);
+    expect(route.size).toBe(3);
+  });
+});
+
+describe("connectorFor, the local machine", () => {
+  // The local machine is a disc with its name on a chip under it, and the only
+  // disc with a hop below: its wire starts under the chip, and close under it,
+  // since no line of words hangs there any more.
+  it("leaves the local machine just below its name", () => {
+    const layout = layoutTopology(chain, { client: { name: "Local" } });
+    const client = placed(layout, "Local");
+    const wire = layout.edges.find((e) => e.from.uuid === client.uuid)!;
+    const start = Number(/^M[\d.]+ ([\d.]+)/.exec(connectorFor(wire).d)?.[1]);
+    const chipBottom =
+      client.y + NODE_METRICS.chipDrop + NODE_METRICS.chipHeight / 2;
+    // The same clear space a wire keeps from any shape it leaves.
+    expect(start - chipBottom).toBe(10);
+  });
+});

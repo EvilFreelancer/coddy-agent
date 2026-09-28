@@ -6,17 +6,32 @@ import {
   fetchTopology,
   probeSwarm,
 } from "./api";
-import type { SwarmHttpError } from "./api";
-import { nodeActivity, routeLabel, sessionKey, sessionToOpen } from "./routes";
+import type { RelayTarget, SwarmHttpError } from "./api";
+import { nodeActivity, routeLabel, sessionKey } from "./routes";
 import { topologySummary } from "./layout";
 import { TopologyGraph } from "./TopologyGraph";
 import { useT } from "../i18n/I18nProvider";
+import { getEnv } from "../env/remoteEnv";
+import { rememberSwarmPicture, swarmPicture } from "../env/pageMemory";
 import type {
   SwarmInfo,
   SwarmNode,
   SwarmSession,
   SwarmTopology,
 } from "./types";
+
+/** The relay a map reads: the one it was given, else the environment itself. */
+function pictureKey(relayBase: string): string {
+  if (relayBase) {
+    return relayBase.replace(/\/+$/, "");
+  }
+  const env = getEnv();
+  return env.mode === "remote"
+    ? env.baseUrl
+    : typeof window === "undefined"
+      ? ""
+      : window.location.origin;
+}
 
 /**
  * One screen for a whole swarm, and the map is the screen: which nodes exist,
@@ -30,8 +45,31 @@ import type {
 export function SwarmView(props: {
   onOpenSession?: (s: SwarmSession) => void;
   onOpenNode?: (nodePath: string[]) => void;
+  /**
+   * A relay on the map was clicked: its route from this one, empty for the
+   * relay the map is drawn for, and the name the map shows for it. A relay is
+   * opened as a relay - its own map - never as a node, whose screens it does
+   * not have.
+   */
+  onOpenRelay?: (relayPath: string[], name: string) => void;
   /** Route of the node the app is driving right now, if it is inside one. */
   currentNode?: string[];
+  /**
+   * The relay to ask, when the app is not on it: inside a node the map is the
+   * relay's, read straight from it, so opening it leaves the node where it is.
+   */
+  relay?: RelayTarget;
+  /**
+   * The machine the page runs on, drawn above the relay as where the
+   * connection starts; a click on it opens that machine (onOpenLocal).
+   */
+  client?: { name: string };
+  onOpenLocal?: () => void;
+  /**
+   * The app is on the relay the map is drawn for: its card carries the ring a
+   * node carries when the app is on that node.
+   */
+  rootCurrent?: boolean;
   /**
    * Rendered in the header. On a relay opened as the app's home there is no
    * composer, so the environment selector that normally lives there has to be
@@ -40,22 +78,36 @@ export function SwarmView(props: {
   headerSlot?: ReactNode;
 }) {
   const { t, tp } = useT();
-  const [info, setInfo] = useState<SwarmInfo | null>(null);
-  const [nodes, setNodes] = useState<SwarmNode[]>([]);
-  const [sessions, setSessions] = useState<SwarmSession[]>([]);
+  const relayBase = props.relay?.baseUrl ?? "";
+  const relayToken = props.relay?.token ?? "";
+  // A switch to another node starts the app over, the map with it (EnvScope),
+  // but the map is the relay's and the same before and after: it is drawn at
+  // once from what it last showed, then read again, rather than from
+  // "Looking…".
+  const [picture] = useState(() => swarmPicture(pictureKey(relayBase)));
+  const [info, setInfo] = useState<SwarmInfo | null>(picture?.info ?? null);
+  const [nodes, setNodes] = useState<SwarmNode[]>(picture?.nodes ?? []);
+  const [sessions, setSessions] = useState<SwarmSession[]>(
+    picture?.sessions ?? [],
+  );
   const [results, setResults] = useState<SwarmSession[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [topology, setTopology] = useState<SwarmTopology | null>(null);
+  const [warnings, setWarnings] = useState<string[]>(picture?.warnings ?? []);
+  const [topology, setTopology] = useState<SwarmTopology | null>(
+    picture?.topology ?? null,
+  );
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!picture);
 
   const searchRef = useRef(search);
   searchRef.current = search;
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
-      const probe = await probeSwarm(signal);
+      const relay = relayBase
+        ? { baseUrl: relayBase, token: relayToken }
+        : undefined;
+      const probe = await probeSwarm(signal, relay);
       if (!probe) {
         setInfo(null);
         setError(t("swarm.error.notRelay"));
@@ -67,12 +119,12 @@ export function SwarmView(props: {
       const query = searchRef.current.trim();
       try {
         const [nodeList, sessionList, topo, found] = await Promise.all([
-          fetchNodes(signal),
+          fetchNodes(signal, relay),
           // Unfiltered, because this list is what the map counts work from. A
           // search narrows the rows under the map, never the picture.
-          fetchSwarmSessions({}, signal),
-          fetchTopology(signal).catch(() => null),
-          query ? fetchSwarmSessions({ q: query }, signal) : null,
+          fetchSwarmSessions({}, signal, relay),
+          fetchTopology(signal, relay).catch(() => null),
+          query ? fetchSwarmSessions({ q: query }, signal, relay) : null,
         ]);
         setNodes(nodeList);
         setSessions(sessionList.sessions);
@@ -81,6 +133,14 @@ export function SwarmView(props: {
         if (topo) {
           setTopology(topo);
         }
+        const key = pictureKey(relayBase);
+        rememberSwarmPicture(key, {
+          info: probe,
+          nodes: nodeList,
+          sessions: sessionList.sessions,
+          warnings: sessionList.warnings,
+          topology: topo ?? swarmPicture(key)?.topology ?? null,
+        });
       } catch (e) {
         if ((e as Error)?.name !== "AbortError") {
           // /swarm/info is public, so a relay answers the probe and then refuses
@@ -96,7 +156,7 @@ export function SwarmView(props: {
         setLoading(false);
       }
     },
-    [t],
+    [t, relayBase, relayToken],
   );
 
   useEffect(() => {
@@ -120,12 +180,12 @@ export function SwarmView(props: {
   // Work per node, so the map can say what each of them is doing.
   const activity = useMemo(() => nodeActivity(sessions), [sessions]);
 
-  // The map says a node is asking a question; the click has to land on the
-  // question. Only an idle node opens its own home.
-  const enterNode = (nodePath: string[]): void => {
-    const s = sessionToOpen(sessions, nodePath);
-    if (s) {
-      props.onOpenSession?.(s);
+  // A click on a node switches the app to it and nothing more: what to do
+  // there - the question it asks, its history - is the person's next click, on
+  // the node's own screens. A relay opens as one.
+  const enterNode = (nodePath: string[], kind?: string, name = ""): void => {
+    if (kind === "relay") {
+      props.onOpenRelay?.(nodePath, name);
       return;
     }
     props.onOpenNode?.(nodePath);
@@ -185,9 +245,14 @@ export function SwarmView(props: {
           topology={topology}
           currentNode={current}
           activity={activity}
-          {...(props.onOpenNode
-            ? { onEnterNode: (n) => enterNode(n.path) }
+          {...(props.onOpenNode || props.onOpenRelay
+            ? { onEnterNode: (n) => enterNode(n.path, n.kind, n.name) }
             : {})}
+          // Read from a relay the app is not on: the map is open over a node.
+          rootEnterable={!!props.relay}
+          rootCurrent={!props.relay && props.rootCurrent === true}
+          {...(props.client ? { client: props.client } : {})}
+          {...(props.onOpenLocal ? { onEnterClient: props.onOpenLocal } : {})}
         />
       ) : error ? null : (
         <p className="swarm-empty">

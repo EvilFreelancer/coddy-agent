@@ -444,11 +444,18 @@ tools:
 #   cors:
 #     enable: false
 #     allowed_origins: ["http://localhost:12345"]
-#   # Remote coddy serve servers offered in the UI environment selector. Tokens are NOT stored here;
-#   # the UI keeps them client-side per remote.
+#   # Remote coddy serve servers and swarm relays offered in the UI environment selector and
+#   # resolved by `coddy --remote <name>`. An entry may carry the token to present (usually a
+#   # ${ENV} reference): every browser that reads this config receives it, which is the choice
+#   # of whoever writes it here. Without one, the UI keeps the token in the browser per remote
+#   # and the console reads --remote-token or CODDY_REMOTE_TOKEN. A relay also has to list the
+#   # page's origin in its swarm.cors.allowed_origins.
 #   remotes:
 #     - name: "prod box"
 #       url: "https://box.example:12345"
+#     - name: "office relay"
+#       url: "http://relay.lan:12346"
+#       token: "${CODDY_RELAY_TOKEN}"   # the relay's client token (its swarm.auth_token)
 
 # Embedded web UI (only with -tags http,ui). Set enable: false to run an API-only server
 # (e.g. a remote box) — the SPA at GET / is replaced by a short notice, and the API keeps
@@ -549,7 +556,7 @@ logger:
 # ----------------------------------------------------------------------------
 # swarm:
 #   enable: false        # run the relay here; independent of the join list below
-#   name: "outer"
+#   name: "outer"          # empty: the host name this relay runs on
 #   host: "0.0.0.0"
 #   port: 12346
 #   # A relay reaches every node with that node's own credential, so an open one
@@ -575,7 +582,7 @@ logger:
 #   # That symmetry is the whole of relay chaining.
 #   join:
 #     - url: "https://relay.example"
-#       name: "nas02"
+#       name: "nas02"      # empty: the host name, dots turned into dashes
 #       pairing_token: "${CODDY_SWARM_PAIRING_TOKEN}"
 #       # Where the relay can reach this process. Leave it out and this process
 #       # dials the relay instead, which is the only way in from a network that

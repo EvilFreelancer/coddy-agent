@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -221,6 +222,7 @@ func runServe(args []string) error {
 		httpAuthTokens:  httpTokens,
 		httpLogin:       outOfBandLogin(),
 		swarmAuthTokens: outOfBandTokens(*swarmAuthToken, swarm.TokenEnvVar),
+		adjust:          applyProcessOverrides,
 	})
 	// Resolve is the pre-flight: it refuses a configuration this binary cannot
 	// honour before a single listener is opened, and reports what will run.
@@ -286,45 +288,45 @@ func runServe(args []string) error {
 	defer stop()
 
 	reloads := make(chan *config.Config, 1)
-	if rt.Mgr != nil {
-		// Every reload path - the settings screen, the agent's config_commit
-		// tool, the console - lands in the manager, so watching it is how a
-		// remote edit reaches a subsystem that has to be rebuilt to honour it.
-		//
-		// Only the newest configuration is worth keeping: an observer must not
-		// block the goroutine that replaced it, and a queued older document is
-		// already wrong by the time the supervisor would read it.
-		removeObserver := rt.Mgr.AddConfigObserver(func(next *config.Config) {
-			for {
-				select {
-				case reloads <- next:
-					return
-				default:
-				}
-				select {
-				case <-reloads:
-				default:
-					return
-				}
+	// Every reload path - the settings screen, the agent's config_commit tool,
+	// the console, a relay's own settings page - lands in the runtime (the
+	// session manager when the process has one), so watching it is how a remote
+	// edit reaches a subsystem that has to be rebuilt to honour it. A relay
+	// alone has no manager and used to have no reloads at all.
+	//
+	// Only the newest configuration is worth keeping: an observer must not
+	// block the goroutine that replaced it, and a queued older document is
+	// already wrong by the time the supervisor would read it.
+	removeObserver := rt.AddConfigObserver(func(next *config.Config) {
+		for {
+			select {
+			case reloads <- next:
+				return
+			default:
 			}
-		})
-		defer removeObserver()
-
-		// Not every writer of config.yaml is this process. `coddy providers
-		// login` adds a provider and its models from another terminal, an
-		// operator edits the file by hand, a deployment drops a new one in.
-		// Watching the file turns all of those into the same swap the settings
-		// screen makes, so an open model picker, a chat surface and the
-		// supervisor see them together.
-		watcher := &config.FileWatcher{
-			Paths:   paths,
-			Live:    rt.Mgr.Cfg,
-			Install: rt.Mgr.ReplaceConfig,
-			Adjust:  applyProcessOverrides,
-			Log:     log,
+			select {
+			case <-reloads:
+			default:
+				return
+			}
 		}
-		go func() { _ = watcher.Run(ctx) }()
+	})
+	defer removeObserver()
+
+	// Not every writer of config.yaml is this process. `coddy providers
+	// login` adds a provider and its models from another terminal, an
+	// operator edits the file by hand, a deployment drops a new one in.
+	// Watching the file turns all of those into the same swap the settings
+	// screen makes, so an open model picker, a chat surface and the
+	// supervisor see them together.
+	watcher := &config.FileWatcher{
+		Paths:   paths,
+		Live:    rt.Cfg,
+		Install: rt.ReplaceConfig,
+		Adjust:  applyProcessOverrides,
+		Log:     log,
 	}
+	go func() { _ = watcher.Run(ctx) }()
 
 	// The supervisor is handed every descriptor, not just the enabled ones, so
 	// a later configuration change can turn a surface on as well as off.
@@ -421,6 +423,9 @@ type subsystemDeps struct {
 	httpAuthTokens  []string
 	httpLogin       httpserver.LoginCredentials
 	swarmAuthTokens []string
+	// adjust re-applies the command-line overrides to a configuration loaded
+	// from the file, the way the file watcher does, before it is installed.
+	adjust func(*config.Config) error
 }
 
 // subsystems describes every surface this binary knows about, available or not.
@@ -490,10 +495,27 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			Available:  swarm.Available,
 			Enabled:    func(c *config.Config) bool { return c.Swarm.Enabled },
 			RestartKey: deps.swarmListenAddr,
+			// The relay reads its settings when it starts, so one whose
+			// settings moved - saved from its own page or edited in the file -
+			// is rebuilt on them. Its registry lives in memory: the nodes
+			// register and open their tunnels again within seconds.
+			Fingerprint: swarmFingerprint,
 			Run: func(ctx context.Context) error {
 				return swarm.Serve(ctx, swarm.Options{
 					Cfg: rt.Cfg(), Log: rt.Log, Home: deps.home,
 					ListenAddr: deps.swarmAddr, ExtraAuthTokens: deps.swarmAuthTokens,
+					// The relay's own settings page saves through the runtime,
+					// which the supervisor watches like every other reload.
+					Live: rt.Cfg,
+					Install: func(c *config.Config) error {
+						if deps.adjust != nil {
+							if err := deps.adjust(c); err != nil {
+								return err
+							}
+						}
+						rt.ReplaceConfig(c)
+						return nil
+					},
 				})
 			},
 		},
@@ -514,6 +536,22 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			},
 		},
 	}
+}
+
+// swarmFingerprint is everything a rebuilt relay would read differently, apart
+// from its listen address, which RestartKey answers: a new address takes a new
+// process, anything else a new relay in this one.
+func swarmFingerprint(c *config.Config) string {
+	if c == nil {
+		return ""
+	}
+	s := c.Swarm
+	s.Host, s.Port = "", 0
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // gatewayFingerprint is everything a rebuilt bot would read differently.
