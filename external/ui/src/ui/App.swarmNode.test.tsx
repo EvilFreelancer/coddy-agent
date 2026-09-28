@@ -152,6 +152,78 @@ afterEach(() => {
   vi.unstubAllGlobals();
   history.replaceState(null, "", "/");
   localStorage.clear();
+  document.cookie = "coddy_sessions_origin=; Path=/; Max-Age=0; SameSite=Lax";
+});
+
+function sessionRequests(): URL[] {
+  return nodeFetch.mock.calls
+    .map(([input]) => new URL(String(input), "http://node.test"))
+    .filter((url) => url.pathname === "/coddy/sessions");
+}
+
+async function openHistoryEnvironmentFilter(): Promise<void> {
+  fireEvent.click(await screen.findByTestId("nav-history"));
+  fireEvent.click(await screen.findByTestId("sessions-filter-trigger"));
+  fireEvent.click(screen.getByTestId("sessions-filter-section-environment"));
+}
+
+test("History origin filters the active swarm node without switching environments", async () => {
+  document.cookie = "coddy_sessions_origin=local; Path=/; SameSite=Lax";
+  const activeRemote = localStorage.getItem("coddy_env");
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+
+  await waitFor(() =>
+    expect(
+      sessionRequests().some((url) => url.searchParams.get("origin") === "local"),
+    ).toBe(true),
+  );
+  await openHistoryEnvironmentFilter();
+  expect(screen.getByTestId("sessions-filter-env-local")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  nodeFetch.mockClear();
+  switched.mockClear();
+  fireEvent.click(screen.getByTestId("sessions-filter-env-gateway"));
+
+  expect(switched).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(
+      sessionRequests().some((url) => url.searchParams.get("origin") === "gateway"),
+    ).toBe(true),
+  );
+  expect(document.cookie).toContain("coddy_sessions_origin=gateway");
+  expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
+});
+
+test("History All filters the active swarm node without switching environments", async () => {
+  document.cookie = "coddy_sessions_origin=local; Path=/; SameSite=Lax";
+  const activeRemote = localStorage.getItem("coddy_env");
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await openHistoryEnvironmentFilter();
+
+  nodeFetch.mockClear();
+  switched.mockClear();
+  fireEvent.click(screen.getByTestId("sessions-filter-env-all"));
+
+  expect(switched).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(
+      sessionRequests().some((url) => !url.searchParams.has("origin")),
+    ).toBe(true),
+  );
+  expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
 });
 
 test("the swarm map opens over a node without leaving it", async () => {

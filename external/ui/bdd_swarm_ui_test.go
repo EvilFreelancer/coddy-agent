@@ -18,6 +18,10 @@ func TestSwarmWebUIFeature(t *testing.T) {
 				return runVitestScenario("src/ui/swarm/SwarmView.test.tsx",
 					"SwarmView takes taps on a phone: the dock sits above the backdrop and below the top bar")
 			})
+			sc.Step(`^the History origin filter applies to the node currently open through the relay without leaving it$`, func() error {
+				return runVitestScenario("src/ui/App.swarmNode.test.tsx",
+					"History origin filters the active swarm node without switching environments")
+			})
 		},
 		Options: &godog.Options{
 			Format:   "pretty",

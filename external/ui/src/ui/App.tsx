@@ -5669,15 +5669,9 @@ export function App() {
    */
   const sessionEnvironments = useMemo<SessionsEnvironmentOption[]>(() => {
     const onRemote = activeEnv.mode === "remote";
-    // Narrowing by origin is a filter on the server being read; it must not
-    // reach for connectLocal, which reloads the page and would throw the choice
-    // away before it was used. Only coming *back* from a remote is a switch,
-    // and that reload resets the filter along with everything else.
+    // The first three rows filter whichever server is active. Configured
+    // remote rows below switch the server the whole app reads instead.
     const narrowTo = (origin: SessionOriginFilter) => () => {
-      if (onRemote) {
-        connectLocal();
-        return;
-      }
       setSessionsOrigin(origin);
       writeSessionPref(SESSION_PREF_COOKIES.origin, origin);
     };
@@ -5685,19 +5679,19 @@ export function App() {
       {
         key: "all",
         label: t("sessions.filter.env.all"),
-        active: !onRemote && sessionsOrigin === "",
+        active: sessionsOrigin === "",
         onPick: narrowTo(""),
       },
       {
         key: "local",
         label: t("sessions.filter.env.local"),
-        active: !onRemote && sessionsOrigin === "local",
+        active: sessionsOrigin === "local",
         onPick: narrowTo("local"),
       },
       {
         key: "gateway",
         label: t("sessions.filter.env.gateway"),
-        active: !onRemote && sessionsOrigin === "gateway",
+        active: sessionsOrigin === "gateway",
         onPick: narrowTo("gateway"),
       },
     ];
@@ -5707,8 +5701,7 @@ export function App() {
         label: remote.name.trim() || remote.url,
         active:
           onRemote && activeEnv.baseUrl === remote.url.replace(/\/+$/, ""),
-        // Connecting reloads the page, so nothing of this session's state
-        // reaches the other server - the origin filter included.
+        // A configured remote is an environment switch, not an origin filter.
         onPick: () => connectConfiguredRemote(remote),
       });
     }

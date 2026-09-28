@@ -7,3 +7,6 @@ Feature: The swarm screen in the web UI
 
   Scenario: On a phone the swarm screen takes taps and clears the top bar
     Then the swarm dock sits above the shell's backdrop and below the top bar on a narrow shell
+
+  Scenario: History origin filtering stays on the active swarm node
+    Then the History origin filter applies to the node currently open through the relay without leaving it
