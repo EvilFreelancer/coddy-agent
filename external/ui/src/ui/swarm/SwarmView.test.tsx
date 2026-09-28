@@ -344,11 +344,13 @@ describe("SwarmView", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
 
-    fireEvent.keyDown(viewport, { key: "+" });
+    fireEvent.keyDown(viewport, { key: "+", shiftKey: true });
     await waitFor(() => {
       expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
     });
     fireEvent.keyDown(viewport, { key: "0" });
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+    fireEvent.keyDown(viewport, { key: "+", ctrlKey: true });
     expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
   });
 
@@ -362,6 +364,14 @@ describe("SwarmView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Star layout" }));
     expect(mapNode("middle")).toHaveClass("is-route-relay");
     expect(mapNode("other")).not.toHaveClass("is-route-relay");
+
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      ".swarm-node-relay.is-route-relay:not(.is-current) .swarm-node-ring",
+    );
   });
 
   it("renders the environment selector in the Swarm error state", async () => {
@@ -700,6 +710,7 @@ describe("SwarmView", () => {
     expect(
       document.querySelector(".swarm-node-client")?.getAttribute("class"),
     ).toContain("is-on-route");
+    expect(mapNode("outer")).toHaveClass("is-route-relay", "is-current");
   });
 
   it("previews the route to a node while it is hovered", async () => {

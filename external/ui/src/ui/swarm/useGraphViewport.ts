@@ -253,8 +253,7 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
       event.keyCode === 229 ||
       event.altKey ||
       event.ctrlKey ||
-      event.metaKey ||
-      event.shiftKey
+      event.metaKey
     ) {
       return;
     }

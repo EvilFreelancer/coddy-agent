@@ -13768,7 +13768,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 /* Every relay a live route crosses remains visible as the route's structure.
    The root still has its filled accent tile, and the current relay keeps the
    stronger current-node ring above this quieter transit outline. */
-.swarm-node-relay.is-route-relay .swarm-node-ring {
+.swarm-node-relay.is-route-relay:not(.is-current) .swarm-node-ring {
   opacity: 0.78;
   stroke-width: 2.5;
   stroke-dasharray: none;
