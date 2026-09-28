@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -182,5 +183,53 @@ func TestRuntimeWithoutAManagerHoldsTheLiveConfiguration(t *testing.T) {
 	rt.ReplaceConfig(nil)
 	if rt.Cfg() != first {
 		t.Fatal("a nil configuration replaced the live one")
+	}
+}
+
+// A relay alone holds its configuration in the runtime, and two overlapping
+// replacements reach the supervisor in the order they were stored, as they do
+// through a manager: the other order left it rebuilding the relay on the older
+// one.
+func TestRuntimeReplacementsReachObserversInTheOrderTheyWereStored(t *testing.T) {
+	rt := &Runtime{}
+	if err := rt.Init(Options{Cfg: &config.Config{}}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := &config.Config{}, &config.Config{}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var last *config.Config
+	remove := rt.AddConfigObserver(func(c *config.Config) {
+		if c == first {
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		last = c
+		mu.Unlock()
+	})
+	defer remove()
+	firstDone, secondDone := make(chan struct{}), make(chan struct{})
+	go func() { rt.ReplaceConfig(first); close(firstDone) }()
+	<-entered
+	go func() { rt.ReplaceConfig(second); close(secondDone) }()
+	// Give a second replacement that is not held back the time to publish
+	// before the first one's publication resumes.
+	select {
+	case <-secondDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for _, done := range []chan struct{}{firstDone, secondDone} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a replacement never finished")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if last != rt.Cfg() {
+		t.Fatalf("the observer was left on %p while the runtime holds %p", last, rt.Cfg())
 	}
 }

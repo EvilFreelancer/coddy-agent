@@ -88,6 +88,12 @@ type Manager struct {
 	cfgObserverMu  sync.Mutex
 	cfgObservers   map[int]func(*config.Config)
 	cfgObserverSeq int
+	// cfgReplaceMu holds one replacement from its store to its last observer,
+	// so observers hear replacements in the order they were stored. Not every
+	// writer takes the config file lock (config_commit, the file watcher), and
+	// two overlapping replacements otherwise reached an observer newest first,
+	// leaving it on the older configuration while the manager held the newer.
+	cfgReplaceMu sync.Mutex
 
 	// deleting marks sessions whose bundles are being removed by
 	// DeleteSessionTree, so a turn racing the delete is refused instead of
@@ -311,6 +317,8 @@ func (m *Manager) SetMCPTrust(ctx context.Context, cwd, name, fingerprint string
 // sessions. It returns the previous configuration so callers can decide
 // whether active MCP clients need reconnecting.
 func (m *Manager) storeConfig(next *config.Config) *config.Config {
+	m.cfgReplaceMu.Lock()
+	defer m.cfgReplaceMu.Unlock()
 	previous := m.activeCfg()
 	m.skillsLoad = skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
 	m.cfgAt.Store(next)

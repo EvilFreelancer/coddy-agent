@@ -154,6 +154,10 @@ func (s *Server) Drain() {
 }
 
 // New creates an HTTP server wrapper (handlers registered on mux).
+//
+// cfg is the configuration the server starts from. With a manager the
+// manager's configuration wins from then on: every replacement reaches the
+// server, and so does one the manager made before the server subscribed.
 func New(cfg *config.Config, mgr *session.Manager, log *slog.Logger, defaultCWD string) *Server {
 	s := &Server{
 		mgr:                  mgr,

@@ -16,6 +16,10 @@ import (
 type liveConfig struct {
 	cur atomic.Pointer[config.Config]
 
+	// replaceMu holds one replacement from its store to its last observer, so
+	// the supervisor hears replacements in the order they were stored.
+	replaceMu sync.Mutex
+
 	mu        sync.Mutex
 	seq       uint64
 	observers map[uint64]func(*config.Config)
@@ -24,11 +28,15 @@ type liveConfig struct {
 func (l *liveConfig) load() *config.Config { return l.cur.Load() }
 
 // replace installs next and tells every observer. Like the manager's, an
-// observer runs on the replacing goroutine and must not block.
+// observer runs on the replacing goroutine, hears the replacements one at a
+// time in the order they were stored, and must neither block nor replace the
+// configuration itself.
 func (l *liveConfig) replace(next *config.Config) {
 	if next == nil {
 		return
 	}
+	l.replaceMu.Lock()
+	defer l.replaceMu.Unlock()
 	l.cur.Store(next)
 	l.mu.Lock()
 	fns := make([]func(*config.Config), 0, len(l.observers))
