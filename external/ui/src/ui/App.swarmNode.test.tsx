@@ -183,6 +183,7 @@ async function openHistoryEnvironmentFilter(): Promise<void> {
 
 test("History origin filters the active swarm node without switching environments", async () => {
   document.cookie = "coddy_sessions_origin=local; Path=/; SameSite=Lax";
+  pageRemotes = [{ name: "input-relay", url: RELAY }];
   const activeRemote = localStorage.getItem("coddy_env");
 
   render(
@@ -203,8 +204,17 @@ test("History origin filters the active swarm node without switching environment
     ).toBe(true),
   );
   await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("input-relay · Local"),
+  );
   expect(screen.getByTestId("sessions-filter-env-local")).toHaveAttribute(
     "aria-checked",
+    "true",
+  );
+  expect(screen.getByTestId(`sessions-filter-env-${RELAY}`)).toHaveAttribute(
+    "aria-current",
     "true",
   );
 
@@ -230,7 +240,14 @@ test("History origin filters the active swarm node without switching environment
   nodeFetch.mockClear();
   switched.mockClear();
   fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  expect(screen.getByTestId("sessions-filter-section-environment")).toHaveTextContent(
+    "input-relay · Gateway",
+  );
   fireEvent.click(screen.getByTestId("sessions-filter-section-environment"));
+  expect(screen.getByTestId(`sessions-filter-env-${RELAY}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
   fireEvent.click(screen.getByTestId("sessions-filter-env-all"));
 
   expect(switched).not.toHaveBeenCalled();

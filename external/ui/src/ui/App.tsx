@@ -5677,18 +5677,21 @@ export function App() {
     };
     const rows: SessionsEnvironmentOption[] = [
       {
+        kind: "origin",
         key: "all",
         label: t("sessions.filter.env.all"),
         active: sessionsOrigin === "",
         onPick: narrowTo(""),
       },
       {
+        kind: "origin",
         key: "local",
         label: t("sessions.filter.env.local"),
         active: sessionsOrigin === "local",
         onPick: narrowTo("local"),
       },
       {
+        kind: "origin",
         key: "gateway",
         label: t("sessions.filter.env.gateway"),
         active: sessionsOrigin === "gateway",
@@ -5696,11 +5699,15 @@ export function App() {
       },
     ];
     for (const remote of configuredRemotes) {
+      const remoteBase = remote.url.replace(/\/+$/, "");
       rows.push({
+        kind: "switch",
         key: remote.url,
         label: remote.name.trim() || remote.url,
         active:
-          onRemote && activeEnv.baseUrl === remote.url.replace(/\/+$/, ""),
+          onRemote &&
+          (activeEnv.baseUrl === remoteBase ||
+            activeEnv.baseUrl.startsWith(`${remoteBase}/swarm/nodes/`)),
         // A configured remote is an environment switch, not an origin filter.
         onPick: () => connectConfiguredRemote(remote),
       });
