@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -78,8 +78,16 @@ func TestRunCommandCWDOverrideOnlyAffectsOneCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(filepath.Clean(out), filepath.Clean(other)) {
-		t.Fatalf("override command output = %q, want %s", out, other)
+	gotInfo, err := os.Stat(strings.TrimSpace(out))
+	if err != nil {
+		t.Fatalf("stat command cwd %q: %v", out, err)
+	}
+	wantInfo, err := os.Stat(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("override command cwd = %q, want %s", out, other)
 	}
 	if env.CWD != base {
 		t.Fatalf("session cwd moved to %q", env.CWD)
