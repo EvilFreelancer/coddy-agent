@@ -39,6 +39,9 @@ var codexStreamTruncationScripts = map[string]string{
 	"cuts the stream after text deltas": "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" fr\"}\n\n",
 
+	"cuts a JSON event after text deltas": "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\n\n",
+
 	"completes the response": "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from server\"}\n\n" +
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":3}}}\n\n",
 
@@ -204,7 +207,7 @@ func initializeStreamTruncationScenario(sc *godog.ScenarioContext) {
 	})
 
 	sc.Step(`^an "openai" provider pointed at a stub server that (cuts the stream after text deltas|ends the stream with a finish_reason but no \[DONE\] marker)$`, s.aProviderPointedAtTruncatingStub)
-	sc.Step(`^a "codex" provider pointed at a stub server that (cuts the stream after text deltas|completes the response|stops the response at its output cap)$`, s.aCodexProviderPointedAtStub)
+	sc.Step(`^a "codex" provider pointed at a stub server that (cuts the stream after text deltas|cuts a JSON event after text deltas|completes the response|stops the response at its output cap)$`, s.aCodexProviderPointedAtStub)
 	sc.Step(`^a streaming completion is requested$`, s.aTruncationStreamingCompletionIsRequested)
 	sc.Step(`^the call fails with a truncation error$`, s.theCallFailsWithATruncationError)
 	sc.Step(`^the partial response preserves text "([^"]*)"$`, s.thePartialResponsePreservesText)

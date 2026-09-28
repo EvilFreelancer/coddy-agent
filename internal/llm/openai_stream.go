@@ -158,13 +158,22 @@ func (e *streamServerError) Error() string {
 // classification refuses to retry (see isRetryableLLMError).
 type streamTruncatedError struct {
 	emitted bool
+	// A Codex SSE event can close after its delimiter but before its JSON
+	// payload is complete. Keep the parser error in the chain for diagnostics.
+	cause   error
+	midJSON bool
 }
 
 func (e *streamTruncatedError) Error() string {
+	if e.midJSON {
+		return "stream truncated: upstream SSE event ended mid-JSON"
+	}
 	// Digit-free on purpose: httpStatusFromError falls back to scanning the
 	// message for status-code substrings.
 	return "stream truncated: connection closed before a terminal marker ([DONE] or finish_reason)"
 }
+
+func (e *streamTruncatedError) Unwrap() error { return e.cause }
 
 // IsStreamTruncated reports whether err carries a mid-response stream
 // truncation, so callers (the ReAct loop) can persist the partial answer the

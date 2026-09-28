@@ -234,6 +234,25 @@ func (p *codexProvider) Stream(ctx context.Context, messages []Message, tools []
 				CachedInputTokens:  cachedInputTokens,
 			}, fmt.Errorf("codex stream: %w", err)
 		}
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) && syntax.Error() == "unexpected end of JSON input" {
+			cut := fmt.Errorf("codex stream: %w", &streamTruncatedError{
+				emitted: emitted, cause: err, midJSON: true,
+			})
+			// A named or even completed tool call in a cut response has not
+			// been confirmed by a terminal event and must not be run.
+			if strings.TrimSpace(fullContent) != "" || strings.TrimSpace(reasoning) != "" {
+				return &Response{
+					Content:            fullContent,
+					Reasoning:          reasoning,
+					ReasoningSignature: p.encodeReasoningItems(reasoningItems),
+					InputTokens:        inputTokens,
+					OutputTokens:       outputTokens,
+					CachedInputTokens:  cachedInputTokens,
+				}, cut
+			}
+			return nil, cut
+		}
 		// Same transport wrapper as the openai and anthropic paths: a failure
 		// mid-read is retried only while nothing reached the caller, and an
 		// HTTP error keeps its status reachable through Unwrap.

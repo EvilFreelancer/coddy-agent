@@ -28,6 +28,12 @@ Feature: Truncated LLM streams surface as errors
     Then the call fails with a truncation error
     And the partial response preserves text "Hello fr"
 
+  Scenario: A Codex SSE event cut inside JSON fails and keeps prior text
+    Given a "codex" provider pointed at a stub server that cuts a JSON event after text deltas
+    When a streaming completion is requested
+    Then the call fails with a truncation error
+    And the partial response preserves text "Hello"
+
   Scenario: A Codex stream that completes the response succeeds
     Given a "codex" provider pointed at a stub server that completes the response
     When a streaming completion is requested

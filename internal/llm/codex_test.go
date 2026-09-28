@@ -688,6 +688,137 @@ func TestCodexStreamTerminalStates(t *testing.T) {
 	}
 }
 
+// A malformed SSE JSON event is a cut response, not a parser failure to show
+// as-is. Stream may have emitted chunks; Complete has no callback and remains
+// retryable because nothing reached its caller.
+func TestCodexStreamJSONEventTruncation(t *testing.T) {
+	text := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n"
+	reasoning := "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n"
+	namedTool := "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"run_command\",\"arguments\":\"\"}}\n\n"
+	partialTool := "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"command\\\":\"}\n\n"
+	cut := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\n\n"
+	for _, tc := range []struct {
+		name, script, content, reasoning string
+		streamed                         bool
+	}{
+		{name: "before first event", script: cut},
+		{name: "after text and reasoning", script: text + reasoning + cut, content: "Hello", reasoning: "thinking", streamed: true},
+		{name: "after named partial tool call", script: text + namedTool + partialTool + cut, content: "Hello", streamed: true},
+	} {
+		for _, mode := range []string{"Stream", "Complete"} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, tc.script)
+				}))
+				defer srv.Close()
+				provider := newCodexTestProvider(t, srv.URL)
+				var chunks []StreamChunk
+				var resp *Response
+				var err error
+				if mode == "Stream" {
+					resp, err = provider.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil,
+						func(chunk StreamChunk) { chunks = append(chunks, chunk) })
+				} else {
+					resp, err = provider.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+				}
+				if err == nil || !strings.Contains(err.Error(), "stream truncated: upstream SSE event ended mid-JSON") {
+					t.Fatalf("error = %v, want stable JSON truncation diagnostic", err)
+				}
+				if !IsStreamTruncated(err) {
+					t.Fatalf("error is not classified as truncation: %v", err)
+				}
+				wantRetry := mode == "Complete" || !tc.streamed
+				if got := isRetryableLLMError(err); got != wantRetry {
+					t.Errorf("retryable = %v, want %v", got, wantRetry)
+				}
+				var syntax *json.SyntaxError
+				if !errors.As(err, &syntax) {
+					t.Errorf("original JSON syntax error lost: %v", err)
+				}
+				if (resp != nil) != (tc.content != "" || tc.reasoning != "") {
+					t.Fatalf("partial response = %+v", resp)
+				}
+				if resp != nil {
+					if resp.Content != tc.content || resp.Reasoning != tc.reasoning || resp.StopReason != "" || len(resp.ToolCalls) != 0 {
+						t.Errorf("partial response = %+v", resp)
+					}
+				}
+				if mode == "Stream" && tc.streamed && len(chunks) == 0 {
+					t.Fatal("valid deltas did not reach the caller")
+				}
+				if mode == "Stream" && tc.name == "after named partial tool call" {
+					var named, partial bool
+					for _, chunk := range chunks {
+						named = named || chunk.ToolCallNamed != nil
+						partial = partial || chunk.ToolCallDelta != nil
+					}
+					if !named || !partial {
+						t.Fatalf("named/partial tool events not delivered before cut: %+v", chunks)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCodexJSONTruncationRetriesOnlyBeforeDelivery(t *testing.T) {
+	cut := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\n\n"
+	validText := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n"
+	completed := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"whole\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+	for _, tc := range []struct {
+		name, first string
+		complete    bool
+		wantCalls   int
+		wantText    string
+	}{
+		{name: "Stream before output", first: cut, wantCalls: 2, wantText: "whole"},
+		{name: "Stream after output", first: validText + cut, wantCalls: 1, wantText: "first"},
+		{name: "Complete after internal output", first: validText + cut, complete: true, wantCalls: 2, wantText: "whole"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if calls.Add(1) == 1 {
+					_, _ = io.WriteString(w, tc.first)
+				} else {
+					_, _ = io.WriteString(w, completed)
+				}
+			}))
+			defer srv.Close()
+			provider := wrapResilient(newCodexTestProvider(t, srv.URL), ResilientOptions{
+				RetryMax: 1, RetryBase: time.Millisecond, RetryMaxDelay: time.Millisecond,
+			})
+			var resp *Response
+			var err error
+			var delivered strings.Builder
+			if tc.complete {
+				resp, err = provider.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil)
+			} else {
+				resp, err = provider.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil,
+					func(c StreamChunk) { delivered.WriteString(c.TextDelta) })
+			}
+			if int(calls.Load()) != tc.wantCalls {
+				t.Errorf("requests = %d, want %d", calls.Load(), tc.wantCalls)
+			}
+			if resp == nil || resp.Content != tc.wantText {
+				t.Errorf("response = %+v, want %q", resp, tc.wantText)
+			}
+			if tc.wantCalls == 1 && !IsStreamTruncated(err) {
+				t.Errorf("error = %v, want truncation", err)
+			}
+			if tc.wantCalls == 2 && err != nil {
+				t.Errorf("retry did not recover: %v", err)
+			}
+			if !tc.complete && delivered.String() != tc.wantText {
+				t.Errorf("delivered %q, want %q", delivered.String(), tc.wantText)
+			}
+		})
+	}
+}
+
 // TestCodexStreamCancelKeepsPartialText covers a Stop mid-answer: the text
 // already streamed comes back next to the cancellation, which is not
 // retried.
