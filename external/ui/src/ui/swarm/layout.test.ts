@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   NODE_METRICS,
   connectorFor,
+  graphConnectorFor,
   layoutTopology,
+  nodeHalfHeight,
+  nodeHalfWidth,
   routeEdgeIds,
   topologySummary,
+  type PlacedEdge,
   type PlacedNode,
   type TopologyLayout,
 } from "./layout";
@@ -528,7 +532,9 @@ describe("layoutTopology with the local machine", () => {
     const wire = withClient.edges.find((e) => e.from.uuid === client.uuid);
     expect(wire?.to.uuid).toBe(relay.uuid);
     expect(withClient.tiers[0]).toMatchObject({ depth: -1, count: 1 });
-    expect(withClient.height - plain.height).toBe(relay.y - placed(plain, "outer").y);
+    expect(withClient.height - plain.height).toBe(
+      relay.y - placed(plain, "outer").y,
+    );
   });
 
   // The live route runs from where the page is to where the app is.
@@ -555,5 +561,117 @@ describe("connectorFor, the local machine", () => {
       client.y + NODE_METRICS.chipDrop + NODE_METRICS.chipHeight / 2;
     // The same clear space a wire keeps from any shape it leaves.
     expect(start - chipBottom).toBe(10);
+  });
+});
+
+describe("graphConnectorFor", () => {
+  function relay(uuid: string, x: number, y: number): PlacedNode {
+    return {
+      uuid,
+      name: uuid,
+      kind: "relay",
+      online: true,
+      depth: 0,
+      path: [],
+      x,
+      y,
+    };
+  }
+
+  function edge(
+    from: PlacedNode,
+    to: PlacedNode,
+    alternate = false,
+  ): PlacedEdge {
+    return {
+      id: `${from.uuid}>${to.uuid}:${to.name}`,
+      from,
+      to,
+      name: to.name,
+      alternate,
+      laneX: 0,
+    };
+  }
+
+  /** Every number an SVG path string carries, in order. */
+  function pathPoints(d: string): { x: number; y: number }[] {
+    const nums = d.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      out.push({ x: nums[i]!, y: nums[i + 1]! });
+    }
+    return out;
+  }
+
+  it("draws a downward edge as a cubic leaving the source's bottom and arriving at the target's top", () => {
+    const from = relay("parent", 400, 120);
+    const to = relay("child", 520, 380);
+    const conn = graphConnectorFor(edge(from, to));
+    expect(conn.d).toMatch(/ C/);
+    const points = pathPoints(conn.d);
+    const start = points[0]!;
+    const end = points[points.length - 1]!;
+    expect(start.x).toBe(from.x);
+    expect(start.y).toBe(from.y + nodeHalfHeight(from) + 10);
+    expect(end.x).toBe(to.x);
+    expect(end.y).toBe(to.y - nodeHalfHeight(to) - 10);
+    // The label sits at the cubic's midpoint, between the two endpoints.
+    expect(conn.labelY).toBeGreaterThan(start.y);
+    expect(conn.labelY).toBeLessThan(end.y);
+    expect(conn.labelX).toBeGreaterThanOrEqual(Math.min(start.x, end.x) - 60);
+    expect(conn.labelX).toBeLessThanOrEqual(Math.max(start.x, end.x) + 60);
+    expect(conn.peer).toBe(false);
+  });
+
+  it("keeps an alternate edge a distinct cubic over the same endpoints", () => {
+    const from = relay("parent", 400, 120);
+    const to = relay("child", 520, 380);
+    const primary = graphConnectorFor(edge(from, to));
+    const alternate = graphConnectorFor(edge(from, to, true));
+    expect(alternate.d).toMatch(/ C/);
+    expect(alternate.d).not.toBe(primary.d);
+    // Same anchors, different curve: the two wires never paint over each other.
+    const a = pathPoints(alternate.d);
+    const p = pathPoints(primary.d);
+    expect(a[0]).toEqual(p[0]);
+    expect(a[a.length - 1]).toEqual(p[p.length - 1]);
+    expect(Number.isFinite(alternate.labelX)).toBe(true);
+    expect(Number.isFinite(alternate.labelY)).toBe(true);
+  });
+
+  it("loops a backward edge around the side, finite and clear of both shapes", () => {
+    const from = relay("low", 400, 380);
+    const to = relay("high", 520, 120);
+    const conn = graphConnectorFor(edge(from, to));
+    expect(conn.d).toMatch(/ C/);
+    const points = pathPoints(conn.d);
+    for (const p of points) {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
+    const start = points[0]!;
+    const end = points[points.length - 1]!;
+    // The wire starts and ends outside the node bounds, on the side lane.
+    expect(Math.abs(start.x - from.x)).toBeGreaterThanOrEqual(
+      nodeHalfWidth(from) + 10,
+    );
+    expect(Math.abs(end.x - to.x)).toBeGreaterThanOrEqual(
+      nodeHalfWidth(to) + 10,
+    );
+    expect(Number.isFinite(conn.labelX)).toBe(true);
+    expect(Number.isFinite(conn.labelY)).toBe(true);
+  });
+
+  it("bows a same-level edge to the side instead of kinking", () => {
+    const from = relay("west", 300, 200);
+    const to = relay("east", 620, 200);
+    const conn = graphConnectorFor(edge(from, to));
+    expect(conn.d).toMatch(/ C/);
+    for (const p of pathPoints(conn.d)) {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
+    expect(Number.isFinite(conn.labelX)).toBe(true);
+    expect(Number.isFinite(conn.labelY)).toBe(true);
   });
 });

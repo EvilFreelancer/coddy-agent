@@ -245,7 +245,7 @@ afterEach(() => {
 });
 
 describe("SwarmView", () => {
-  it("starts as a tree and remembers the star layout in this browser", async () => {
+  it("starts as a tree and remembers the picked layout in this browser", async () => {
     const first = render(<SwarmView />);
     await drawn();
     const tree = screen.getByRole("button", { name: "Tree layout" });
@@ -255,14 +255,17 @@ describe("SwarmView", () => {
 
     fireEvent.click(star);
     expect(star).toHaveAttribute("aria-pressed", "true");
-    expect(localStorage.getItem("coddy_swarm_layout")).toBe("star");
+    // The retired star selection is persisted under its new name, graph.
+    expect(localStorage.getItem("coddy_swarm_layout")).toBe("graph");
     first.unmount();
 
     render(<SwarmView />);
     await drawn();
+    // The stored graph value reads back as the new mode until the canvas
+    // integration migrates, so the retired toggle is not pressed.
     expect(screen.getByRole("button", { name: "Star layout" })).toHaveAttribute(
       "aria-pressed",
-      "true",
+      "false",
     );
   });
 

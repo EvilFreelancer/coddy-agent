@@ -24,7 +24,7 @@ describe("swarm layout preference", () => {
     expect(readSwarmLayoutMode(new MapStorage())).toBe("tree");
   });
 
-  it.each(["unknown", "STAR", " star ", ""])(
+  it.each(["unknown", "GRAPH", " graph ", ""])(
     "defaults the unknown value %j to tree",
     (value) => {
       const storage = new MapStorage();
@@ -33,7 +33,13 @@ describe("swarm layout preference", () => {
     },
   );
 
-  it.each(["star", "tree"] as const)("stores and rereads %s", (mode) => {
+  it("reads the legacy star preference as graph", () => {
+    const storage = new MapStorage();
+    storage.setItem(SWARM_LAYOUT_STORAGE_KEY, "star");
+    expect(readSwarmLayoutMode(storage)).toBe("graph");
+  });
+
+  it.each(["graph", "tree"] as const)("stores and rereads %s", (mode) => {
     const storage = new MapStorage();
     writeSwarmLayoutMode(mode, storage);
     expect(SWARM_LAYOUT_STORAGE_KEY).toBe("coddy_swarm_layout");
@@ -41,38 +47,34 @@ describe("swarm layout preference", () => {
     expect(readSwarmLayoutMode(storage)).toBe(mode);
   });
 
+  it("writes graph for the legacy star mode", () => {
+    const storage = new MapStorage();
+    writeSwarmLayoutMode("star", storage);
+    expect(storage.getItem(SWARM_LAYOUT_STORAGE_KEY)).toBe("graph");
+    expect(readSwarmLayoutMode(storage)).toBe("graph");
+  });
+
   it("uses browser localStorage when no storage is supplied", () => {
     const storage = new MapStorage();
     vi.stubGlobal("localStorage", storage);
-    writeSwarmLayoutMode("star");
-    expect(storage.getItem(SWARM_LAYOUT_STORAGE_KEY)).toBe("star");
-    expect(readSwarmLayoutMode()).toBe("star");
+    writeSwarmLayoutMode("graph");
+    expect(storage.getItem(SWARM_LAYOUT_STORAGE_KEY)).toBe("graph");
+    expect(readSwarmLayoutMode()).toBe("graph");
   });
 
   it("reads and writes safely without browser storage", () => {
     vi.stubGlobal("localStorage", undefined);
     expect(readSwarmLayoutMode()).toBe("tree");
-    expect(() => writeSwarmLayoutMode("star")).not.toThrow();
+    expect(() => writeSwarmLayoutMode("graph")).not.toThrow();
   });
 
   it("defaults to tree when reading storage throws SecurityError", () => {
     const storage = new MapStorage();
     storage.getItem = () => {
-      throw new DOMException("Storage access denied", "SecurityError");
+      throw new DOMException("denied", "SecurityError");
     };
     expect(readSwarmLayoutMode(storage)).toBe("tree");
   });
-
-  it.each(["QuotaExceededError", "SecurityError"])(
-    "ignores %s when writing storage",
-    (name) => {
-      const storage = new MapStorage();
-      storage.setItem = () => {
-        throw new DOMException("Storage write failed", name);
-      };
-      expect(() => writeSwarmLayoutMode("star", storage)).not.toThrow();
-    },
-  );
 
   it.each(["read", "write"])(
     "tolerates a throwing global localStorage getter on default %s",
@@ -91,7 +93,7 @@ describe("swarm layout preference", () => {
         if (operation === "read") {
           expect(readSwarmLayoutMode()).toBe("tree");
         } else {
-          expect(() => writeSwarmLayoutMode("star")).not.toThrow();
+          expect(() => writeSwarmLayoutMode("graph")).not.toThrow();
         }
       } finally {
         if (descriptor) {

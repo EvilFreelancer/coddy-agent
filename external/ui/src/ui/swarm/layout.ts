@@ -249,8 +249,10 @@ export function layoutTopology(
 
   // Outside every card, so a link that skips a row never crosses one.
   const laneX =
-    Math.max(...[...placed.values()].map((n) => n.x + nodeHalfWidth(n)), GUTTER) +
-    LANE_GAP;
+    Math.max(
+      ...[...placed.values()].map((n) => n.x + nodeHalfWidth(n)),
+      GUTTER,
+    ) + LANE_GAP;
 
   const edges: PlacedEdge[] = [];
   if (client && root) {
@@ -486,6 +488,68 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
     peer: false,
   };
 }
+
+/**
+ * The smooth wire the graph mode draws between two nodes.
+ *
+ * A downward edge leaves the source's bottom and arrives at the target's top,
+ * a cubic whose control points pull on the vertical, so every wire flows top
+ * to bottom like the graph itself. An edge that stays level or climbs back
+ * (a ring's way round) leaves a side and bows out sideways, finite at every
+ * bend. An alternate edge keeps the same anchors but sways its control points
+ * off the direct line, so two links between the same shapes never paint over
+ * each other. Pure, like connectorFor; the tree keeps its orthogonal wires.
+ */
+export function graphConnectorFor(edge: PlacedEdge): Connector {
+  const { from, to } = edge;
+  const dir = to.x >= from.x ? 1 : -1;
+  if (to.y - from.y > 1) {
+    const x0 = from.x;
+    const y0 = from.y + nodeHalfHeight(from) + EXIT_GAP;
+    const x1 = to.x;
+    const y1 = to.y - nodeHalfHeight(to) - ARRIVE_GAP;
+    const bend = Math.max((y1 - y0) * 0.5, 8);
+    // The alternate bows away from the direct line rather than over it.
+    const sway = edge.alternate ? -dir * GRAPH_ALT_SWEEP : 0;
+    const c1x = x0 + sway;
+    const c1y = y0 + bend;
+    const c2x = x1 + sway;
+    const c2y = y1 - bend;
+    return {
+      d:
+        `M${round(x0)} ${round(y0)}` +
+        ` C${round(c1x)} ${round(c1y)} ${round(c2x)} ${round(c2y)}` +
+        ` ${round(x1)} ${round(y1)}`,
+      labelX: round(cubicMid(x0, c1x, c2x, x1)),
+      labelY: round(cubicMid(y0, c1y, c2y, y1)),
+      peer: false,
+    };
+  }
+  // Level or climbing: out of one side, bowed wide, into the same side of the
+  // target, so the loop never crosses a shape at its ends.
+  const x0 = from.x + dir * (nodeHalfWidth(from) + EXIT_GAP);
+  const x1 = to.x + dir * (nodeHalfWidth(to) + ARRIVE_GAP);
+  const bow =
+    GRAPH_SIDE_BOW +
+    Math.abs(to.y - from.y) * 0.2 +
+    (edge.alternate ? GRAPH_ALT_SWEEP : 0);
+  const c1x = x0 + dir * bow;
+  const c2x = x1 + dir * bow;
+  return {
+    d:
+      `M${round(x0)} ${round(from.y)}` +
+      ` C${round(c1x)} ${round(from.y)} ${round(c2x)} ${round(to.y)}` +
+      ` ${round(x1)} ${round(to.y)}`,
+    labelX: round(cubicMid(x0, c1x, c2x, x1)),
+    labelY: round(cubicMid(from.y, from.y, to.y, to.y)),
+    peer: true,
+  };
+}
+
+/** How far an alternate wire sways off the direct line, in canvas units. */
+const GRAPH_ALT_SWEEP = 46;
+/** How far a level or backward wire bows out of the side lane, in canvas units. */
+const GRAPH_SIDE_BOW = 92;
 
 export function nodeHalfWidth(n: PlacedNode): number {
   return n.kind === "relay"

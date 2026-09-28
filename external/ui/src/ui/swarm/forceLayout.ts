@@ -19,11 +19,25 @@ const SPRING = 0.024;
 const REPULSION = 24000;
 const DAMPING = 0.8;
 const MAX_STEP = 12;
+/* Nominal vertical step per hop of the shortest route. It seeds the solver and
+   anchors the weak depth spring, never a rigid row: two nodes at the same
+   depth end up at different heights, which is what makes the map read as a
+   graph flowing down rather than as tiers. */
+const LEVEL = 170;
+/* How strongly a node drifts back towards its depth's level. Weak on purpose:
+   edges and repulsion win locally, so the pull shapes the flow without
+   flattening it onto horizontal lines. */
+const DEPTH_SPRING = 0.02;
+/* Spread of the seeded x around the root axis, per level of depth. */
+const SEED_SPREAD = 240;
+const SEED_SPREAD_PER_DEPTH = 140;
 
 type Body = {
   node: PlacedNode;
   halfWidth: number;
   halfHeight: number;
+  /** The level this node's depth tends towards, deterministic jitter aside. */
+  targetY: number;
   pinned: boolean;
   vx: number;
   vy: number;
@@ -32,13 +46,15 @@ type Body = {
 };
 
 /**
- * A rooted force layout, without timers or random state. Route depth only seeds
- * the positions; the solver never snaps nodes onto hop rows. Each of its 180
- * steps visits UUID-ordered pairs and edges, so a poll's enumeration order does
- * not change the result. After O(V log V + E log E) sorting, the solver takes
- * O(180 * (V² + E)) work and O(V + E) storage.
+ * A rooted graph layout, without timers or random state. Route depth only
+ * seeds the positions and sets each node's weak vertical anchor; the solver
+ * never snaps nodes onto hop rows, so the map flows downward as a directed
+ * graph. Each of its 180 steps visits UUID-ordered pairs and edges, so a
+ * poll's enumeration order does not change the result. After
+ * O(V log V + E log E) sorting, the solver takes O(180 * (V² + E)) work and
+ * O(V + E) storage.
  */
-export function layoutTopologyStar(
+export function layoutTopologyGraph(
   topology: SwarmTopology,
   opts: LayoutOptions = {},
 ): TopologyLayout {
@@ -58,9 +74,12 @@ export function layoutTopologyStar(
 
   for (let step = 0; step < ITERATIONS; step += 1) {
     for (const body of bodies) {
-      // A weak pull towards the root's axis and into its lower half-plane.
+      // A weak pull towards the root's axis, and a softer one towards the
+      // level of this node's route depth. The depth spring shapes a downward
+      // flow; it never pins nodes to rows, so same-depth siblings keep the
+      // spacing repulsion gives them.
       body.fx = -body.node.x * 0.002;
-      body.fy = 0.12 - body.node.y * 0.0008;
+      body.fy = (body.targetY - body.node.y) * DEPTH_SPRING;
     }
     eachPair(bodies, repel);
     for (const { from, to } of links) attract(from, to);
@@ -111,16 +130,22 @@ export function layoutTopologyStar(
 function seed(node: PlacedNode, rootUUID: string, lift: number): Body {
   const pinned = node.uuid === rootUUID;
   const hash = hashUUID(node.uuid);
-  const angle = (0.1 + (hash / 0x100000000) * 0.8) * Math.PI;
-  const radius = 160 + Math.max(0, node.depth + lift) * 100 + (hash & 63);
+  const depth = Math.max(0, node.depth + lift);
+  // Deterministic per-UUID jitter, so the placement cannot depend on input
+  // order and two siblings at one depth never start on the same level.
+  const spread =
+    (hash / 0x100000000 - 0.5) * (SEED_SPREAD + depth * SEED_SPREAD_PER_DEPTH);
+  const jitter = ((hash >> 8) & 63) - 32;
+  const targetY = depth * LEVEL + jitter;
   return {
     node: {
       ...node,
-      x: pinned ? 0 : Math.cos(angle) * radius,
-      y: pinned ? 0 : Math.sin(angle) * radius,
+      x: pinned ? 0 : spread,
+      y: pinned ? 0 : targetY,
     },
     halfWidth: nodeHalfWidth(node),
     halfHeight: nodeHalfHeight(node),
+    targetY,
     pinned,
     vx: 0,
     vy: 0,
@@ -242,3 +267,10 @@ function clampStep(value: number): number {
 function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
+
+/**
+ * @deprecated The mode is "graph" now; this alias keeps the current canvas
+ * integration compiling until it migrates to layoutTopologyGraph.
+ */
+export const layoutTopologyStar: typeof layoutTopologyGraph =
+  layoutTopologyGraph;
