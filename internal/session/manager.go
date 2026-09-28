@@ -101,6 +101,12 @@ type Manager struct {
 	cfgObserverMu  sync.Mutex
 	cfgObservers   map[int]func(*config.Config)
 	cfgObserverSeq int
+	// cfgReplaceMu holds one replacement from its store to its last observer,
+	// so observers hear replacements in the order they were stored. Not every
+	// writer takes the config file lock (config_commit, the file watcher), and
+	// two overlapping replacements otherwise reached an observer newest first,
+	// leaving it on the older configuration while the manager held the newer.
+	cfgReplaceMu sync.Mutex
 
 	// deleting marks sessions whose bundles are being removed by
 	// DeleteSessionTree, so a turn racing the delete is refused instead of
@@ -192,21 +198,13 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 	if next == nil {
 		return
 	}
-	previousTrust := m.swapMCPTrust(next)
-	previous := m.storeConfig(next)
+	previous, previousTrust := m.storeConfig(next)
 	if previous != nil && !mcpSettingsChanged(previous, next, previousTrust) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 	defer cancel()
 	m.reloadConfiguredMCPServers(ctx)
-}
-
-// swapMCPTrust records the project trust policy of the configuration being
-// installed and returns the one the live sessions were reconciled under.
-func (m *Manager) swapMCPTrust(next *config.Config) string {
-	previous, _ := m.mcpTrust.Swap(next.MCP.ResolvedProjectTrust()).(string)
-	return previous
 }
 
 // mcpSettingsChanged reports whether a new configuration changes which
@@ -352,10 +350,16 @@ func (m *Manager) SetMCPTrust(ctx context.Context, cwd, name, fingerprint string
 }
 
 // storeConfig replaces the process configuration and the loader used by new
-// sessions. It returns the previous configuration so callers can decide
+// sessions. It returns the previous configuration and the project trust
+// policy the live sessions were reconciled under, so callers can decide
 // whether active MCP clients need reconnecting.
-func (m *Manager) storeConfig(next *config.Config) *config.Config {
+func (m *Manager) storeConfig(next *config.Config) (*config.Config, string) {
+	m.cfgReplaceMu.Lock()
+	defer m.cfgReplaceMu.Unlock()
 	previous := m.activeCfg()
+	// The policy the live sessions were reconciled under is swapped in the
+	// same order as the configurations themselves.
+	previousTrust, _ := m.mcpTrust.Swap(next.MCP.ResolvedProjectTrust()).(string)
 	m.skillsLoad = skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
 	m.cfgAt.Store(next)
 	// The global servers the pool keeps follow the configuration: a server
@@ -371,7 +375,7 @@ func (m *Manager) storeConfig(next *config.Config) *config.Config {
 	// credential apart on the next read.
 	m.pauseProviderUsage()
 	m.publishConfigReplaced(next)
-	return previous
+	return previous, previousTrust
 }
 
 // ReloadConfigForSession reloads config.yaml and applies runtime-owned state to
@@ -416,8 +420,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 		}
 	}
 
-	previousTrust := m.swapMCPTrust(next)
-	previous := m.storeConfig(next)
+	previous, previousTrust := m.storeConfig(next)
 	if st != nil {
 		st.ReplaceSkills(loadedSkills)
 		st.ReplaceRulesCatalog(DiscoverRules(next, st.GetCWD()))

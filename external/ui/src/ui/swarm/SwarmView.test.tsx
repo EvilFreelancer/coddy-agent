@@ -130,6 +130,19 @@ function mapNode(name: string): Element {
   return found as Element;
 }
 
+/** The words a node draws on the map, its tooltip left out. */
+function drawnWords(node: Element | null): string {
+  return [...(node?.querySelectorAll("text") ?? [])]
+    .map((t) => (t.textContent || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** The line of words under a node's name, empty when it draws none. */
+function meta(node: Element): string {
+  return (node.querySelector(".swarm-node-meta")?.textContent || "").trim();
+}
+
 async function drawn(): Promise<void> {
   await waitFor(() => {
     expect(
@@ -168,52 +181,223 @@ describe("SwarmView", () => {
   });
 
   it("enters a node when it is clicked on the map", async () => {
+    // An idle agent: nothing is running or waiting there, so the click opens
+    // the node itself.
+    vi.stubGlobal("fetch", stubFetch({ sessions: [] }));
     const onOpenNode = vi.fn();
     render(<SwarmView onOpenNode={onOpenNode} />);
     await drawn();
-    // The middle relay holds no sessions of its own, so there is nothing to
-    // open there but the node itself.
-    fireEvent.click(mapNode("middle"));
-    expect(onOpenNode).toHaveBeenCalledWith(["middle"]);
+    fireEvent.click(mapNode("nas02"));
+    expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
   });
 
-  // Spotting on the map that a box is asking a question is half the job. The
-  // click after it has to land on the question.
-  it("opens the waiting session when the node it clicked is asking", async () => {
+  // A relay on the map is a relay: entering it as a node pointed the chat at a
+  // relay's mount, which has no sessions. It opens as the relay it is - its own
+  // map, reached through this one (issue #401).
+  it("opens a relay it reaches as a relay when it is clicked", async () => {
+    const onOpenNode = vi.fn();
+    const onOpenRelay = vi.fn();
+    render(<SwarmView onOpenNode={onOpenNode} onOpenRelay={onOpenRelay} />);
+    await drawn();
+    fireEvent.click(mapNode("middle"));
+    expect(onOpenRelay).toHaveBeenCalledWith(["middle"], "middle");
+    expect(onOpenNode).not.toHaveBeenCalled();
+  });
+
+  // A click on a node switches the app to it and nothing more: what to do
+  // there - the question it asks, its history - is the next click's, on the
+  // node's own screens.
+  it("switches to a node that is asking rather than opening its question", async () => {
     const onOpenNode = vi.fn();
     const onOpenSession = vi.fn();
     render(<SwarmView onOpenNode={onOpenNode} onOpenSession={onOpenSession} />);
     await drawn();
     fireEvent.click(mapNode("hidden"));
+    expect(onOpenNode).toHaveBeenCalledWith(["middle", "hidden"]);
+    expect(onOpenSession).not.toHaveBeenCalled();
+  });
+
+  // The node the app is on is where a click would go: it is not a button, as
+  // the relay the app is on is not.
+  it("leaves the node the app is on alone", async () => {
+    const onOpenNode = vi.fn();
+    const onOpenSession = vi.fn();
+    render(
+      <SwarmView
+        currentNode={["nas02"]}
+        onOpenNode={onOpenNode}
+        onOpenSession={onOpenSession}
+      />,
+    );
+    await drawn();
+    const here = mapNode("nas02");
+    expect(here.getAttribute("role")).toBeNull();
+    fireEvent.click(here);
+    fireEvent.keyDown(here, { key: "Enter" });
     expect(onOpenNode).not.toHaveBeenCalled();
-    const opened = onOpenSession.mock.calls[0]?.[0] as {
-      node_path: string[];
-      permissionPending?: boolean;
-    };
-    expect(opened.node_path).toEqual(["middle", "hidden"]);
-    expect(opened.permissionPending).toBe(true);
+    expect(onOpenSession).not.toHaveBeenCalled();
+  });
+
+  // A switch starts the app over on the new node, the map with it. The map is
+  // the relay's, the same before and after, so it is drawn at once from what
+  // it last showed rather than from "Looking…".
+  it("draws the map it last showed for this relay at once", async () => {
+    const first = render(<SwarmView />);
+    await drawn();
+    first.unmount();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    render(<SwarmView />);
+    expect(screen.getByRole("img", { name: "Swarm topology" })).toBeInTheDocument();
+    expect(screen.queryByText("Looking…")).toBeNull();
   });
 
   it("enters a node from the keyboard, and marks it focusable", async () => {
-    const onOpenNode = vi.fn();
-    render(<SwarmView onOpenNode={onOpenNode} />);
+    const onOpenRelay = vi.fn();
+    render(<SwarmView onOpenNode={() => {}} onOpenRelay={onOpenRelay} />);
     await drawn();
     const node = mapNode("middle");
     expect(node.getAttribute("tabindex")).toBe("0");
     fireEvent.keyDown(node, { key: "Enter" });
     fireEvent.keyDown(node, { key: " " });
-    expect(onOpenNode).toHaveBeenCalledTimes(2);
-    expect(onOpenNode).toHaveBeenLastCalledWith(["middle"]);
+    expect(onOpenRelay).toHaveBeenCalledTimes(2);
+    expect(onOpenRelay).toHaveBeenLastCalledWith(["middle"], "middle");
   });
 
-  it("does nothing when the relay we are attached to is clicked", async () => {
-    const onOpenNode = vi.fn();
-    render(<SwarmView onOpenNode={onOpenNode} />);
+  // Over a node, the map is read from the relay directly, and a click on the
+  // relay connects to it: the app leaves the node for the relay (issue #401).
+  it("connects to the relay from the map opened over a node", async () => {
+    // Asked by its full address: the relay, not the page's environment.
+    const relayAnswers = stubFetch();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        relayAnswers(String(input).replace("http://relay.test", "")),
+      ),
+    );
+    const onOpenRelay = vi.fn();
+    render(
+      <SwarmView
+        onOpenNode={() => {}}
+        onOpenRelay={onOpenRelay}
+        relay={{ baseUrl: "http://relay.test", token: "t" }}
+      />,
+    );
+    await drawn();
+    const root = mapNode("outer");
+    expect(root.getAttribute("role")).toBe("button");
+    fireEvent.click(root);
+    expect(onOpenRelay).toHaveBeenCalledWith([], "outer");
+  });
+
+  // On the relay itself there is nothing to connect to: the relay is not a
+  // button, and a click on it reloads nothing.
+  // The machine the page runs on is drawn above the relay, wired to it, and a
+  // click on it goes back to Local. Its wire is how the page reaches the swarm,
+  // not a link of the swarm, so the relay's card does not count it.
+  it("draws the machine the page runs on above the relay, and opens it", async () => {
+    const onOpenLocal = vi.fn();
+    render(
+      <SwarmView
+        client={{ name: "laptop" }}
+        onOpenLocal={onOpenLocal}
+        currentNode={["nas02"]}
+      />,
+    );
+    await drawn();
+    const client = document.querySelector(".swarm-node-client");
+    expect(drawnWords(client)).toBe("laptop");
+    expect(client?.querySelector("title")?.textContent).toContain("Local");
+    // The card's shape says it is a relay; its line says how much it carries.
+    expect(meta(mapNode("outer"))).toBe("2 links");
+    expect(mapNode("outer").querySelector("title")?.textContent).toContain(
+      "relay",
+    );
+    fireEvent.click(client as Element);
+    expect(onOpenLocal).toHaveBeenCalledTimes(1);
+  });
+
+  // A node that dials out carries a badge and a dotted wire; the words under
+  // it are for what the drawing cannot say, so its work moves up to that line.
+  it("says nothing under a working node that the drawing already says", async () => {
+    const tunnelled = {
+      ...topology,
+      nodes: topology.nodes.map((n) =>
+        n.uuid === "u-nas02" ? { ...n, transport: "tunnel" } : n,
+      ),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/swarm/topology")) {
+          return { ok: true, status: 200, json: async () => tunnelled } as Response;
+        }
+        return stubFetch()(input);
+      }),
+    );
+    render(<SwarmView />);
+    await drawn();
+    const nas = mapNode("nas02");
+    expect(nas.querySelector(".swarm-node-badge")).not.toBeNull();
+    expect(meta(nas)).toBe("");
+    expect(nas.querySelector("title")?.textContent).toContain("dials out");
+    const work = nas.querySelector(".swarm-node-work text");
+    expect(work?.textContent).toContain("running");
+    expect(work?.getAttribute("y")).toBe("62");
+    // A plain agent says nothing about being one either.
+    expect(meta(mapNode("hidden"))).toBe("");
+  });
+
+  // The tiers say which way a hop runs; arrowheads on every wire said it again.
+  it("draws its wires without arrowheads", async () => {
+    render(<SwarmView />);
+    await drawn();
+    expect(document.querySelectorAll(".swarm-edge").length).toBeGreaterThan(0);
+    expect(document.querySelector("marker")).toBeNull();
+    for (const wire of document.querySelectorAll(".swarm-edge")) {
+      expect(wire.getAttribute("marker-end")).toBeNull();
+      expect(wire.getAttribute("marker-start")).toBeNull();
+    }
+  });
+
+  // A wire is named by the mount the relay reaches the node under. When that is
+  // the node's own name, the chip under the node already says it.
+  it("names a wire only when the mount differs from the node's name", async () => {
+    const renamed = {
+      ...topology,
+      edges: topology.edges.map((e) =>
+        e.to_uuid === "u-hidden" ? { ...e, name: "backup" } : e,
+      ),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/swarm/topology")) {
+          return { ok: true, status: 200, json: async () => renamed } as Response;
+        }
+        return stubFetch()(input);
+      }),
+    );
+    render(<SwarmView />);
+    await drawn();
+    const chips = [...document.querySelectorAll(".swarm-edge-label")].map(
+      (t) => t.textContent,
+    );
+    expect(chips).toEqual(["backup"]);
+  });
+
+  it("leaves the relay the app is on alone", async () => {
+    const onOpenRelay = vi.fn();
+    render(<SwarmView onOpenNode={() => {}} onOpenRelay={onOpenRelay} />);
     await drawn();
     const root = mapNode("outer");
     expect(root.getAttribute("role")).toBeNull();
     fireEvent.click(root);
-    expect(onOpenNode).not.toHaveBeenCalled();
+    expect(onOpenRelay).not.toHaveBeenCalled();
   });
 
   it("does nothing for a node with no route to it", async () => {
@@ -252,7 +436,9 @@ describe("SwarmView", () => {
     await drawn();
     const here = document.querySelector(".swarm-node.is-current");
     expect(here?.textContent).toContain("hidden");
-    expect(here?.textContent).toContain("you are here");
+    // The ring is the mark; a line of text under it said the same thing again.
+    expect(drawnWords(here)).not.toContain("you are here");
+    expect(here?.querySelector("title")?.textContent).toContain("you are here");
     // Two hops from the relay, so both of them are the live path and nothing
     // else is.
     expect(document.querySelectorAll(".swarm-edge.is-live")).toHaveLength(2);
@@ -263,6 +449,23 @@ describe("SwarmView", () => {
     expect(
       document.querySelector(".swarm-graph-summary")?.textContent,
     ).toContain("You are working on hidden");
+  });
+
+  // On the relay itself the relay is where the app is: it carries the ring a
+  // node carries when the app is on it, and the wire from this machine, when
+  // the map draws it, is the route in use.
+  it("rings the relay the app is on, and draws the way to it as the route", async () => {
+    render(<SwarmView rootCurrent client={{ name: "laptop" }} />);
+    await drawn();
+    const current = document.querySelectorAll(".swarm-node.is-current");
+    expect(current).toHaveLength(1);
+    expect(current[0]).toBe(mapNode("outer"));
+    expect(current[0]?.querySelector("title")?.textContent).toContain("you are here");
+    const live = document.querySelectorAll(".swarm-edge.is-live");
+    expect(live).toHaveLength(1);
+    expect(document.querySelector(".swarm-node-client")?.getAttribute("class")).toContain(
+      "is-on-route",
+    );
   });
 
   it("previews the route to a node while it is hovered", async () => {
@@ -373,6 +576,26 @@ describe("SwarmView", () => {
     expect(z).not.toBeNull();
     expect(Number(z![1])).toBeGreaterThan(Number(mobileBackdrop![1]));
     expect(rule).toMatch(/top:\s*calc\(var\(--coddy-mobile-top-inset\)/);
+  });
+
+  // The map opens in a dock like the documentation reader's, and the two are one
+  // width: the map's dock spanned the whole screen right of the rail while the
+  // reader stopped at 1350px, and the map inside kept to 1100px of it, which
+  // left bare strips on both sides of a wide screen (issue #401).
+  it("opens in a dock as wide as the documentation reader's, and the map fills it", () => {
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    const top = (selector: string) =>
+      new RegExp(`^\\${selector}\\s*\\{([^}]*)\\}`, "m").exec(css)?.[1] ?? "";
+    for (const dock of [".swarm-dock-cluster", ".docs-dock-cluster"]) {
+      const rule = top(dock);
+      expect(rule, dock).toMatch(/width:\s*var\(--coddy-dock-width\)/);
+      expect(rule, dock).toMatch(/margin-inline:\s*auto/);
+    }
+    const view = top(".swarm-view");
+    expect(view).not.toMatch(/max-width/);
   });
 
   it("shows no rows until something is searched for", async () => {

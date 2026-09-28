@@ -1233,18 +1233,22 @@
         },
         "remotes": {
           "type": "array",
-          "description": "Remote coddy serve servers offered in the UI environment selector. Tokens are not stored here; the UI keeps them client-side per remote.",
+          "description": "Remote coddy serve servers and swarm relays offered in the UI environment selector and resolved by `coddy --remote <name>`. An entry may carry the token to present; without one the UI keeps the token in the browser per remote and the console reads --remote-token or CODDY_REMOTE_TOKEN.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Display label for the remote."
+                "description": "Display label for the remote. Empty: the web UI shows the name the remote reports (a relay's swarm.name, else the host name it runs on; an agent's host name), else its address."
               },
               "url": {
                 "type": "string",
-                "description": "Base URL of the remote coddy serve server, e.g. \"https://box.example:12345\"."
+                "description": "Base URL of the remote coddy serve server or relay, e.g. \"https://box.example:12345\"."
+              },
+              "token": {
+                "type": "string",
+                "description": "Bearer token to present to this remote: a relay's client token (swarm.auth_token) or a server's httpserver.auth_token, usually a ${ENV} reference. Optional and opt-in: every browser that reads this configuration receives it, and coddy --remote <name> uses it when --remote-token is not given. A node mounted under a relay (<url>/swarm/nodes/<name>) takes the relay's token."
               }
             }
           },
@@ -1277,7 +1281,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Label for this relay in topology views and in a child's node path.",
+          "description": "Label for this relay in topology views, in /swarm/info and in a child's node path. Empty: the host name it runs on.",
           "default": ""
         },
         "auth_token": {

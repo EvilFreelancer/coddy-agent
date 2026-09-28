@@ -357,10 +357,14 @@ type HTTPCORSJSON struct {
 	AllowedOrigins []string `json:"allowed_origins,omitempty"`
 }
 
-// HTTPRemoteJSON mirrors HTTPRemote.
+// HTTPRemoteJSON mirrors HTTPRemote. Token travels both ways, like a provider's
+// api_key: it is a credential for another server that the page itself presents
+// when it switches to that remote, not one that grants access to this server,
+// which is what the write-only fields are. config_get still redacts it.
 type HTTPRemoteJSON struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Token string `json:"token,omitempty"`
 }
 
 // SwarmJSON mirrors SwarmConfig. Every credential is write-only: reading the

@@ -469,3 +469,59 @@ func TestMountDoesNotLendANodesCORSPolicyToTheRelay(t *testing.T) {
 		}
 	}
 }
+
+// A relay chained under this one is reached through a mount like any node, and
+// the mount carries /coddy/* - but the settings of that relay decide who joins
+// it, and a client of this relay is not its operator (issue #401). Reading them
+// goes through; changing them is refused here.
+func TestMountRefusesToChangeTheSettingsOfARelayBehindIt(t *testing.T) {
+	st := &mountFeatureState{}
+	defer st.reset()
+	if err := st.aRelay("pair-secret", "client-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.anAgentNode("worker"); err != nil {
+		t.Fatal(err)
+	}
+	// A relay registered under this one; the fake node answers for it too.
+	if _, err := st.srv.registry.Register(swarmdto.RegisterRequest{
+		Name: "inner", Kind: swarmdto.KindRelay, Transport: swarmdto.TransportDirect,
+		AdvertiseURL: st.node.URL, InstanceUUID: "uuid-inner", Token: "inner-secret", Version: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	send := func(method, node, path string) int {
+		req, err := http.NewRequest(method, st.relay.URL+swarmdto.MountPath+node+path, strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+st.client)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res.StatusCode
+	}
+	for _, c := range []struct {
+		method, node, path string
+		want               int
+	}{
+		{http.MethodGet, "inner", "/coddy/config", http.StatusOK},
+		{http.MethodGet, "inner", "/coddy/config/schema", http.StatusOK},
+		{http.MethodPut, "inner", "/coddy/config", http.StatusForbidden},
+		{http.MethodPost, "inner", "/coddy/config/validate", http.StatusForbidden},
+		// The node decodes the path it routes on, so an escaped letter names
+		// the same route and is refused the same way.
+		{http.MethodPut, "inner", "/coddy/%63onfig", http.StatusForbidden},
+		{http.MethodPost, "inner", "/coddy/config/%76alidate", http.StatusForbidden},
+		// An escaped letter in the prefix is no route a mount carries at all.
+		{http.MethodPut, "inner", "/%63oddy/config", http.StatusNotFound},
+		// An agent's settings are its API like the rest of it.
+		{http.MethodPut, "worker", "/coddy/config", http.StatusOK},
+	} {
+		if got := send(c.method, c.node, c.path); got != c.want {
+			t.Errorf("%s %s%s through the mount = %d, want %d", c.method, c.node, c.path, got, c.want)
+		}
+	}
+}

@@ -74,6 +74,8 @@ export const NODE_METRICS = {
   /** Offset of a relay's two text rows from the card's centre line. */
   relayNameDrop: -3,
   relayMetaDrop: 13,
+  /** Baseline of a relay's name when no line goes under it. */
+  relayNameAloneDrop: 4,
 } as const;
 
 /* Tall enough that a hop's label lands clear of both the corner it turns and
@@ -97,6 +99,17 @@ const MARGIN_TOP = 48;
 /** Room under the deepest row for an agent's name chip and meta line. */
 const BOTTOM_PAD = 82;
 
+/** The uuid of the local machine the map draws above the relay. */
+export const CLIENT_UUID = "__coddy_client__";
+
+export type LayoutOptions = {
+  /**
+   * The machine the page runs on, drawn one tier above the relay and wired to
+   * it: that is where the connection to the swarm starts (issue #401).
+   */
+  client?: { name: string };
+};
+
 /**
  * layoutTopology places the swarm on a tier per hop.
  *
@@ -108,7 +121,13 @@ const BOTTOM_PAD = 82;
  * A pure function of the topology, so the arrangement can be checked without
  * rendering anything.
  */
-export function layoutTopology(topology: SwarmTopology): TopologyLayout {
+export function layoutTopology(
+  topology: SwarmTopology,
+  opts: LayoutOptions = {},
+): TopologyLayout {
+  // The local machine takes the top tier, so everything of the swarm sits one
+  // tier lower than it would without it.
+  const lift = opts.client ? 1 : 0;
   const byUUID = new Map<string, TopologyNode>();
   for (const n of topology.nodes) {
     byUUID.set(n.uuid, n);
@@ -177,7 +196,7 @@ export function layoutTopology(topology: SwarmTopology): TopologyLayout {
     });
     const rowWidth = (members.length - 1) * NODE_SPACING;
     const startX = GUTTER + (contentWidth - rowWidth) / 2;
-    const y = MARGIN_TOP + depth * TIER_HEIGHT;
+    const y = MARGIN_TOP + (depth + lift) * TIER_HEIGHT;
     members.forEach((n, i) => {
       placed.set(n.uuid, {
         ...n,
@@ -195,6 +214,22 @@ export function layoutTopology(topology: SwarmTopology): TopologyLayout {
         depth === 0 ||
         members.some((n) => (paths.get(n.uuid) || []).length > 0),
     });
+  }
+
+  const root = placed.get(topology.root.uuid);
+  let client: PlacedNode | null = null;
+  if (opts.client && root) {
+    client = {
+      uuid: CLIENT_UUID,
+      name: opts.client.name,
+      kind: "client",
+      online: true,
+      depth: -1,
+      path: [],
+      x: root.x,
+      y: MARGIN_TOP,
+    };
+    rows.unshift({ depth: -1, y: MARGIN_TOP, count: 1, reachable: true });
   }
 
   // A route reaches exactly one node, so its joined path identifies that node.
@@ -218,6 +253,16 @@ export function layoutTopology(topology: SwarmTopology): TopologyLayout {
     LANE_GAP;
 
   const edges: PlacedEdge[] = [];
+  if (client && root) {
+    edges.push({
+      id: `${CLIENT_UUID}>${root.uuid}`,
+      from: client,
+      to: root,
+      name: "",
+      alternate: false,
+      laneX,
+    });
+  }
   for (const e of topology.edges || []) {
     const from = placed.get(e.from_uuid);
     const to = placed.get(e.to_uuid);
@@ -234,13 +279,14 @@ export function layoutTopology(topology: SwarmTopology): TopologyLayout {
     });
   }
 
-  const height = MARGIN_TOP + deepest * TIER_HEIGHT + BOTTOM_PAD;
+  const height = MARGIN_TOP + (deepest + lift) * TIER_HEIGHT + BOTTOM_PAD;
   // The lane only costs width when something actually runs in it.
   const skipsARow = edges.some(
     (e) => Math.abs(e.to.y - e.from.y) > TIER_HEIGHT * 1.5,
   );
+  const all = client ? [client, ...placed.values()] : [...placed.values()];
   return {
-    nodes: [...placed.values()].sort((a, b) => a.depth - b.depth || a.x - b.x),
+    nodes: all.sort((a, b) => a.depth - b.depth || a.x - b.x),
     edges,
     tiers: rows,
     spineX: GUTTER - 28,
@@ -276,13 +322,12 @@ export type Connector = {
 };
 
 /**
- * Clear space left between a shape and the wire leaving it. Wide enough that
- * the head on a dialled link, which sits at the near end and points back into
- * the node, is not swallowed by that node's shadow plate.
+ * Clear space left between a shape and a wire at either end: a wire stops
+ * short of the halo a working node pulses in (9 units out from its body), so
+ * the two never touch.
  */
 const EXIT_GAP = 10;
-/** The arrowhead is 12 user units long, so a wire stops that short of a shape. */
-const ARRIVE_GAP = 12;
+const ARRIVE_GAP = 10;
 /** Radius of an elbow corner where a hop turns onto its rail. */
 const CORNER = 12;
 /**
@@ -402,7 +447,13 @@ function peerLink(from: PlacedNode, to: PlacedNode): Connector {
 
 function hopLink(from: PlacedNode, to: PlacedNode): Connector {
   const vdir = to.y > from.y ? 1 : -1;
-  const y0 = from.y + vdir * (halfHeight(from) + EXIT_GAP);
+  // A disc carries its name chip under it. An agent has no hop below it, but
+  // the local machine does: its wire leaves under the chip, not through it.
+  const below =
+    from.kind === "client" && vdir > 0
+      ? NODE_METRICS.chipDrop + NODE_METRICS.chipHeight / 2
+      : halfHeight(from);
+  const y0 = from.y + vdir * (below + EXIT_GAP);
   const y1 = to.y - vdir * (halfHeight(to) + ARRIVE_GAP);
   // Halfway between the two rows, not between the two shapes: siblings of
   // different sizes then still turn on one rail instead of on four of them.
@@ -516,6 +567,25 @@ export function routeEdgeIds(
     if (edge) {
       out.add(edge.id);
     }
+  }
+  // The route starts where the page is, when the map draws that machine.
+  const fromClient = layout.edges.find((e) => e.from.uuid === CLIENT_UUID);
+  if (fromClient) {
+    out.add(fromClient.id);
+  }
+  return out;
+}
+
+/**
+ * The links a request to the relay the map is drawn for would follow: none
+ * inside the swarm, and the wire from the machine the page runs on when the map
+ * draws it.
+ */
+export function rootRouteEdgeIds(layout: TopologyLayout): Set<string> {
+  const out = new Set<string>();
+  const fromClient = layout.edges.find((e) => e.from.uuid === CLIENT_UUID);
+  if (fromClient) {
+    out.add(fromClient.id);
   }
   return out;
 }
