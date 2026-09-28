@@ -1126,21 +1126,24 @@ is the screen: there is no list of nodes under it, because everything the list d
   the chip alone it ran past the window at 1280 px and hid the entries a token is added with.
   Pinned by **`EnvironmentChip.test.tsx`** and **`features/web_ui_menus.feature`**.
 - **Canvas layout and persistence.** The graph opens in **Tree layout**: the rooted, tiered view
-  with its hop spine. **Star layout** is a rooted free graph for reading rings and cross-links;
-  its fixed, UUID-ordered force solver makes the same topology land in the same places on every
-  poll rather than jittering as the relay enumerates it. The relay is the pinned root, or the
-  local computer is the root when that connection-start node is present. The choice is browser
-  state only, stored in localStorage as **`coddy_swarm_layout`**; an absent, blocked or invalid
-  value means Tree, and it never changes server configuration or another browser's choice.
+  with its hop spine. **Graph layout** is a deterministic rooted graph for reading rings and
+  cross-links. It trends down by shortest-route depth without placing every hop on a rigid row, and
+  draws its links as smooth curves. Its fixed, UUID-ordered solver makes the same topology land in
+  the same places on every poll rather than jittering as the relay enumerates it. The relay is the
+  pinned root, or the local computer is the root when that connection-start node is present. The
+  choice is browser state only, stored in localStorage as **`coddy_swarm_layout`**; a saved legacy
+  `star` value migrates to Graph, and an absent, blocked or invalid value means Tree. It never
+  changes server configuration or another browser's choice.
 - **Canvas camera.** The graph is fitted into its viewport on first open and whenever the relay or
-  layout changes. The **Tree** and **Star** controls select the layout; **Zoom out**, **Fit graph**
-  and **Zoom in** control the camera. Pointer-wheel zoom is centred on the pointer, dragging pans,
-  and a two-finger pinch zooms around the pinch midpoint; a drag or pinch never also enters a
-  node. When the canvas has focus, **`+`** / **`=`** zoom in, **`-`** zooms out and **`0`** fits.
-  Zoom never goes below the fitted view or above three times that scale, and panning remains
-  clamped to the graph. The controls are **40px** touch targets on the stacked shell. A polling
-  update fits an untouched graph to its new bounds, but preserves a manually panned or zoomed
-  camera (clamping it only if the bounds moved); Fit explicitly resets that manual view.
+  layout changes. The **Tree** and **Graph** controls select the layout; **Zoom out**, **Fit graph**
+  and **Zoom in** control the camera. Pointer-wheel zoom is centred on the pointer, dragging pans
+  across both axes even in the fitted view, and a two-finger pinch zooms around the pinch midpoint;
+  a drag or pinch never also enters a node. When the canvas has focus, **`+`** / **`=`** zoom in,
+  **`-`** zooms out and **`0`** fits. Zoom never goes below the fitted view or above three times
+  that scale, and panning remains clamped so the graph cannot vanish completely. The controls are
+  **40px** touch targets on the stacked shell. A polling update fits an untouched graph to its new
+  bounds, but preserves a manually panned or zoomed camera (clamping it only if the bounds moved);
+  Fit explicitly resets that manual view.
 - **Search, not filter.** The box goes to the relay, which fans out, so a query reaches machines
   this browser cannot dial. With a query, matching sessions appear as rows under the map, each
   naming its node and route, and a row opens that session on that node. With no query there are

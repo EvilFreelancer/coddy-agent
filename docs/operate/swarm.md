@@ -236,18 +236,25 @@ The Swarm screen shows the topology and a search box that goes to the relay. It 
 wide as the documentation reader's, and the map fills it.
 
 **Choose a layout, then explore the canvas.** The map starts in **Tree layout**, the rooted view
-that shows hop tiers. The **Star layout** is a deterministic rooted free graph for inspecting rings
-and cross-links: the relay is its root, or the local computer is the root when the map shows the
-machine that started the connection. The choice belongs only to this browser, under localStorage
-key `coddy_swarm_layout`; it does not change the relay configuration or another browser. If the
-key is absent, unavailable or invalid, Tree remains the default.
+that shows hop tiers. The **Graph layout** is a deterministic rooted graph for inspecting rings and
+cross-links: the relay is its root, or the local computer is the root when the map shows the machine
+that started the connection. It trends down by shortest-route depth without putting every hop on a
+rigid horizontal row, and its links are smooth curves. The choice belongs only to this browser,
+under localStorage key `coddy_swarm_layout`; it does not change the relay configuration or another
+browser. A saved legacy `star` value migrates to Graph; if the key is absent, unavailable or invalid,
+Tree remains the default.
 
-The map has Tree and Star selectors plus **Zoom out**, **Fit graph**, and **Zoom in** controls.
-Wheel zoom centres on the pointer; drag pans; two fingers pinch to zoom; and a drag or pinch does
-not activate a node. With the canvas focused, **`+`** or **`=`** zooms in, **`-`** zooms out, and
-**`0`** fits the entire graph. Canvas controls are 40px touch targets on the stacked shell. Fit
-resets the camera, as does changing the relay or layout; ordinary five-second topology polling
-does not discard a manual pan or zoom, though it keeps the camera inside changed graph bounds.
+The map has Tree and Graph selectors plus **Zoom out**, **Fit graph**, and **Zoom in** controls.
+Wheel zoom centres on the pointer; drag pans in both axes even when the graph is fitted; two fingers
+pinch to zoom; and a drag or pinch does not activate a node. With the canvas focused, **`+`** or
+**`=`** zooms in, **`-`** zooms out, and **`0`** fits the entire graph. Canvas controls are 40px
+touch targets on the stacked shell. Fit resets the camera, as does changing the relay or layout;
+ordinary five-second topology polling does not discard a manual pan or zoom, though it keeps the
+camera inside changed graph bounds.
+
+![The Graph layout with the canvas controls](../assets/swarm/map-graph-canvas-dark-1280.png)
+
+*The Graph layout: soft top-down placement, smooth links, and camera controls over the canvas.*
 
 The route in use is an accent path. Every relay it crosses is outlined, with the relay the app is
 currently driving outlined more strongly; alternate routes remain visibly secondary. This makes a

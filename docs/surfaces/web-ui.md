@@ -1248,18 +1248,21 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a phone (below 1200 px) the screen opens under the top bar and above the
   dimmed backdrop, so taps reach the map, the search and the nodes; tapping the
   top bar's own entries still leaves it.
-- **Tree** is the default canvas layout. **Star** is a deterministic rooted free
-  graph for rings and cross-links, rooted at the relay or, when drawn, at the
-  local computer that starts the connection. Selecting Tree or Star is
-  browser-only state in localStorage key `coddy_swarm_layout`; an absent,
-  blocked or invalid value selects Tree and no server configuration changes.
-- The canvas starts fitted. Its Tree/Star selector and **Zoom out**, **Fit
+- **Tree** is the default canvas layout. **Graph** is a deterministic rooted
+  top-down graph for rings and cross-links, rooted at the relay or, when drawn,
+  at the local computer that starts the connection. It follows route depth
+  softly rather than with rigid hop rows, and uses smooth links. Selecting Tree
+  or Graph is browser-only state in localStorage key `coddy_swarm_layout`; a
+  saved legacy `star` value migrates to Graph, and an absent, blocked or invalid
+  value selects Tree. No server configuration changes.
+- The canvas starts fitted. Its Tree/Graph selector and **Zoom out**, **Fit
   graph**, and **Zoom in** controls are usable with 40px targets on the stacked
-  shell. Wheel zoom follows the pointer, drag pans, two-finger pinch zooms, and
-  drag/pinch gestures do not open nodes. When focused, **`+`** / **`=`**, **`-`**
-  and **`0`** zoom in, zoom out and fit. Fit, a relay change, or a layout change
-  resets the camera; polling refits only an untouched camera and otherwise
-  preserves the operator's pan and zoom within changed bounds.
+  shell. Wheel zoom follows the pointer, drag pans in both axes even when fitted,
+  two-finger pinch zooms, and drag/pinch gestures do not open nodes. When
+  focused, **`+`** / **`=`**, **`-`** and **`0`** zoom in, zoom out and fit. Fit,
+  a relay change, or a layout change resets the camera; polling refits only an
+  untouched camera and otherwise preserves the operator's pan and zoom within
+  changed bounds.
 - Built with `-tags "swarm ui"` the relay serves this SPA at its own address;
   without the `ui` tag its root explains how to rebuild.
 - The environment selector in the map header opens **downward**, because on a
