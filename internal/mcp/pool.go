@@ -100,6 +100,8 @@ type poolEntry struct {
 	// waiting for the lock.
 	idle    *time.Timer
 	idleGen uint64
+	// deadline is when the start runs out of time.
+	deadline time.Time
 }
 
 // PoolServer describes one server connection of the pool.
@@ -291,7 +293,15 @@ func (p *Pool) acquireOnce(ctx context.Context, srv ManagedServer, workspace str
 	e := p.entries[key]
 	if e == nil {
 		_, kept := p.kept[key]
-		e = p.startLocked(key, srv, workspace, kept)
+		// The start is bounded by the caller's own deadline when that comes
+		// first: a caller that gives up on the server when its time runs out
+		// leaves nothing behind for the next one - a turn's one more try -
+		// to join instead of starting afresh.
+		deadline := time.Now().Add(time.Duration(p.dialTimeout.Load()))
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
+		}
+		e = p.startLocked(key, srv, workspace, kept, deadline)
 	}
 	e.refs++
 	e.cancelIdleLocked()
@@ -300,6 +310,9 @@ func (p *Pool) acquireOnce(ctx context.Context, srv ManagedServer, workspace str
 	select {
 	case <-e.ready:
 	case <-ctx.Done():
+		p.mu.Lock()
+		p.dropExpiredStartLocked(e)
+		p.mu.Unlock()
 		p.release(e)
 		return nil, false, ctx.Err()
 	}
@@ -375,7 +388,7 @@ func (p *Pool) Keep(servers []ManagedServer) {
 			e.cancelIdleLocked()
 			continue
 		}
-		p.startLocked(key, srv, "", true)
+		p.startLocked(key, srv, "", true, time.Now().Add(time.Duration(p.dialTimeout.Load())))
 	}
 	p.mu.Unlock()
 	for _, s := range stopping {
@@ -493,21 +506,23 @@ const closeMargin = 2 * time.Second
 
 // startLocked registers a new entry for key and starts its dial. The caller
 // holds p.mu.
-func (p *Pool) startLocked(key string, srv ManagedServer, workspace string, kept bool) *poolEntry {
+func (p *Pool) startLocked(key string, srv ManagedServer, workspace string, kept bool, deadline time.Time) *poolEntry {
 	e := &poolEntry{
 		key:       key,
 		server:    srv,
 		workspace: workspace,
 		ready:     make(chan struct{}),
 		kept:      kept,
+		deadline:  deadline,
 	}
 	p.entries[key] = e
 	p.dials.Add(1)
-	ctx, cancel := context.WithTimeout(p.ctx, time.Duration(p.dialTimeout.Load()))
+	ctx, cancel := context.WithDeadline(p.ctx, deadline)
 	// A start whose time ran out is no longer one to wait for: it is on its
 	// way to failing, and stopping what it spawned can take a while. The
 	// next caller - a turn's one more try - starts the server afresh
-	// instead of joining it.
+	// instead of joining it. A waiter that gave up at that moment drops it
+	// itself (dropExpiredStartLocked), before this has run.
 	context.AfterFunc(ctx, func() {
 		p.mu.Lock()
 		if e.conn == nil && p.entries[e.key] == e {
@@ -517,6 +532,14 @@ func (p *Pool) startLocked(key string, srv ManagedServer, workspace string, kept
 	})
 	go p.dial(ctx, cancel, e)
 	return e
+}
+
+// dropExpiredStartLocked takes a start whose time has run out off the map,
+// so the next caller starts the server afresh. The caller holds p.mu.
+func (p *Pool) dropExpiredStartLocked(e *poolEntry) {
+	if e.conn == nil && !time.Now().Before(e.deadline) && p.entries[e.key] == e {
+		delete(p.entries, e.key)
+	}
 }
 
 // dial starts the entry's server under ctx and settles the entry. A server
