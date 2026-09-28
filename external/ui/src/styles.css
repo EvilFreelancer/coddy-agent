@@ -800,6 +800,12 @@ body {
   --rail-shell-track-width: calc(
     var(--rail-pill-track) + var(--rail-column-pad-end)
   );
+  /* The width of the docks that open over the chat - the documentation reader
+     and the swarm map - which share one look (issue #401). */
+  --coddy-dock-width: min(
+    1350px,
+    calc(100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px)
+  );
 }
 
 .shell-main {
@@ -4263,7 +4269,10 @@ a.rail-brand {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 6px 6px 12px;
+  /* 12px on the right puts the remove cross on the vertical line of the
+     improve-prompt button of the card below (the row's 12px, the same 24px
+     control): composerQueueCss.test.ts. */
+  padding: 6px 12px;
   border-radius: 12px;
   background: var(--coddy-glass-panel-bg);
   backdrop-filter: var(--coddy-glass-panel-backdrop);
@@ -5061,22 +5070,17 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   gap: 6px;
 }
 
-.mode-env-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.4;
-}
-
-.mode-env-dot[data-remote="1"] {
-  background: #f59e0b; /* amber when driving a remote server */
-  opacity: 1;
-}
-
 .mode-menu--env {
   min-width: 240px;
   max-width: min(340px, calc(100vw - 24px));
+  /* The anchored menu gets the room it has as max-height (EnvironmentChip);
+     past that it scrolls rather than running off the window. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mode-menu--sheet.mode-menu--env {
+  max-height: 80vh;
 }
 
 .mode-menu--portal.mode-menu--env {
@@ -5102,6 +5106,51 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   font-size: 0.85em;
   opacity: 0.5;
   white-space: nowrap;
+}
+
+/* One remote in the menu: its row, then why it is red when it is (issue #401),
+   then the agents of a relay that let this browser in. Hints and agents start
+   under the name, past the row's padding, the dot and the gap (10 + 8 + 8). */
+.mode-env-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: -4px 0 4px;
+  padding: 0 10px 0 26px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
+}
+
+.mode-env-hint-action {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mode-env-hint-action:hover {
+  background: color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+}
+
+.mode-env-nodes {
+  display: flex;
+  flex-direction: column;
+  margin: -2px 0 4px;
+  padding-left: 16px;
+}
+
+.mode-env-item.mode-env-node {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 12.5px;
 }
 
 /* Reachability dots: green up, red down, amber while probing (local is always up). */
@@ -6542,13 +6591,23 @@ html:not([data-theme="light"]) .context-usage-note--error {
   .backdrop {
     z-index: 60;
   }
+  /* Under the top bar (80), not behind it, and over the backdrop and the
+     drawers, which start below it anyway. */
+  .env-health-banner {
+    top: var(--coddy-mobile-bar-h);
+    z-index: 75;
+  }
   .sessions.drawer,
   .scheduler-jobs.drawer,
   .settings.drawer {
     z-index: 70;
   }
   .shell {
-    --coddy-mobile-top-inset: calc(78px + env(safe-area-inset-top, 0px));
+    /* The top bar the rail becomes, and under it the environment banner when
+       one is shown: the banner publishes its height (EnvHealthBanner.tsx), so
+       everything placed by the inset starts below both. */
+    --coddy-mobile-bar-h: calc(78px + env(safe-area-inset-top, 0px));
+    --coddy-mobile-top-inset: calc(var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px));
     /* Same rhythm as title row to first message (.messages-inner gap, sticky-head padding-bottom) */
     --coddy-mobile-chat-stack-gap: 12px;
     --coddy-mobile-title-sticky-top: calc(
@@ -12192,7 +12251,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
-  width: min(1350px, calc(100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px));
+  width: var(--coddy-dock-width);
   margin-inline: auto;
   z-index: 50;
   display: flex;
@@ -13098,6 +13157,9 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
+  /* As wide as the documentation reader, and centred the same way. */
+  width: var(--coddy-dock-width);
+  margin-inline: auto;
   z-index: 50;
   overflow: auto;
   border-radius: var(--coddy-glass-panel-radius);
@@ -13117,16 +13179,17 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
     right: max(8px, env(safe-area-inset-right, 0px));
     top: calc(var(--coddy-mobile-top-inset) + 6px);
     bottom: 8px;
+    width: auto;
+    margin-inline: 0;
   }
 }
 
+/* The map fills its dock: the dock is what sets the width (--coddy-dock-width). */
 .swarm-view {
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 20px 24px 32px;
-  max-width: 1100px;
-  margin: 0 auto;
   color: var(--text);
 }
 
@@ -13250,40 +13313,12 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   font-style: italic;
 }
 
-/* Arrowheads. Each head is painted here rather than on the path referencing
-   it, because a marker resolves its paint inside defs and never inherits. */
-.swarm-head-route {
-  fill: var(--accent);
-  stroke: none;
-}
-
-.swarm-head-idle {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-down {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-dial {
-  fill: color-mix(in srgb, var(--text) 66%, var(--coddy-blend-base));
-  stroke: none;
-}
-
 /* A wire crossing a node must not swallow a click meant for the node. */
 .swarm-graph-edges {
   pointer-events: none;
 }
 
-/* The route a request would take: solid, heavier, filled head. */
+/* The route a request would take: solid and heavier. */
 .swarm-edge {
   fill: none;
   stroke: var(--accent);
@@ -13299,8 +13334,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-dasharray: 1.5 5;
 }
 
-/* A way round a ring the relay would not take: drawn, but lighter, dashed and
-   ended with an open chevron instead of a filled head. */
+/* A way round a ring the relay would not take: drawn, but lighter and
+   dashed. */
 .swarm-edge.is-alternate {
   stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
   stroke-width: 1.6;
@@ -13633,11 +13668,6 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   fill: color-mix(in srgb, var(--accent) 16%, var(--swarm-plate));
   stroke: var(--accent);
   stroke-width: 2;
-}
-
-.swarm-node.is-current .swarm-node-meta {
-  fill: var(--accent);
-  font-weight: 600;
 }
 
 /* Off the traced path: still readable, no longer competing with it. */

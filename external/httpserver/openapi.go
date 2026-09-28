@@ -1035,10 +1035,36 @@ func openAPISpec() map[string]interface{} {
 					},
 				},
 			},
+			"/coddy/info": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Which build serves this API, and where",
+					"description": "Names the version of the coddy binary serving this API, the same string `coddy -v` prints, and the host name of the machine it runs on. The web UI shows the version in the start screen's footer, for the server the page is talking to (the local one, a remote or a node reached through a relay), and names the machine the page runs on by its host name on the swarm map.",
+					"operationId": "coddyInfoGet",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "The build and the machine",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type":     "object",
+										"required": []string{"object", "version", "hostname"},
+										"properties": map[string]interface{}{
+											"object":   map[string]interface{}{"type": "string", "enum": []string{"coddy.info"}},
+											"version":  map[string]interface{}{"type": "string", "example": "1.2.35"},
+											"hostname": map[string]interface{}{"type": "string", "description": "The machine's host name; empty when the system does not say."},
+										},
+									},
+								},
+							},
+						},
+						"401": errorResponseRef(),
+					},
+				},
+			},
 			"/coddy/config": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "Get current configuration as JSON",
-					"description": "Returns the active process configuration (including **api_key** and optional **proxy** fields on providers). Per-session path fields (**`skills.dirs`**, **`subagents.dirs`**, **`hooks.files`**, **`prompts.dir`**, **`mcp_servers[].command`** / **`args`** / **`url`** / **`env`** / **`headers`**) are returned as written in **config.yaml**, including a **`${CWD}`** placeholder, which each session resolves against its own workspace; **`${CODDY_HOME}`** and the process-scoped directories are returned expanded. The document carries a **`revision`** naming the configuration it was read from; send it back with a **PUT**.",
+					"description": "Returns the active process configuration (including **api_key** and optional **proxy** fields on providers, and the **token** of an **`httpserver.remotes`** entry that carries one: the page presents it to that remote). Per-session path fields (**`skills.dirs`**, **`subagents.dirs`**, **`hooks.files`**, **`prompts.dir`**, **`mcp_servers[].command`** / **`args`** / **`url`** / **`env`** / **`headers`**) are returned as written in **config.yaml**, including a **`${CWD}`** placeholder, which each session resolves against its own workspace; **`${CODDY_HOME}`** and the process-scoped directories are returned expanded. The document carries a **`revision`** naming the configuration it was read from; send it back with a **PUT**.",
 					"operationId": "coddyConfigGet",
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{

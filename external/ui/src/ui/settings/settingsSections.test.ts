@@ -228,3 +228,29 @@ test("the session management tab follows the active locale", () => {
   expect(byId.sessions_manager?.label).toBe("Сессии");
   expect(byId.sessions_manager?.description).toBe("Сохранённые чаты и очистка");
 });
+
+// A relay holds no sessions: its settings form is its deployment and its log
+// (config.RelayUISchemaMap), and the Sessions tab, which reads /coddy/sessions,
+// would only fail there (issue #401).
+test("a relay's settings leave out the Sessions tab and name the swarm section", () => {
+  const relaySchema = {
+    type: "object",
+    "x-coddy-relay": true,
+    "x-coddy-property-order": ["swarm", "logger"],
+    properties: {
+      swarm: { type: "object", title: "Swarm relay", properties: {} },
+      logger: { type: "object", title: "Logger", properties: {} },
+    },
+  };
+  const tabs = deriveSettingsSections(relaySchema);
+  expect(tabs.map((s) => s.id)).toEqual(["appearance", "swarm", "logger"]);
+  expect(tabs.find((s) => s.id === "swarm")?.label).toBe("Swarm relay");
+});
+
+// On a relay that predates its settings page the schema is not there at all;
+// the app knows it is on a relay and still leaves the Sessions tab out.
+test("a relay without a settings page keeps only Appearance", () => {
+  expect(deriveSettingsSections(null, { relay: true }).map((s) => s.id)).toEqual([
+    "appearance",
+  ]);
+});

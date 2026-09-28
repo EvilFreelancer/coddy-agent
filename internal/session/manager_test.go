@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -1564,5 +1565,52 @@ func TestPermissionModeOverrideDoesNotOutliveTheProcess(t *testing.T) {
 	}
 	if snap.PermissionMode != "ask" {
 		t.Fatalf("permission mode after a restart = %q, want the configured ask", snap.PermissionMode)
+	}
+}
+
+// Two replacements that overlap reach an observer in the order they were
+// stored. The first is held in the middle of its publication while the second
+// is made: published first, the second was then overwritten by the first, and
+// the observer stayed on the older configuration while the manager held the
+// newer - an HTTP server following the manager kept a rotated token valid
+// (issue #401).
+func TestConfigReplacementsReachObserversInTheOrderTheyWereStored(t *testing.T) {
+	m := session.NewManager(&config.Config{}, noopSender{}, noopRunner, slog.Default(), "/tmp", nil)
+	first, second := &config.Config{}, &config.Config{}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	var last *config.Config
+	remove := m.AddConfigObserver(func(c *config.Config) {
+		if c == first {
+			close(entered)
+			<-release
+		}
+		mu.Lock()
+		last = c
+		mu.Unlock()
+	})
+	defer remove()
+	firstDone, secondDone := make(chan struct{}), make(chan struct{})
+	go func() { m.ReplaceConfig(first); close(firstDone) }()
+	<-entered
+	go func() { m.ReplaceConfig(second); close(secondDone) }()
+	// Give a second replacement that is not held back the time to publish
+	// before the first one's publication resumes.
+	select {
+	case <-secondDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for _, done := range []chan struct{}{firstDone, secondDone} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a replacement never finished")
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if last != m.Cfg() {
+		t.Fatalf("the observer was left on %p while the manager holds %p", last, m.Cfg())
 	}
 }

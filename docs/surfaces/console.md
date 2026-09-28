@@ -637,8 +637,9 @@ workspace.
 remote `coddy serve` server instead of running the agent in-process. The
 target is a configured remote name (`httpserver.remotes`), a bare
 `host:port` (scheme defaults to http), or a full http(s) URL. The bearer
-token comes from `--remote-token` or `CODDY_REMOTE_TOKEN`; tokens are
-deliberately never read from config.yaml. The same pair of flags works on
+token is the first of `--remote-token`, the `token` of the matching
+`httpserver.remotes` entry (a node mount under a configured relay takes the
+relay's) and `CODDY_REMOTE_TOKEN`. The same pair of flags works on
 `coddy acp`, so an ACP editor can drive a remote coddy too.
 
 Turns execute on the server in its workspace. For a turn this console starts,

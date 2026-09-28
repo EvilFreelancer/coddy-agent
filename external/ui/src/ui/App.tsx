@@ -119,14 +119,27 @@ import { EnvironmentChip } from "./chat/EnvironmentChip";
 import { probeSwarm } from "./swarm/api";
 import {
   connectLocal,
-  connectRemote,
   connectSwarmNode,
-  getRemoteToken,
+  connectSwarmRelay,
+  environmentKey,
   localFetch,
-  returnToSwarm,
   snapshotEnv,
   subscribeEnv,
 } from "./env/remoteEnv";
+import {
+  configuredRemoteFor,
+  connectConfiguredRemote,
+  refreshConfiguredRemotes,
+  useConfiguredRemotes,
+} from "./env/configuredRemotes";
+import {
+  isKnownRelayHome,
+  knownPageServer,
+  rememberPageServer,
+  rememberRelayHome,
+  rememberSchedulerLinked,
+  schedulerLinkedGuess,
+} from "./env/pageMemory";
 import type { SessionsEnvironmentOption } from "./sessions/SessionsFilterMenu";
 import {
   newChatWorkspaceIsReady,
@@ -980,10 +993,31 @@ export function App() {
         initialRoute.branch === "none") &&
         initialRoute.historyOpen),
   );
-  /** null until first probe of /coddy/scheduler/jobs; false when route returns 404 (binary without scheduler). */
-  const [schedulerHttpLinked, setSchedulerHttpLinked] = useState<
+  // The environment this app was started on. A switch to another remote
+  // starts another app (EnvScope), so an answer that lands here after one is
+  // the old environment's, and must not be kept for the new one.
+  const [appEnvKey] = useState(() => environmentKey(getEnv()));
+  const isAppEnvironment = useCallback(
+    () => environmentKey(getEnv()) === appEnvKey,
+    [appEnvKey],
+  );
+  /**
+   * null until first probe of /coddy/scheduler/jobs; false when route returns
+   * 404 (binary without scheduler). Started over by a switch between remotes
+   * (EnvScope), it begins from the last answer so the rail keeps its shape.
+   */
+  const [schedulerHttpLinked, setSchedulerHttpLinkedState] = useState<
     boolean | null
-  >(null);
+  >(() => schedulerLinkedGuess(appEnvKey));
+  const setSchedulerHttpLinked = useCallback(
+    (linked: boolean) => {
+      if (isAppEnvironment()) {
+        rememberSchedulerLinked(appEnvKey, linked);
+      }
+      setSchedulerHttpLinkedState(linked);
+    },
+    [appEnvKey, isAppEnvironment],
+  );
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [settingsRoute, setSettingsRoute] = useState(
     () => initialRoute.branch === "settings",
@@ -1009,8 +1043,16 @@ export function App() {
   // closing it goes back there rather than home.
   const docsReturnHashRef = useRef("");
   // The Swarm entry only appears when the environment answers as a relay: on a
-  // plain agent there is no swarm to show.
-  const [isSwarmEnv, setIsSwarmEnv] = useState(false);
+  // plain agent there is no swarm to show. A node reached through a relay is in
+  // one from the start, and a remote last found to be a relay starts as one
+  // (a switch in place starts the app over; pageMemory.ts).
+  const [isSwarmEnv, setIsSwarmEnv] = useState(() => {
+    const env = getEnv();
+    return (
+      env.mode === "remote" &&
+      (!!env.swarmRelay || isKnownRelayHome(env.baseUrl))
+    );
+  });
   /**
    * True while the environment is a relay itself rather than a node reached
    * through one.
@@ -1020,7 +1062,12 @@ export function App() {
    * for a room nobody can enter. What it does have is the swarm, so that is
    * what it shows.
    */
-  const [atSwarmRoot, setAtSwarmRoot] = useState(false);
+  const [atSwarmRoot, setAtSwarmRoot] = useState(() => {
+    const env = getEnv();
+    return (
+      env.mode === "remote" && !env.swarmRelay && isKnownRelayHome(env.baseUrl)
+    );
+  });
   // Active Settings section id from `#/settings/<section>` (null = default/grid).
   const [settingsSection, setSettingsSection] = useState<string | null>(() =>
     initialRoute.branch === "settings" ? initialRoute.section : null,
@@ -1148,10 +1195,9 @@ export function App() {
   );
   // The remotes this server offers as environments, read from the local config
   // rather than the active one - the list of places to go must not travel with
-  // the place you are.
-  const [configuredRemotes, setConfiguredRemotes] = useState<
-    { name: string; url: string }[]
-  >([]);
+  // the place you are. Shared with the composer's environment chip and read
+  // again on every config reload (env/configuredRemotes.ts).
+  const configuredRemotes = useConfiguredRemotes();
   // A folder picked from a History heading, waiting for the conversation on
   // screen to be gone before it is applied (see newChatWorkspace.ts). The value
   // is a ref and the trigger a counter, so the one effect that owns "the
@@ -1596,21 +1642,28 @@ export function App() {
     [sessionId],
   );
 
-  const refreshWorkspaceContext = useCallback(async (sid: string) => {
-    try {
-      const res = await fetch("/coddy/workspace/context", {
-        headers: sid ? { [HDR]: sid } : {},
-      });
-      if (res.ok) {
-        const ctx = (await res.json()) as WorkspaceContext;
-        setWorkspaceCtx(ctx);
-        // Host fact, not a workspace one: the tool cards name the interpreter.
-        setHostShell(ctx.shell);
+  const refreshWorkspaceContext = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await fetch("/coddy/workspace/context", {
+          headers: sid ? { [HDR]: sid } : {},
+        });
+        if (res.ok) {
+          const ctx = (await res.json()) as WorkspaceContext;
+          setWorkspaceCtx(ctx);
+          // Host fact, not a workspace one: the tool cards name the interpreter.
+          // An answer from the environment the app was switched away from is
+          // not this host's.
+          if (isAppEnvironment()) {
+            setHostShell(ctx.shell);
+          }
+        }
+      } catch {
+        // ignore: chips keep the previous context
       }
-    } catch {
-      // ignore: chips keep the previous context
-    }
-  }, []);
+    },
+    [isAppEnvironment],
+  );
 
   // Load the workspace context whenever the viewed session changes; a fresh
   // home/draft view also drops stale pre-session workspace choices.
@@ -1803,15 +1856,20 @@ export function App() {
           setSchedulerOpen(false);
           setSchedulerEditor(null);
           msg = t("scheduler.apiNotAvailable");
-          const sid = sessionId.trim();
-          if (sid) {
-            setSessionHashInLocation(sid);
-          } else if (window.location.hash) {
-            history.replaceState(
-              null,
-              "",
-              `${window.location.pathname}${window.location.search}`,
-            );
+          // The answer is about the scheduler screen: the address is left
+          // alone once the reader has moved on from it, or the app from the
+          // environment it asked (a switch in place keeps the request alive).
+          if (isAppEnvironment() && parseAppHash().branch === "scheduler") {
+            const sid = sessionId.trim();
+            if (sid) {
+              setSessionHashInLocation(sid);
+            } else if (window.location.hash) {
+              history.replaceState(
+                null,
+                "",
+                `${window.location.pathname}${window.location.search}`,
+              );
+            }
           }
           setSchedulerListError(msg);
           setSchedulerJobs([]);
@@ -1837,7 +1895,7 @@ export function App() {
       setSchedulerInfo(res.data.scheduler);
       setSchedulerJobs(res.data.jobs || []);
     },
-    [sessionId, t],
+    [sessionId, t, isAppEnvironment],
   );
 
   const applyLocationHash = useCallback(() => {
@@ -1895,6 +1953,9 @@ export function App() {
     }
     if (p.branch === "history") {
       setSettingsRoute(false);
+      // The map lies over History in the stack of the rail's screens: opened
+      // under it, the drawer would be out of sight.
+      setSwarmRoute(false);
       setSessionsOpen(true);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
@@ -2075,10 +2136,16 @@ export function App() {
   }, [applyLocationHash]);
 
   useEffect(() => {
-    const onHash = () => applyLocationHash();
+    // A switch to another remote writes the new environment's route while
+    // this app may still be listening; the route is the next app's to apply.
+    const onHash = () => {
+      if (isAppEnvironment()) {
+        applyLocationHash();
+      }
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [applyLocationHash]);
+  }, [applyLocationHash, isAppEnvironment]);
 
   useEffect(() => {
     void (async () => {
@@ -2679,6 +2746,7 @@ export function App() {
     configReloaded: () => {
       setConfigEpoch((e) => e + 1);
       noteSettingsConfigReloaded();
+      void refreshConfiguredRemotes();
     },
     // A session is shared: this is what someone else queued, in another
     // browser or from a console attached over --remote.
@@ -2729,7 +2797,8 @@ export function App() {
     const ctl = new AbortController();
     // One connection for every tab of this environment where the browser allows
     // it: a browser keeps six HTTP/1.1 connections per host for all of its tabs.
-    // Changing the environment reloads the page, so the one read here holds.
+    // The environment read here holds for this app: a switch to another one,
+    // or a token rotated under this one, starts another app (EnvScope).
     const env = getEnv();
     void subscribeSharedServerEvents({
       env,
@@ -5232,57 +5301,183 @@ export function App() {
     }
     const ac = new AbortController();
     void probeSwarm(ac.signal).then((info) => {
+      if (env.mode === "remote") {
+        rememberRelayHome(env.baseUrl, !!info);
+      }
       setIsSwarmEnv(!!info);
       setAtSwarmRoot(!!info);
     });
     return () => ac.abort();
   }, []);
 
+  // What serves this page: an agent, or a relay serving its own page. The
+  // documentation is read from it (docs/api.ts), so on a relay's own page the
+  // reader is left out of the rail; and only an agent is a machine of its own
+  // the swarm map draws above the relay as where the connection starts
+  // (issue #401). Null until it answers.
+  // It never changes while the page is open, so it is asked once and kept
+  // (pageMemory.ts): an app started over by a switch in place knows it at once.
+  const [localServer, setLocalServer] = useState<"agent" | "relay" | null>(
+    () => knownPageServer()?.kind ?? null,
+  );
+  // The host name of the machine the page runs on (GET /coddy/info of the
+  // page's own server), which is how the swarm map names it.
+  const [localHost, setLocalHost] = useState(
+    () => knownPageServer()?.host ?? "",
+  );
+  useEffect(() => {
+    if (knownPageServer()) {
+      return undefined;
+    }
+    let alive = true;
+    const readJSON = (path: string) =>
+      localFetch(path)
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null) as Promise<Record<string, unknown> | null>;
+    void (async () => {
+      const info = await readJSON("/swarm/info");
+      const kind = info?.swarm === true ? "relay" : "agent";
+      // Only an agent is a machine of its own on the map; the map says
+      // "Local" when it does not say its name.
+      const about = kind === "agent" ? await readJSON("/coddy/info") : null;
+      const host =
+        typeof about?.hostname === "string" ? about.hostname.trim() : "";
+      rememberPageServer({ kind, host });
+      if (alive) {
+        setLocalServer(kind);
+        setLocalHost(host);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const localDocs = localServer !== "relay";
+  // The machine the page runs on, for the swarm map: drawn only while the app
+  // is on a remote environment the page reached from it, and named by its host
+  // name (Local when the system reports none).
+  const swarmClient = useMemo(() => {
+    if (localServer !== "agent" || getEnv().mode !== "remote") {
+      return undefined;
+    }
+    return { name: localHost || t("composer.env.local") };
+  }, [localServer, localHost, t]);
+
   // Entering a node points the whole app at that node's mount, so every screen
   // that already existed works against it with a relay in the middle.
-  const openSwarmNode = useCallback((nodePath: string[], hash?: string) => {
-    const env = getEnv();
-    // Served by the relay from its own root, the environment is plain
-    // same-origin: the relay is then this page's origin. Without that fallback
-    // the one entry point this screen exists for silently did nothing.
-    const relay =
-      env.mode === "remote"
-        ? (env.swarmRelay ?? env.baseUrl)
-        : window.location.origin;
-    if (!relay) {
-      return;
-    }
-    connectSwarmNode(
-      relay,
-      nodePath,
-      env.mode === "remote" ? env.token : "",
-      hash,
-    );
-  }, []);
+  // `hash` is a session to open; `landing` is where a switch to another node
+  // lands without one - the map, kept open over the node, for a node clicked
+  // on it.
+  const openSwarmNode = useCallback(
+    (nodePath: string[], hash?: string, landing?: string) => {
+      const env = getEnv();
+      // The node the app is already on: nothing to switch, and no reload. A
+      // session of it a search row picked opens in place; without one the map
+      // closes onto the node. (The map itself leaves this node alone.)
+      if (
+        env.mode === "remote" &&
+        env.swarmRelay &&
+        env.swarmNode === nodePath.join("/")
+      ) {
+        setSwarmRoute(false);
+        if (hash) {
+          window.location.hash = hash;
+          return;
+        }
+        const sid = viewedSessionIdRef.current.trim();
+        if (sid) {
+          setSessionHashInLocation(sid);
+        } else {
+          window.location.hash = "#/";
+        }
+        return;
+      }
+      // Served by the relay from its own root, the environment is plain
+      // same-origin: the relay is then this page's origin. Without that fallback
+      // the one entry point this screen exists for silently did nothing.
+      const relay =
+        env.mode === "remote"
+          ? (env.swarmRelay ?? env.baseUrl)
+          : window.location.origin;
+      if (!relay) {
+        return;
+      }
+      connectSwarmNode(
+        relay,
+        nodePath,
+        env.mode === "remote" ? env.token : "",
+        hash ?? landing,
+      );
+    },
+    [],
+  );
+
+  // A relay on the map opens as a relay: the one the map is drawn for is
+  // connected to itself, a relay chained under it opens on its own map.
+  const openSwarmRelay = useCallback(
+    (relayPath: string[], name: string) => {
+      const env = getEnv();
+      // Already on the relay the map is drawn for: nothing to connect to, and a
+      // reload would only blink the page.
+      if (
+        relayPath.length === 0 &&
+        !(env.mode === "remote" && env.swarmRelay)
+      ) {
+        return;
+      }
+      const relay =
+        env.mode === "remote"
+          ? (env.swarmRelay ?? env.baseUrl)
+          : window.location.origin;
+      if (!relay) {
+        return;
+      }
+      // The chip names the relay the way the environment menu does: by its
+      // entry in httpserver.remotes, else by the name it goes by on the map.
+      const label =
+        relayPath.length === 0
+          ? configuredRemoteFor(relay, configuredRemotes)?.name || name
+          : name;
+      connectSwarmRelay(
+        relay,
+        relayPath,
+        env.mode === "remote" ? env.token : "",
+        label,
+      );
+    },
+    [configuredRemotes],
+  );
 
   /**
-   * Where the app has been in this swarm, as a route.
-   *
-   * Inside a node it is that node; back on the relay it is whatever
-   * `returnToSwarm` remembered. The map marks it and draws the path to it, so
-   * the screen can say where we are rather than only what exists.
+   * Where the app is in this swarm, as a route: inside a node, that node. The
+   * map marks it and draws the path to it, so the screen can say where we are
+   * rather than only what exists.
    */
   const swarmCurrentNode = useMemo(() => {
     const env = getEnv();
     if (env.mode !== "remote") {
       return [] as string[];
     }
-    const route = env.swarmNode || env.swarmFrom || "";
-    return route.split("/").filter(Boolean);
+    return (env.swarmNode || "").split("/").filter(Boolean);
+  }, []);
+
+  /**
+   * The relay the map reads when the app is inside one of its nodes. The
+   * environment is the node's mount, which the relay's own routes are not
+   * under, so the map asks the relay directly - with the same client token the
+   * mount takes - and opening it leaves the node, its History and its
+   * Scheduler where they are (issue #401). Undefined on the relay itself,
+   * where the environment shim already reaches it.
+   */
+  const swarmRelayTarget = useMemo(() => {
+    const env = getEnv();
+    if (env.mode !== "remote" || !env.swarmRelay) {
+      return undefined;
+    }
+    return { baseUrl: env.swarmRelay, token: env.token };
   }, []);
 
   const openSwarmFromNav = useCallback(() => {
-    const env = getEnv();
-    // Inside a node, going to the swarm means going back out to its relay.
-    if (env.mode === "remote" && env.swarmRelay) {
-      returnToSwarm();
-      return;
-    }
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setTasksOpen(false);
@@ -5419,6 +5614,7 @@ export function App() {
     setSchedulerEditor(null);
     setTasksOpen(false);
     setSettingsRoute(false);
+    setSwarmRoute(false);
     setSessionsOpen(true);
     setHistoryHash();
   }, []);
@@ -5457,40 +5653,6 @@ export function App() {
       return id.includes(q) || desc.includes(q);
     });
   }, [schedulerJobs, schedulerFilterQ]);
-
-  // Read the environments this server offers once: the list lives in the local
-  // config, so it is fetched off the origin rather than through the shim.
-  useEffect(() => {
-    let alive = true;
-    localFetch("/coddy/config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cfg) => {
-        if (!alive || !cfg) {
-          return;
-        }
-        const list = (cfg as Record<string, unknown>)?.httpserver as
-          | Record<string, unknown>
-          | undefined;
-        const raw = list?.remotes;
-        if (!Array.isArray(raw)) {
-          return;
-        }
-        setConfiguredRemotes(
-          raw
-            .map((item) => {
-              const o = (item ?? {}) as Record<string, unknown>;
-              return { name: String(o.name ?? ""), url: String(o.url ?? "") };
-            })
-            .filter((r) => r.url.trim() !== ""),
-        );
-      })
-      .catch(() => {
-        /* configured remotes are optional */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const activeEnv = useSyncExternalStore(
     subscribeEnv,
@@ -5545,10 +5707,9 @@ export function App() {
         label: remote.name.trim() || remote.url,
         active:
           onRemote && activeEnv.baseUrl === remote.url.replace(/\/+$/, ""),
-        // connectRemote reloads the page, so nothing of this session's state
+        // Connecting reloads the page, so nothing of this session's state
         // reaches the other server - the origin filter included.
-        onPick: () =>
-          connectRemote(remote.url, getRemoteToken(remote.url), remote.name),
+        onPick: () => connectConfiguredRemote(remote),
       });
     }
     return rows;
@@ -5886,7 +6047,9 @@ export function App() {
     >
       <EnvHealthBanner />
       <NavRail
-        onNewChat={goHome}
+        // A relay has no chat to start: its home is the map, and the brand
+        // leads there as it leads an agent's page to a new chat.
+        onNewChat={atSwarmRoot ? openSwarmFromNav : goHome}
         onOpenHistory={onOpenHistoryFromNav}
         historyOpen={sessionsOpen}
         showHistory={!atSwarmRoot}
@@ -5895,8 +6058,10 @@ export function App() {
         schedulerOpen={schedulerOpen}
         showSwarm={isSwarmEnv}
         onOpenSwarm={openSwarmFromNav}
-        swarmOpen={swarmRoute}
-        onOpenDocs={openDocsFromNav}
+        // On a relay the map is the home screen, so its entry stays lit while
+        // the map is what is on screen, whichever address shows it.
+        swarmOpen={swarmRoute || (atSwarmRoot && !settingsRoute && !docsRoute)}
+        {...(localDocs ? { onOpenDocs: openDocsFromNav } : {})}
         docsOpen={docsRoute !== null}
         settingsOpen={settingsRoute}
         onOpenSettings={openSettingsFromNav}
@@ -6029,12 +6194,21 @@ export function App() {
         {swarmRoute || (atSwarmRoot && !settingsRoute && !docsRoute) ? (
           <div className="swarm-dock-cluster">
             <SwarmView
-              onOpenNode={(nodePath: string[]) => openSwarmNode(nodePath)}
+              onOpenNode={(nodePath: string[]) =>
+                openSwarmNode(nodePath, undefined, "#/swarm")
+              }
+              onOpenRelay={openSwarmRelay}
+              {...(swarmRelayTarget ? { relay: swarmRelayTarget } : {})}
+              {...(swarmClient
+                ? { client: swarmClient, onOpenLocal: connectLocal }
+                : {})}
               onOpenSession={(s) => openSwarmNode(s.node_path, `#/s/${s.id}`)}
               {...(swarmCurrentNode.length > 0
                 ? { currentNode: swarmCurrentNode }
                 : {})}
-              {...(atSwarmRoot ? { headerSlot: <EnvironmentChip /> } : {})}
+              {...(atSwarmRoot
+                ? { rootCurrent: true, headerSlot: <EnvironmentChip /> }
+                : {})}
             />
           </div>
         ) : null}
@@ -6054,7 +6228,10 @@ export function App() {
           <div className="settings-dock-cluster">
             <Settings
               onClose={closeToChat}
-              onConfigSaved={() => setConfigEpoch((e) => e + 1)}
+              onConfigSaved={() => {
+                setConfigEpoch((e) => e + 1);
+                void refreshConfiguredRemotes();
+              }}
               initialSection={settingsSection}
               initialItem={settingsItem}
               activeSessionId={sidebarActiveId}
@@ -6068,6 +6245,8 @@ export function App() {
                   prev.map((s) => (s.id === id ? { ...s, tags } : s)),
                 )
               }
+              // On a relay the drawer edits the relay's own deployment.
+              relay={atSwarmRoot}
             />
           </div>
         ) : null}

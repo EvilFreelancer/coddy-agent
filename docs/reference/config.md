@@ -315,9 +315,10 @@ OpenAI-compatible HTTP API defaults (used only by binaries built with -tags http
 | `httpserver.cors` | object |  | Cross-origin access so a browser UI on another origin can call this API (e.g. the bundled UI pointed at a remote server). Bearer auth still applies. |
 | `httpserver.cors.enable` | boolean | false | Handle CORS preflight and emit Access-Control-* headers for allowed origins. |
 | `httpserver.cors.allowed_origins` | list of strings | [] | Exact origins permitted to call the API, e.g. "http://localhost:5173". A single "*" allows any origin. |
-| `httpserver.remotes` | list of objects | [] | Remote coddy serve servers offered in the UI environment selector. Tokens are not stored here; the UI keeps them client-side per remote. |
-| `httpserver.remotes[].name` | string |  | Display label for the remote. |
-| `httpserver.remotes[].url` | string |  | Base URL of the remote coddy serve server, e.g. "https://box.example:12345". |
+| `httpserver.remotes` | list of objects | [] | Remote coddy serve servers and swarm relays offered in the UI environment selector and resolved by `coddy --remote <name>`. An entry may carry the token to present; without one the UI keeps the token in the browser per remote and the console reads --remote-token or CODDY_REMOTE_TOKEN. |
+| `httpserver.remotes[].name` | string |  | Display label for the remote. Empty: the web UI shows the name the remote reports (a relay's swarm.name, else the host name it runs on; an agent's host name), else its address. |
+| `httpserver.remotes[].url` | string |  | Base URL of the remote coddy serve server or relay, e.g. "https://box.example:12345". |
+| `httpserver.remotes[].token` | string |  | Bearer token to present to this remote: a relay's client token (swarm.auth_token) or a server's httpserver.auth_token, usually a ${ENV} reference. Optional and opt-in: every browser that reads this configuration receives it, and coddy --remote <name> uses it when --remote-token is not given. A node mounted under a relay (<url>/swarm/nodes/<name>) takes the relay's token. |
 
 ### `swarm`
 
@@ -328,7 +329,7 @@ Stateless relay that nodes register into and that chains into other relays. The 
 | `swarm.enable` | boolean | false | Run the swarm relay in this process. Independent of swarm.join, which is how an agent registers into a parent relay. |
 | `swarm.host` | string | "" | Bind address for the relay when the CLI does not pass --swarm-host. Empty falls back to 0.0.0.0. |
 | `swarm.port` | integer | 0 | Listen port for the relay. 0 falls back to 12346. |
-| `swarm.name` | string | "" | Label for this relay in topology views and in a child's node path. |
+| `swarm.name` | string | "" | Label for this relay in topology views, in /swarm/info and in a child's node path. Empty: the host name it runs on. |
 | `swarm.auth_token` | string | "" | Bearer credential clients present to this relay. A relay reaches every node with that node's own credential, so an unauthenticated relay bound off loopback is a fleet-wide open door and the server refuses to start unless allow_insecure is set. Never echoed back. |
 | `swarm.pairing_tokens` | list of strings | [] | Credentials a node must present to register. Empty closes registration unless insecure_open_registration is set. Never echoed back. |
 | `swarm.allow_insecure` | boolean | false | Permit binding off loopback without a client token. |
@@ -635,7 +636,7 @@ These control config discovery itself, not individual fields (see [Configuration
 | `CODDY_HOME` | `--home` | Agent state directory (default `~/.coddy`). |
 | `CODDY_CWD` | `--cwd` | Default session working directory. |
 | `CODDY_CONFIG` | `--config` | Explicit path to `config.yaml`. |
-| `CODDY_SWARM_TOKEN` | `--auth-token` (swarm) | Client credential for `coddy serve` (see [`swarm`](#swarm)). |
-| `CODDY_SWARM_PAIRING_TOKEN` | `--pairing-token` | Registration credential for `coddy serve` (see [`swarm`](#swarm)). |
+| `CODDY_SWARM_TOKEN` | `--swarm-auth-token` | Client credential of the relay `coddy serve` runs (see [`swarm`](#swarm)). |
+| `CODDY_SWARM_PAIRING_TOKEN` | `--swarm-pairing-token` | Registration credential of that relay (see [`swarm`](#swarm)). |
 | `NAME_API_KEY` | - | Per-provider API key fallback (see [`providers`](#providers)). |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token fallback (see [`gateways.telegram`](#gatewaystelegram)). |
