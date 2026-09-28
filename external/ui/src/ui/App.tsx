@@ -4662,8 +4662,8 @@ export function App() {
       if (!ownsPost() || abortCtl.signal.aborted) return;
       assistantStreamId = lastAssistantId;
       // Only settings commands: the exchange drawn for it is not part of the
-      // conversation. The transcript's log holds the notice, which the reload
-      // below renders in the place a reload of the page would.
+      // conversation, and the change is on the selectors. The reload below
+      // shows the transcript as the server holds it.
       if (settingsOnly) {
         applyStreamItems((prev) =>
           prev.filter(

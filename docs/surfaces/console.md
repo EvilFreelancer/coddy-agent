@@ -241,9 +241,10 @@ Slash commands: the settings commands `/model`, `/reasoning` (`/effort`),
 `/new`, `/theme`, `/hotkeys`, `/queue`, `/usage`, `/tasks`, `/mcp`, `/docs`, `/quit`; server-driven `/compact`, `/export`,
 `/plugin`, and every loaded skill (from the ACP available-commands catalog).
 A bare `/model`, `/reasoning` or `/permissions` opens its picker; with a value
-the command is applied by the session manager, which answers with a notice
-line, and commands followed by a message apply to the turn that message
-starts. `/mode` is gone: the modes have their own commands.
+the command is applied by the session manager and the footer shows the change,
+and commands followed by a message apply to the turn that message starts. The
+transcript gets a line only for a change the agent made itself, such as
+`Model: stub/coddy-mini for this session` after its `switch_model` call. `/mode` is gone: the modes have their own commands.
 
 **Model memory** — the console is a surface of its own. A session-scoped pick
 (`/model`, the picker, or `/model <id>` ahead of a prompt) is remembered in
@@ -254,9 +255,9 @@ the alphabetically first configured model. Reopened and resumed sessions keep
 the model saved in their bundle, `--model` is a per-invocation override that
 does not rewrite the memory, and `coddy -p` always follows the configuration.
 
-![The console after /permissions bypass and a chained /model --once and /reasoning --count=3: three notices, bypass in the footer, and the line of turn overrides](../assets/session-settings/session-settings-console-footer-dark.png)
+![The console after /permissions bypass and a chained /model --once and /reasoning --count=3: bypass in the footer and the line of turn overrides, no line in the transcript](../assets/session-settings/session-settings-console-footer-dark.png)
 
-*After `/permissions bypass` and `/model stub/coddy-mini --once /reasoning high --count=3`: a notice per change, `bypass` in the footer, the turn overrides under the model.*
+*After `/permissions bypass` and `/model stub/coddy-mini --once /reasoning high --count=3`: `bypass` in the footer, the turn overrides under the model, nothing in the transcript.*
 
 Enter on a slash suggestion applies and submits in one stroke. `/export [md|html|json|jsonl]
 [path]` writes the transcript into the workspace (`docs/features/session-export.md`);
