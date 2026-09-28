@@ -5,8 +5,9 @@ import { EnvScope } from "./EnvScope";
 import { connectRemote, setEnv } from "./remoteEnv";
 
 // A switch between two remotes happens in place (remoteEnv.switchTo): the app is
-// started over on the new server rather than the page being reloaded, and the
-// same server with a rotated token is left as it is.
+// started over on the new server rather than the page being reloaded. A token
+// rotated under the same server starts it over too: the events stream and
+// everything else that holds the old token have to present the new one.
 
 let mounts = 0;
 
@@ -25,21 +26,27 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-test("starts the app over on another server, not on another token", () => {
+test("starts the app over on another server, and on a rotated token", () => {
   render(
     <EnvScope>
       <Probe />
     </EnvScope>,
   );
   expect(mounts).toBe(1);
+  // The same token again (a configuration read that changed nothing) is not a
+  // reason to start over.
   act(() =>
-    setEnv({ mode: "remote", baseUrl: "http://relay:1/swarm/nodes/a", token: "rotated" }),
+    setEnv({ mode: "remote", baseUrl: "http://relay:1/swarm/nodes/a", token: "t" }),
   );
   expect(mounts).toBe(1);
   act(() =>
-    setEnv({ mode: "remote", baseUrl: "http://relay:1/swarm/nodes/b", token: "t" }),
+    setEnv({ mode: "remote", baseUrl: "http://relay:1/swarm/nodes/a", token: "rotated" }),
   );
   expect(mounts).toBe(2);
+  act(() =>
+    setEnv({ mode: "remote", baseUrl: "http://relay:1/swarm/nodes/b", token: "rotated" }),
+  );
+  expect(mounts).toBe(3);
 });
 
 // Choosing the same remote again starts the app over on it (remoteEnv.switchTo

@@ -1072,8 +1072,10 @@ is the screen: there is no list of nodes under it, because everything the list d
   the page is not reloaded: **`switchTo`** (**`env/remoteEnv.ts`**) sets the environment and the
   address and runs what the modules that hold something of the old one registered with
   **`onEnvironmentSwitch`** (the Settings copy, the server's version, the host shell, the active
-  environment's health), and **`EnvScope`** (**`main.tsx`**) starts **`App`** over, keyed by
-  **`environmentKey`**. What would otherwise start as "not known yet" and pop in a moment later is
+  environment's health), and **`EnvScope`** (**`main.tsx`**) starts **`App`** over, keyed by the
+  events stream's scope (**`serverEventsScope`**: the server and a fingerprint of its token) and
+  the count of switches in place, so the same remote chosen again and a token rotated under the
+  one in use start it over as well. What would otherwise start as "not known yet" and pop in a moment later is
   kept for the life of the page (**`env/pageMemory.ts`**): the page's own server and its host name,
   which remotes are relays, whether the scheduler answered, and the last picture of each relay's
   map, which a remounted map draws at once and then reads again. To or from **Local** the page

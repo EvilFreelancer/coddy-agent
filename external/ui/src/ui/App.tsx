@@ -2797,7 +2797,8 @@ export function App() {
     const ctl = new AbortController();
     // One connection for every tab of this environment where the browser allows
     // it: a browser keeps six HTTP/1.1 connections per host for all of its tabs.
-    // Changing the environment reloads the page, so the one read here holds.
+    // The environment read here holds for this app: a switch to another one,
+    // or a token rotated under this one, starts another app (EnvScope).
     const env = getEnv();
     void subscribeSharedServerEvents({
       env,
