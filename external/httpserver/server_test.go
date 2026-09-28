@@ -2889,6 +2889,29 @@ func TestHTTPAuthHotReloadEnableRotateDisable(t *testing.T) {
 	}
 }
 
+// A server handed a configuration the manager has already replaced follows
+// the manager. The replacement was announced before the server subscribed and
+// nobody announces it again, so a token rotated while `coddy serve` was
+// starting the server from an older snapshot stayed unenforced until the next
+// save (issue #401).
+func TestHTTPAuthFollowsAConfigurationReplacedBeforeTheServerSubscribed(t *testing.T) {
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	handed := cfgWithAuth("old-token")
+	mgr := session.NewManager(handed, noopSender{}, runner, slog.Default(), "/tmp", nil)
+	mgr.ReplaceConfig(cfgWithAuth("new-token"))
+	srv := New(handed, mgr, slog.Default(), "/tmp")
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	if got := authGET(t, ts.URL+"/v1/models", "old-token"); got != http.StatusUnauthorized {
+		t.Fatalf("the replaced token: status %d want 401", got)
+	}
+	if got := authGET(t, ts.URL+"/v1/models", "new-token"); got != http.StatusOK {
+		t.Fatalf("the current token: status %d want 200", got)
+	}
+}
+
 func TestHTTPAuthExtraTokensEnableAuth(t *testing.T) {
 	srv, ts := authTestServer(t, cfgWithAuth(""))
 	srv.SetExtraAuthTokens([]string{"cli-token"})
