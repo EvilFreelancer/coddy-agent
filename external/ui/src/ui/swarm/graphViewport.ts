@@ -260,11 +260,9 @@ function hasFiniteAxisMath(
   ) {
     return false;
   }
-  if (scaledSize <= viewportSize) return true;
-
   const scaledEnd = (origin + size) * scale;
-  const min = viewportSize - padding - scaledEnd;
-  const max = padding - scaledOrigin;
+  const min = padding - scaledEnd;
+  const max = viewportSize - padding - scaledOrigin;
   return (
     isFiniteNumber(scaledEnd) && isFiniteNumber(min) && isFiniteNumber(max)
   );
@@ -278,13 +276,8 @@ function clampAxis(
   padding: number,
   scale: number,
 ): number {
-  const scaledSize = size * scale;
-  if (scaledSize <= viewportSize) {
-    return centeredOffset(origin, size, viewportSize, scale);
-  }
-
-  const min = viewportSize - padding - (origin + size) * scale;
-  const max = padding - origin * scale;
+  const min = padding - (origin + size) * scale;
+  const max = viewportSize - padding - origin * scale;
   return clamp(offset, min, max);
 }
 

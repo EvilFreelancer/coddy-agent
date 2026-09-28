@@ -95,7 +95,53 @@ describe("graph viewport camera math", () => {
     ).toBeCloseTo(camera.fitScale * 3);
   });
 
-  it("clamps panning to padded content bounds and centers a smaller axis", () => {
+  it("centers a graph that fits without zooming", () => {
+    const small: Bounds = { x: 0, y: 0, width: 100, height: 50 };
+    const camera = fitCamera(small, viewport, padding);
+
+    expect(camera.x).toBe(200);
+    expect(camera.y).toBe(125);
+  });
+
+  it("pans a fitted small graph on both axes without snapping back to center", () => {
+    const small: Bounds = { x: 0, y: 0, width: 100, height: 50 };
+    const fitted = fitCamera(small, viewport, padding);
+
+    const panned = panCamera(fitted, 30, -40, small, viewport, padding);
+    expect(panned.x).toBe(230);
+    expect(panned.y).toBe(85);
+    expect(panned.userAdjusted).toBe(true);
+
+    const reclamped = clampCamera(
+      clampCamera(panned, small, viewport, padding),
+      small,
+      viewport,
+      padding,
+    );
+    expect(reclamped.x).toBe(230);
+    expect(reclamped.y).toBe(85);
+  });
+
+  it("lets a small graph's edges reach the canvas padding on both axes", () => {
+    const small: Bounds = { x: 0, y: 0, width: 100, height: 50 };
+    const fitted = fitCamera(small, viewport, padding);
+
+    const right = panCamera(fitted, 10000, 0, small, viewport, padding);
+    expect(right.x).toBe(viewport.width - padding);
+
+    const left = panCamera(fitted, -10000, 0, small, viewport, padding);
+    expect(left.x).toBe(padding - small.width);
+
+    const down = panCamera(fitted, 0, 10000, small, viewport, padding);
+    expect(down.y).toBe(viewport.height - padding);
+
+    const up = panCamera(fitted, 0, -10000, small, viewport, padding);
+    expect(up.y).toBe(padding - small.height);
+
+    for (const camera of [right, left, down, up]) expectFinite(camera);
+  });
+
+  it("clamps panning so either content edge can reach the canvas padding", () => {
     const wideButShort: Bounds = { x: 0, y: 0, width: 1000, height: 100 };
     const camera: GraphCamera = {
       x: -100,
@@ -106,12 +152,19 @@ describe("graph viewport camera math", () => {
     };
 
     const right = panCamera(camera, 10000, 50, wideButShort, viewport, padding);
-    expect(right.x).toBe(20);
-    expect(right.y).toBe(100);
+    expect(right.x).toBe(480);
+    expect(right.y).toBe(50);
 
-    const left = panCamera(right, -10000, -50, wideButShort, viewport, padding);
-    expect(left.x).toBe(-520);
-    expect(left.y).toBe(100);
+    const left = panCamera(
+      right,
+      -10000,
+      -200,
+      wideButShort,
+      viewport,
+      padding,
+    );
+    expect(left.x).toBe(-980);
+    expect(left.y).toBe(-80);
   });
 
   it("returns a finite fallback camera for invalid or nonfinite geometry", () => {
