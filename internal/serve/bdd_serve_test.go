@@ -834,3 +834,37 @@ func TestSessionlessRelayDoesNotRestartIntoAConfigurationItCannotRun(t *testing.
 		t.Errorf("the relay was started %d times, want it left running", n)
 	}
 }
+
+// The same holds for a listener that moved: a restart into a configuration the
+// fresh process's pre-flight refuses would take the relay down for good. The
+// reload is refused and the relay keeps its address.
+func TestListenerRestartIsNotRequestedIntoAConfigurationItCannotRun(t *testing.T) {
+	s := &serveFeatureState{}
+	s.reset()
+	s.subs = s.describe(false) // no gateway in this build
+	for i := range s.subs {
+		if s.subs[i].Kind == KindSwarm {
+			s.subs[i].RestartKey = func(c *config.Config) string { return fmt.Sprint(c.Swarm.Port) }
+		}
+	}
+	s.restartable = true
+	s.sessionless = true
+	off := false
+	s.cfg.HTTPServer.Enabled = &off
+	s.cfg.Swarm.Enabled = true
+	s.cfg.Swarm.Port = 12346
+	if err := s.launch(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.stopSupervisor()
+	next := *s.cfg
+	next.Swarm.Port = 12400
+	next.Gateways.Telegram.Enabled = true
+	s.reloads <- &next
+	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-s.done:
+		t.Fatalf("the relay restarted into a configuration its replacement cannot run: %v", s.runErr)
+	default:
+	}
+}

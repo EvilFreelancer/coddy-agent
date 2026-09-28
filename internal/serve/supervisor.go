@@ -197,13 +197,8 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 			}
 			if sub.NeedsSessions && s.Sessionless {
 				// Started on no manager it would fail at once, and its failure
-				// ends every surface of the process, the relay included. The
-				// fresh process has to be able to run the whole configuration:
-				// one its pre-flight refuses would be restarted into again and
-				// again with nothing serving, so that one is refused here.
-				if _, err := Resolve(cfg, s.subs); err != nil {
-					s.log.Error("configuration change refused: the process it needs could not start on it",
-						"subsystem", string(sub.Kind), "error", err)
+				// ends every surface of the process, the relay included.
+				if !s.canRunFresh(cfg, sub.Kind) {
 					return false
 				}
 				if s.Restartable {
@@ -237,6 +232,9 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 			// comes back on the new address, which is how an operator moves a
 			// port from the settings screen of the very server they are moving.
 			if s.Restartable {
+				if !s.canRunFresh(cfg, sub.Kind) {
+					return false
+				}
 				s.log.Info("subsystem listen settings changed, restarting the process",
 					"subsystem", string(sub.Kind))
 				return true
@@ -253,6 +251,20 @@ func (s *Supervisor) applyConfig(ctx context.Context, cfg *config.Config, failur
 		}
 	}
 	return false
+}
+
+// canRunFresh reports whether a fresh process could start on cfg, and says why
+// not when it could not. A configuration change that needs a new process is
+// only worth one the new process can run: one its pre-flight (Resolve)
+// refuses would be restarted into again and again with nothing serving, so
+// that change is refused where it stands and the running surfaces are kept.
+func (s *Supervisor) canRunFresh(cfg *config.Config, kind Kind) bool {
+	if _, err := Resolve(cfg, s.subs); err != nil {
+		s.log.Error("configuration change refused: a fresh process could not start on it",
+			"subsystem", string(kind), "error", err)
+		return false
+	}
+	return true
 }
 
 // runningCount reports how many subsystems are live right now.

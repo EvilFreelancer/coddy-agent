@@ -309,6 +309,14 @@ sets that variable, plus `SuccessExitStatus=75` and `RestartForceExitStatus=75`,
 restart is not recorded as a failure. A unit or a supervisor of your own needs the
 variable too.
 
+A process started as a swarm relay alone opens no session store, so the HTTP server, the
+gateway and the scheduler - the surfaces that run agent turns - cannot start in it; a
+reload that turns one of them on asks for a fresh process the same way, or says a restart
+is due. Before either request the new configuration goes through the pre-flight a fresh
+process runs: one it would refuse, such as a surface this binary was built without, is
+refused where it stands, and the running surfaces are kept rather than restarted into a
+configuration nothing can start.
+
 ## Which form to use
 
 | Situation | Form |
