@@ -249,7 +249,7 @@ export function layoutTopology(
 
   // Outside every card, so a link that skips a row never crosses one.
   const laneX =
-    Math.max(...[...placed.values()].map((n) => n.x + halfWidth(n)), GUTTER) +
+    Math.max(...[...placed.values()].map((n) => n.x + nodeHalfWidth(n)), GUTTER) +
     LANE_GAP;
 
   const edges: PlacedEdge[] = [];
@@ -384,8 +384,8 @@ function bypassLink(
   laneX: number,
 ): Connector {
   const dir = laneX >= from.x ? 1 : -1;
-  const x0 = from.x + dir * (halfWidth(from) + EXIT_GAP);
-  const x1 = to.x + dir * (halfWidth(to) + ARRIVE_GAP);
+  const x0 = from.x + dir * (nodeHalfWidth(from) + EXIT_GAP);
+  const x1 = to.x + dir * (nodeHalfWidth(to) + ARRIVE_GAP);
   const vdir = to.y > from.y ? 1 : -1;
   const r = Math.min(
     CORNER,
@@ -409,8 +409,8 @@ function bypassLink(
 
 function peerLink(from: PlacedNode, to: PlacedNode): Connector {
   const dir = to.x >= from.x ? 1 : -1;
-  const x0 = from.x + dir * (halfWidth(from) + EXIT_GAP);
-  const x1 = to.x - dir * (halfWidth(to) + ARRIVE_GAP);
+  const x0 = from.x + dir * (nodeHalfWidth(from) + EXIT_GAP);
+  const x1 = to.x - dir * (nodeHalfWidth(to) + ARRIVE_GAP);
   const span = Math.max(dir * (x1 - x0), 0);
   if (span < PEER_MIN_SPAN) {
     // The two shapes all but meet. A bow across nothing is a spike, and anchors
@@ -452,9 +452,9 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
   const below =
     from.kind === "client" && vdir > 0
       ? NODE_METRICS.chipDrop + NODE_METRICS.chipHeight / 2
-      : halfHeight(from);
+      : nodeHalfHeight(from);
   const y0 = from.y + vdir * (below + EXIT_GAP);
-  const y1 = to.y - vdir * (halfHeight(to) + ARRIVE_GAP);
+  const y1 = to.y - vdir * (nodeHalfHeight(to) + ARRIVE_GAP);
   // Halfway between the two rows, not between the two shapes: siblings of
   // different sizes then still turn on one rail instead of on four of them.
   const railY = (from.y + to.y) / 2;
@@ -487,13 +487,13 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
   };
 }
 
-function halfWidth(n: PlacedNode): number {
+export function nodeHalfWidth(n: PlacedNode): number {
   return n.kind === "relay"
     ? NODE_METRICS.relayWidth / 2
     : NODE_METRICS.agentRadius;
 }
 
-function halfHeight(n: PlacedNode): number {
+export function nodeHalfHeight(n: PlacedNode): number {
   return n.kind === "relay"
     ? NODE_METRICS.relayHeight / 2
     : NODE_METRICS.agentRadius;

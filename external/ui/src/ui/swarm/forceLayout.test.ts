@@ -1,0 +1,224 @@
+import { describe, expect, it } from "vitest";
+import { layoutTopologyStar } from "./forceLayout";
+import {
+  CLIENT_UUID,
+  layoutTopology,
+  nodeHalfHeight,
+  nodeHalfWidth,
+  type LayoutOptions,
+  type TopologyLayout,
+} from "./layout";
+import type { SwarmTopology } from "./types";
+
+const client: LayoutOptions = { client: { name: "browser-host" } };
+const empty: SwarmTopology = {
+  root: { uuid: "root", name: "entry", kind: "relay", online: true },
+  nodes: [],
+  edges: [],
+  routes: {},
+  warnings: [],
+};
+const ring: SwarmTopology = {
+  ...empty,
+  nodes: [
+    { uuid: "west", name: "west", kind: "relay", online: true },
+    { uuid: "east", name: "east", kind: "relay", online: true },
+    { uuid: "agent", name: "worker", kind: "agent", online: true },
+    { uuid: "lost", name: "offline", kind: "agent", online: false },
+  ],
+  edges: [
+    { from_uuid: "root", to_uuid: "west", name: "west" },
+    { from_uuid: "root", to_uuid: "east", name: "east" },
+    { from_uuid: "west", to_uuid: "east", name: "east" },
+    { from_uuid: "east", to_uuid: "root", name: "entry" },
+    { from_uuid: "east", to_uuid: "agent", name: "worker" },
+  ],
+  routes: {
+    west: { path: ["west"] },
+    east: { path: ["east"], alternates: [["west", "east"]] },
+    agent: { path: ["east", "worker"] },
+  },
+};
+
+function fan(count: number): SwarmTopology {
+  const nodes: SwarmTopology["nodes"] = Array.from(
+    { length: count },
+    (_, i) => ({
+      uuid: `node-${i}`,
+      name: `node-${i}`,
+      kind: i % 2 ? "agent" : "relay",
+      online: true,
+    }),
+  );
+  return {
+    ...empty,
+    nodes,
+    edges: nodes.map((n) => ({
+      from_uuid: "root",
+      to_uuid: n.uuid,
+      name: n.name,
+    })),
+    routes: Object.fromEntries(nodes.map((n) => [n.uuid, { path: [n.name] }])),
+  };
+}
+
+function expectValid(layout: TopologyLayout, rootUUID: string): void {
+  expect(Number.isFinite(layout.width)).toBe(true);
+  expect(Number.isFinite(layout.height)).toBe(true);
+  expect(layout.width).toBeGreaterThan(0);
+  expect(layout.height).toBeGreaterThan(0);
+  expect(layout.tiers).toEqual([]);
+  const root = layout.nodes.find((n) => n.uuid === rootUUID)!;
+  expect(root).toBeDefined();
+  expect(root.x).toBeCloseTo(layout.width / 2, 1);
+  expect(layout.nodes.filter((n) => n.y === root.y)).toEqual([root]);
+  for (const n of layout.nodes) {
+    expect(Number.isFinite(n.x) && Number.isFinite(n.y)).toBe(true);
+    expect(n.x * 10).toBeCloseTo(Math.round(n.x * 10), 6);
+    expect(n.y * 10).toBeCloseTo(Math.round(n.y * 10), 6);
+    expect(n.x - nodeHalfWidth(n)).toBeGreaterThanOrEqual(24);
+    expect(n.y - nodeHalfHeight(n)).toBeGreaterThanOrEqual(24);
+    expect(n.x + nodeHalfWidth(n)).toBeLessThanOrEqual(layout.width - 24);
+    expect(n.y + nodeHalfHeight(n)).toBeLessThanOrEqual(layout.height - 24);
+    if (n !== root) expect(n.y).toBeGreaterThan(root.y);
+  }
+  for (const [i, a] of layout.nodes.entries()) {
+    for (const b of layout.nodes.slice(i + 1)) {
+      const gapX = Math.abs(a.x - b.x) - nodeHalfWidth(a) - nodeHalfWidth(b);
+      const gapY = Math.abs(a.y - b.y) - nodeHalfHeight(a) - nodeHalfHeight(b);
+      expect(
+        Math.max(gapX, gapY),
+        `${a.uuid} and ${b.uuid}`,
+      ).toBeGreaterThanOrEqual(24);
+    }
+  }
+  for (const edge of layout.edges) {
+    expect(edge.from).toBe(layout.nodes.find((n) => n.uuid === edge.from.uuid));
+    expect(edge.to).toBe(layout.nodes.find((n) => n.uuid === edge.to.uuid));
+    expect(Number.isFinite(edge.laneX)).toBe(true);
+  }
+}
+
+function edgeSemantics(layout: TopologyLayout) {
+  return layout.edges
+    .map(({ id, alternate, name, from, to }) => ({
+      id,
+      alternate,
+      name,
+      from: from.uuid,
+      to: to.uuid,
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+describe("layoutTopologyStar", () => {
+  it("is exactly deterministic for the same topology and client", () => {
+    expect(layoutTopologyStar(ring, client)).toEqual(
+      layoutTopologyStar(ring, client),
+    );
+  });
+
+  it("is independent of node, route and edge input order", () => {
+    const reversed = {
+      ...ring,
+      nodes: [...ring.nodes].reverse(),
+      edges: [...ring.edges].reverse(),
+      routes: Object.fromEntries(Object.entries(ring.routes).reverse()),
+    };
+    expect(layoutTopologyStar(reversed, client)).toEqual(
+      layoutTopologyStar(ring, client),
+    );
+  });
+
+  it("does not mutate the topology or options", () => {
+    const before = JSON.stringify({ ring, client });
+    layoutTopologyStar(ring, client);
+    expect(JSON.stringify({ ring, client })).toBe(before);
+  });
+
+  it("pins a unique synthetic client above the swarm", () => {
+    const layout = layoutTopologyStar(ring, client);
+    expect(layout.nodes.filter((n) => n.uuid === CLIENT_UUID)).toHaveLength(1);
+    expect(layout.nodes).toHaveLength(ring.nodes.length + 2);
+    expectValid(layout, CLIENT_UUID);
+  });
+
+  it("pins the topology root above the swarm without a client", () => {
+    const layout = layoutTopologyStar(ring);
+    expect(layout.nodes.some((n) => n.uuid === CLIENT_UUID)).toBe(false);
+    expect(layout.nodes).toHaveLength(ring.nodes.length + 1);
+    expectValid(layout, ring.root.uuid);
+  });
+
+  it.each([{}, client])(
+    "preserves tree routes, depths and edge semantics with %j",
+    (opts) => {
+      const tree = layoutTopology(ring, opts);
+      const star = layoutTopologyStar(ring, opts);
+      expect(edgeSemantics(star)).toEqual(edgeSemantics(tree));
+      for (const n of star.nodes) {
+        const original = tree.nodes.find((t) => t.uuid === n.uuid)!;
+        expect(n.path).toEqual(original.path);
+        expect(n.depth).toBe(original.depth);
+      }
+      if (opts.client) {
+        expect(star.edges.find((e) => e.from.uuid === CLIENT_UUID)?.id).toBe(
+          `${CLIENT_UUID}>root`,
+        );
+      }
+    },
+  );
+
+  it.each([{}, client])(
+    "terminates with a valid empty relay and options %j",
+    (opts) => {
+      const layout = layoutTopologyStar(empty, opts);
+      expect(layout.nodes).toHaveLength(opts.client ? 2 : 1);
+      expectValid(layout, opts.client ? CLIENT_UUID : empty.root.uuid);
+    },
+  );
+
+  it("terminates with a valid ring and disconnected node", () => {
+    expectValid(layoutTopologyStar(ring, client), CLIENT_UUID);
+  });
+
+  it("keeps a dense mixed fan collision-free and in bounds", () => {
+    expectValid(layoutTopologyStar(fan(64), client), CLIENT_UUID);
+  });
+
+  it("does not constrain equal-depth nodes to rigid hop rows", () => {
+    const layout = layoutTopologyStar(fan(8));
+    const children = layout.nodes.filter((n) => n.depth === 1);
+    expect(new Set(children.map((n) => n.y)).size).toBeGreaterThan(1);
+  });
+
+  it("keeps long relay labels inside non-overlapping neighboring cards", () => {
+    const topology = fan(12);
+    topology.nodes = topology.nodes.map((n) => ({
+      ...n,
+      kind: "relay",
+      name: `very-long-relay-name-${n.uuid}-${"x".repeat(200)}`,
+    }));
+    const layout = layoutTopologyStar(topology, client);
+    expect(layout.nodes.find((n) => n.uuid === "node-0")?.name).toBe(
+      topology.nodes[0]!.name,
+    );
+    expectValid(layout, CLIENT_UUID);
+  });
+
+  it("retains the tree filtering of dangling and self edges", () => {
+    const topology: SwarmTopology = {
+      ...ring,
+      edges: [
+        ...ring.edges,
+        { from_uuid: "root", to_uuid: "ghost", name: "missing" },
+        { from_uuid: "west", to_uuid: "west", name: "self" },
+      ],
+    };
+    const layout = layoutTopologyStar(topology, client);
+    expect(edgeSemantics(layout)).toEqual(
+      edgeSemantics(layoutTopology(topology, client)),
+    );
+    expectValid(layout, CLIENT_UUID);
+  });
+});
