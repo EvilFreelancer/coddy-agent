@@ -183,7 +183,8 @@ type HTTPHeaderJSON struct {
 // ToolsJSON mirrors Tools for JSON APIs.
 // MCPJSON mirrors MCP for JSON APIs.
 type MCPJSON struct {
-	ProjectTrust string `json:"project_trust,omitempty"`
+	ProjectTrust       string `json:"project_trust,omitempty"`
+	IdleTimeoutSeconds *int   `json:"idle_timeout_seconds,omitempty"`
 }
 
 type ToolsJSON struct {
@@ -522,7 +523,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		}
 		out.MCPServers = append(out.MCPServers, mj)
 	}
-	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust()}
+	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust(), IdleTimeoutSeconds: cloneIntPtr(c.MCP.IdleTimeoutSeconds)}
 	out.Tools = ToolsJSON{
 		PermissionMode:    c.Tools.ResolvedPermMode(),
 		CommandAllowlist:  append([]string(nil), c.Tools.CommandAllowlist...),
@@ -751,7 +752,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		}
 		cfg.MCPServers = append(cfg.MCPServers, mc)
 	}
-	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust}
+	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust, IdleTimeoutSeconds: cloneIntPtr(j.MCP.IdleTimeoutSeconds)}
 	cfg.Tools = Tools{
 		PermissionMode:    j.Tools.PermissionMode,
 		CommandAllowlist:  append([]string(nil), j.Tools.CommandAllowlist...),

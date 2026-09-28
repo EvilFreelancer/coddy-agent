@@ -791,8 +791,10 @@ func toIfaceOrder(keys []string) []interface{} {
 //
 //	httpserver - the surface the UI itself is served from; editing it there
 //	             would let the page cut its own connection.
-//	mcp        - edited in the MCP servers tab (POST /coddy/mcp/project-trust),
-//	             next to the servers the policy governs.
+//	mcp        - project_trust is edited in the MCP servers tab (POST
+//	             /coddy/mcp/project-trust), next to the servers the policy
+//	             governs; idle_timeout_seconds is set in the file and survives
+//	             every save of this form.
 //	swarm      - a relay's own deployment: bind address, credentials for a whole
 //	             fleet, and the parents this process joins. It is set in the file
 //	             or on the command line, not from a page one of its nodes serves.
