@@ -49,3 +49,30 @@ func TestSwarmFingerprintMovesWithEverySettingButTheAddress(t *testing.T) {
 		t.Error("a nil configuration has a fingerprint")
 	}
 }
+
+// The supervisor reads the configurations the runtime publishes from a channel
+// with one slot, and only the newest is worth applying. Handing it over must
+// never lose that newest one: the supervisor taking the older value out of the
+// slot at the same moment used to leave the slot empty and the new value
+// dropped, and the supervisor stayed on the older configuration for good.
+func TestOfferNewestNeverDropsTheConfigurationItHandsOver(t *testing.T) {
+	for i := 0; i < 100000; i++ {
+		reloads := make(chan *config.Config, 1)
+		older, newer := &config.Config{}, &config.Config{}
+		reloads <- older
+		taken := make(chan *config.Config, 1)
+		go func() { taken <- <-reloads }()
+		offerNewest(reloads, newer)
+		if got := <-taken; got == newer {
+			continue
+		}
+		select {
+		case got := <-reloads:
+			if got != newer {
+				t.Fatalf("round %d: the slot holds another configuration", i)
+			}
+		default:
+			t.Fatalf("round %d: the supervisor took the older configuration and the newer one was dropped", i)
+		}
+	}
+}

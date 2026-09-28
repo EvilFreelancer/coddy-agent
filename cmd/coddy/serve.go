@@ -295,20 +295,7 @@ func runServe(args []string) error {
 	// Only the newest configuration is worth keeping: an observer must not
 	// block the goroutine that replaced it, and a queued older document is
 	// already wrong by the time the supervisor would read it.
-	removeObserver := rt.AddConfigObserver(func(next *config.Config) {
-		for {
-			select {
-			case reloads <- next:
-				return
-			default:
-			}
-			select {
-			case <-reloads:
-			default:
-				return
-			}
-		}
-	})
+	removeObserver := rt.AddConfigObserver(func(next *config.Config) { offerNewest(reloads, next) })
 	defer removeObserver()
 
 	// Not every writer of config.yaml is this process. `coddy providers
@@ -346,6 +333,22 @@ func runServe(args []string) error {
 		return serve.ExitCodeError{Code: serve.ExitRestart, Err: err}
 	}
 	return err
+}
+
+// offerNewest hands next to the supervisor through reloads, a channel with one
+// slot, replacing a configuration still waiting there. It never blocks - it
+// runs on the goroutine that replaced the configuration - and never drops next:
+// with one slot and one reader, the slot is either free to send into or holds
+// an older value to take out, and one select decides which. Checking the two in
+// turn let the supervisor empty the slot in between, and next was dropped.
+func offerNewest(reloads chan *config.Config, next *config.Config) {
+	for {
+		select {
+		case reloads <- next:
+			return
+		case <-reloads:
+		}
+	}
 }
 
 // typedServeFlags rebuilds the command line for the processes this one starts:
