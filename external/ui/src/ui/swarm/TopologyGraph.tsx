@@ -303,6 +303,7 @@ export function TopologyGraph(props: {
         ref={viewport.viewportRef}
         className={`swarm-graph-viewport${viewport.isPanning ? " is-panning" : ""}`}
         data-testid="swarm-graph-viewport"
+        data-wheel-ready={String(viewport.wheelReady)}
         tabIndex={0}
         {...viewport.stageProps}
       >
@@ -310,7 +311,7 @@ export function TopologyGraph(props: {
           className={`swarm-graph${star ? " swarm-graph--star" : ""}`}
           width="100%"
           height="100%"
-          role="img"
+          role="group"
           aria-label={t("swarm.graph.aria")}
           aria-describedby={descId}
         >

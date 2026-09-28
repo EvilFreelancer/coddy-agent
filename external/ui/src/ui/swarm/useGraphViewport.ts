@@ -8,6 +8,7 @@ import {
   type PointerEvent,
 } from "react";
 import {
+  clampCamera,
   fitCamera,
   panCamera,
   zoomCameraAt,
@@ -50,9 +51,12 @@ type PinchGesture = {
  */
 export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const boundsRef = useRef(props.bounds);
+  boundsRef.current = props.bounds;
   const cameraRef = useRef<GraphCamera>(INITIAL_CAMERA);
   const [camera, setCamera] = useState<GraphCamera>(INITIAL_CAMERA);
   const [isPanning, setIsPanning] = useState(false);
+  const [wheelReady, setWheelReady] = useState(false);
   const pointersRef = useRef(new Map<number, GesturePoint>());
   const panRef = useRef<PanGesture | null>(null);
   const pinchRef = useRef<PinchGesture | null>(null);
@@ -69,11 +73,29 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     setCamera(next);
   }, []);
 
+  const cancelGestures = useCallback(() => {
+    const viewport = viewportRef.current;
+    for (const pointerId of pointersRef.current.keys()) {
+      try {
+        if (viewport?.hasPointerCapture(pointerId)) {
+          viewport.releasePointerCapture(pointerId);
+        }
+      } catch {
+        // Capture can end together with a reset or a resize.
+      }
+    }
+    pointersRef.current.clear();
+    panRef.current = null;
+    pinchRef.current = null;
+    consumedGestureClickRef.current = false;
+    setIsPanning(false);
+  }, []);
+
   const fit = useCallback(() => {
     const viewport = geometry();
     if (!viewport) return;
-    updateCamera(fitCamera(props.bounds, viewport, PADDING));
-  }, [geometry, props.bounds, updateCamera]);
+    updateCamera(fitCamera(boundsRef.current, viewport, PADDING));
+  }, [geometry, updateCamera]);
 
   const zoomAt = useCallback(
     (factor: number, focus?: Point) => {
@@ -85,13 +107,13 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
           cameraRef.current,
           factor,
           focus ?? { x: rect.width / 2, y: rect.height / 2 },
-          props.bounds,
+          boundsRef.current,
           viewport,
           PADDING,
         ),
       );
     },
-    [geometry, props.bounds, updateCamera],
+    [geometry, updateCamera],
   );
 
   const zoomIn = useCallback(() => zoomAt(ZOOM_FACTOR), [zoomAt]);
@@ -102,17 +124,40 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
       const viewport = geometry();
       if (!viewport) return;
       updateCamera(
-        panCamera(cameraRef.current, dx, dy, props.bounds, viewport, PADDING),
+        panCamera(
+          cameraRef.current,
+          dx,
+          dy,
+          boundsRef.current,
+          viewport,
+          PADDING,
+        ),
       );
     },
-    [geometry, props.bounds, updateCamera],
+    [geometry, updateCamera],
   );
 
-  // A relay or layout mode describes a different picture. Polls do not: a
-  // manual camera must remain where the reader left it across ordinary reads.
+  const boundsKey = `${props.bounds.x}:${props.bounds.y}:${props.bounds.width}:${props.bounds.height}`;
+
+  // A relay or layout mode is an explicit new picture, so it always fits.
   useLayoutEffect(() => {
+    cancelGestures();
     fit();
-  }, [fit, props.resetKey]);
+  }, [cancelGestures, fit, props.resetKey]);
+
+  // Polls can change the graph's extents. An untouched camera should fit the
+  // fresh picture; a manual one keeps its scale and position where possible,
+  // only clamped into its changed bounds.
+  useLayoutEffect(() => {
+    cancelGestures();
+    const viewport = geometry();
+    if (!viewport) return;
+    updateCamera(
+      cameraRef.current.userAdjusted
+        ? clampCamera(cameraRef.current, boundsRef.current, viewport, PADDING)
+        : fitCamera(boundsRef.current, viewport, PADDING),
+    );
+  }, [boundsKey, cancelGestures, geometry, updateCamera]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -147,7 +192,11 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
       });
     };
     viewport.addEventListener("wheel", wheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", wheel);
+    setWheelReady(true);
+    return () => {
+      viewport.removeEventListener("wheel", wheel);
+      setWheelReady(false);
+    };
   }, [zoomAt]);
 
   const pointFor = (event: PointerEvent<HTMLDivElement>): GesturePoint => ({
@@ -209,7 +258,7 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
           pinch.camera,
           span(pair[0], pair[1]) / pinch.span,
           { x: middle.x - rect.left, y: middle.y - rect.top },
-          props.bounds,
+          boundsRef.current,
           viewport,
           PADDING,
         ),
@@ -291,6 +340,7 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     },
     consumeGestureClick,
     userAdjusted: camera.userAdjusted,
+    wheelReady,
   };
 }
 

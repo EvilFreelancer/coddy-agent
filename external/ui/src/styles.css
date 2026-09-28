@@ -13273,9 +13273,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   --swarm-sunken: var(--bg);
 }
 
-/* role="img" collapses the SVG, so nothing inside it is announced. This is
-   what a screen reader reads instead, and it is the only copy in the picture
-   that has to stay off the canvas. */
+/* The SVG group keeps its node controls exposed. This paragraph supplements
+   its picture-level description and is the only copy that stays off canvas. */
 .swarm-graph-summary {
   position: absolute;
   width: 1px;
@@ -13318,6 +13317,10 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
 .swarm-graph-camera {
   transition: transform 0.12s ease-out;
+}
+
+.swarm-graph-viewport.is-panning .swarm-graph-camera {
+  transition: none;
 }
 
 .swarm-layout-control,
@@ -13375,6 +13378,13 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+@media (max-width: 1199px) {
+  .swarm-canvas-control {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* The spine: a light upright with one tick per hop, so distance is counted

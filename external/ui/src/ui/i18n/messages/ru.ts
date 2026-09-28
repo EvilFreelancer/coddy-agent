@@ -1922,7 +1922,7 @@ export const messagesRu: Record<string, string> = {
   "swarm.layout.star": "Звёздная раскладка",
   "swarm.viewport.zoomIn": "Увеличить",
   "swarm.viewport.zoomOut": "Уменьшить",
-  "swarm.viewport.fit": "Уместить граф",
+  "swarm.viewport.fit": "Показать граф целиком",
   "swarm.tier.client": "эта машина",
   "swarm.graph.hereIs": "Сейчас вы на узле {node}, маршрут {route}.",
   "swarm.graph.busy": "Работа идёт на узлах {names}.",
