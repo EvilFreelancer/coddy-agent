@@ -826,6 +826,7 @@ export const messagesRu: Record<string, string> = {
   "mcp.error.invalidEntry": "Некорректная запись.",
   "mcp.error.saveServer": "Не удалось сохранить сервер",
   "mcp.error.load": "Не удалось загрузить серверы MCP: {message}",
+  "mcp.error.request": "Ошибка запроса MCP: {message}",
   "mcp.discovery.legend": "Обнаружение MCP",
   "mcp.discovery.projectServersLabel": "Проектные серверы",
   "mcp.servers.legend": "Серверы MCP",

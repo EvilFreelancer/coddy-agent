@@ -518,3 +518,146 @@ test("a list that cannot be reached at all says so instead of loading forever", 
   expect(note.textContent).toContain("Failed to fetch");
   expect(screen.queryByText("Loading…")).toBeNull();
 });
+
+test("malformed JSON on the first load ends loading and shows an error", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => Promise.reject(new SyntaxError("Invalid JSON")),
+    }),
+  );
+  render(<MCPSection />);
+
+  const note = await screen.findByTestId("mcp-load-error");
+  expect(note.textContent).toContain("Invalid JSON");
+  expect(screen.queryByText("Loading…")).toBeNull();
+  expect(
+    (screen.getByTestId("mcp-refresh") as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
+test("malformed JSON on refresh keeps the rows and re-enables refresh", async () => {
+  let refresh = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => {
+          if (refresh) throw new SyntaxError("Invalid JSON");
+          return listResponse;
+        },
+      }),
+    ),
+  );
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+
+  refresh = true;
+  fireEvent.click(screen.getByTestId("mcp-refresh"));
+  const note = await screen.findByTestId("mcp-load-error");
+  expect(note.textContent).toContain("Invalid JSON");
+  expect(screen.getByTestId("mcp-toggle-files")).toBeTruthy();
+  expect(
+    (screen.getByTestId("mcp-refresh") as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
+test.each([
+  ["server switch", "mcp-toggle-files", "/coddy/mcp/files/disable"],
+  [
+    "tool switch",
+    "mcp-tool-toggle-files-read_file",
+    "/coddy/mcp/files/tools/read_file/disable",
+  ],
+  ["delete", "mcp-delete-files", "/coddy/mcp/files"],
+  ["project trust policy", "mcp-project-trust", "/coddy/mcp/project-trust"],
+])(
+  "a rejected %s request shows an error and releases its control",
+  async (_name, testId, path) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === path && init?.method !== "GET") {
+          return Promise.reject(new TypeError("Connection lost"));
+        }
+        return Promise.resolve({ ok: true, json: async () => listResponse });
+      }),
+    );
+    render(<MCPSection />);
+    await screen.findByTestId("mcp-list");
+    if (testId.includes("tool-toggle")) {
+      fireEvent.click(screen.getByTestId("mcp-expand-files"));
+    }
+    const control = screen.getByTestId(testId);
+    if (testId === "mcp-project-trust") {
+      fireEvent.change(control, { target: { value: "deny" } });
+    } else {
+      fireEvent.click(control);
+    }
+
+    await waitFor(() =>
+      expect(
+        document.querySelector(".mcp-servers-box .settings-error")?.textContent,
+      ).toContain("Connection lost"),
+    );
+    expect((control as HTMLButtonElement | HTMLSelectElement).disabled).toBe(
+      false,
+    );
+  },
+);
+
+test("a rejected trust request releases the approval control", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? Promise.reject(new TypeError("Connection lost"))
+          : Promise.resolve({
+              ok: true,
+              json: async () => pendingListResponse,
+            }),
+      ),
+  );
+  render(<MCPSection />);
+  const control = await screen.findByTestId("mcp-trust-audit-marker");
+  fireEvent.click(control);
+
+  await waitFor(() =>
+    expect(
+      document.querySelector(".mcp-servers-box .settings-error")?.textContent,
+    ).toContain("Connection lost"),
+  );
+  expect((control as HTMLButtonElement).disabled).toBe(false);
+});
+
+test("a rejected editor save reports the error and re-enables save", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockImplementation((_url: string, init?: RequestInit) =>
+        init?.method === "PUT"
+          ? Promise.reject(new TypeError("Connection lost"))
+          : Promise.resolve({ ok: true, json: async () => listResponse }),
+      ),
+  );
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+  fireEvent.click(screen.getByTestId("mcp-add-server"));
+  fireEvent.change(screen.getByTestId("mcp-editor-name"), {
+    target: { value: "new-server" },
+  });
+  const save = screen.getByTestId("mcp-editor-save") as HTMLButtonElement;
+  fireEvent.click(save);
+
+  await waitFor(() =>
+    expect(
+      document.querySelector(".mcp-editor .settings-error")?.textContent,
+    ).toContain("Connection lost"),
+  );
+  expect(save.disabled).toBe(false);
+});

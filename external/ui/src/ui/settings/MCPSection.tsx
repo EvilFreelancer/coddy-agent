@@ -185,17 +185,26 @@ export function MCPSection() {
     async (firstLoad = false, refresh = false) => {
       if (firstLoad) setLoading(true);
       if (refresh) setRefreshing(true);
-      const result = await fetchServers(refresh);
-      if ("list" in result) {
-        setServers(result.list.items);
-        setProjectTrust(result.list.projectTrust);
-        setWorkspace(result.list.workspace);
-        setLoadError(null);
-      } else {
-        setLoadError(translate("mcp.error.load", { message: result.error }));
+      try {
+        const result = await fetchServers(refresh);
+        if ("list" in result) {
+          setServers(result.list.items);
+          setProjectTrust(result.list.projectTrust);
+          setWorkspace(result.list.workspace);
+          setLoadError(null);
+        } else {
+          setLoadError(translate("mcp.error.load", { message: result.error }));
+        }
+      } catch (err) {
+        setLoadError(
+          translate("mcp.error.load", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        if (firstLoad) setLoading(false);
+        if (refresh) setRefreshing(false);
       }
-      if (firstLoad) setLoading(false);
-      if (refresh) setRefreshing(false);
     },
     [],
   );
@@ -208,8 +217,17 @@ export function MCPSection() {
     setBusy((p) => ({ ...p, [key]: true }));
     setError(null);
     void (async () => {
-      await fn();
-      setBusy((p) => ({ ...p, [key]: false }));
+      try {
+        await fn();
+      } catch (err) {
+        setError(
+          translate("mcp.error.request", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        setBusy((p) => ({ ...p, [key]: false }));
+      }
     })();
   };
 
@@ -331,18 +349,27 @@ export function MCPSection() {
     setEditorBusy(true);
     setEditorError(null);
     void (async () => {
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
-        "PUT",
-        entry,
-      );
-      if (!res.ok) {
-        setEditorError(res.error || translate("mcp.error.saveServer"));
-      } else {
-        setEditor(null);
-        await loadServers();
+      try {
+        const res = await apiSend(
+          `/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
+          "PUT",
+          entry,
+        );
+        if (!res.ok) {
+          setEditorError(res.error || translate("mcp.error.saveServer"));
+        } else {
+          setEditor(null);
+          await loadServers();
+        }
+      } catch (err) {
+        setEditorError(
+          translate("mcp.error.request", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        setEditorBusy(false);
       }
-      setEditorBusy(false);
     })();
   };
 
