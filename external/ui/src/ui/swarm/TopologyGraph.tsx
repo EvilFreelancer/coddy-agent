@@ -7,9 +7,11 @@ import {
   useState,
 } from "react";
 import {
+  CLIENT_UUID,
   NODE_METRICS as M,
   connectorFor,
   layoutTopology,
+  rootRouteEdgeIds,
   routeEdgeIds,
   type PlacedEdge,
   type PlacedNode,
@@ -55,26 +57,45 @@ export function TopologyGraph(props: {
   topology: SwarmTopology;
   /** Joined route of the node the app is driving right now, if any. */
   currentNode?: string | null;
+  /** The app is on the relay the map is drawn for, not on a node under it. */
+  rootCurrent?: boolean;
   /** Work per node, keyed by joined route. */
   activity?: Record<string, NodeActivity>;
   onEnterNode?: (node: PlacedNode) => void;
+  /**
+   * The relay the map is drawn for can be entered: the map is open over a node
+   * and a click on the relay connects to it. On the relay itself there is
+   * nothing to connect to.
+   */
+  rootEnterable?: boolean;
+  /**
+   * The machine the page runs on, drawn above the relay as where the
+   * connection starts (issue #401), named by its host name. A click on it
+   * opens that machine.
+   */
+  client?: { name: string };
+  onEnterClient?: () => void;
 }) {
   const { t, tp } = useT();
   // SwarmView re-polls every five seconds; without this every poll rebuilds the
   // arrangement even when nothing about the swarm moved.
+  const clientName = props.client?.name ?? "";
   const layout = useMemo(
-    () => layoutTopology(props.topology),
-    [props.topology],
+    () =>
+      layoutTopology(
+        props.topology,
+        clientName ? { client: { name: clientName } } : {},
+      ),
+    [props.topology, clientName],
   );
-  // Two graphs on one page would otherwise share marker ids and the second one
-  // would repaint the first one's arrowheads. useId can contain colons, which
-  // read badly inside url(#…), so only id-safe characters survive.
+  // Two graphs on one page would otherwise share the id their description is
+  // found by. useId can contain colons, so only id-safe characters survive.
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const heads = `swarm-head-${uid}`;
   const descId = `swarm-desc-${uid}`;
   const enter = props.onEnterNode;
   const activity = props.activity ?? NO_ACTIVITY;
   const current = props.currentNode || "";
+  const rootCurrent = !current && props.rootCurrent === true;
   const { width, height, spineX } = layout;
 
   // Previewing a route on hover needs no data, only which node the pointer is
@@ -84,15 +105,25 @@ export function TopologyGraph(props: {
   const scroller = useRef<HTMLDivElement | null>(null);
 
   // Degree, not out-degree: "2 links" should count every wire the node carries.
+  // The wire from the machine the page runs on is how this page reaches the
+  // swarm, not a link of it, so it is left out.
   const degrees = new Map<string, number>();
   for (const e of layout.edges) {
+    if (e.from.uuid === CLIENT_UUID) {
+      continue;
+    }
     degrees.set(e.from.uuid, (degrees.get(e.from.uuid) ?? 0) + 1);
     degrees.set(e.to.uuid, (degrees.get(e.to.uuid) ?? 0) + 1);
   }
 
   const liveEdges = useMemo(
-    () => (current ? routeEdgeIds(layout, current) : NO_EDGES),
-    [layout, current],
+    () =>
+      current
+        ? routeEdgeIds(layout, current)
+        : rootCurrent
+          ? rootRouteEdgeIds(layout)
+          : NO_EDGES,
+    [layout, current, rootCurrent],
   );
   const previewEdges = useMemo(
     () =>
@@ -143,6 +174,9 @@ export function TopologyGraph(props: {
   }, [focusX, width]);
 
   const tierName = (row: TierRow): string => {
+    if (row.depth < 0) {
+      return t("swarm.tier.client");
+    }
     if (!row.reachable) {
       return t("swarm.state.noRoute");
     }
@@ -151,11 +185,19 @@ export function TopologyGraph(props: {
       : tp("swarm.tier.hop", row.depth);
   };
 
+  const isCurrent = (n: PlacedNode): boolean =>
+    current
+      ? n.path.length > 0 && n.path.join("/") === current
+      : rootCurrent && n.kind === "relay" && n.depth === 0;
+
+  // The words under a node are for what the drawing cannot say. The shape says
+  // relay or agent, the ring says where the app is, the badge and the dotted
+  // wire say a node dials out, the screen glyph and the tier say this machine:
+  // spelled out again under each of them they were noise. What is left is
+  // trouble - no route, offline - and how much a relay carries.
   const metaOf = (n: PlacedNode): string => {
-    // Where the app is now beats what the node is: the shape already says
-    // whether it routes or works, and only one node can say this.
-    if (current && n.path.length > 0 && n.path.join("/") === current) {
-      return t("swarm.node.here");
+    if (n.kind === "client") {
+      return "";
     }
     if (n.depth > 0 && n.path.length === 0) {
       return t("swarm.state.noRoute");
@@ -164,17 +206,26 @@ export function TopologyGraph(props: {
       return t("swarm.state.offline");
     }
     if (n.kind !== "relay") {
-      return n.transport === "tunnel"
-        ? t("swarm.state.dialsOut")
-        : t("swarm.state.agent");
+      return "";
     }
-    // A relay's line says what it is and how much it carries. That it dials
-    // out is already on the card as a badge, and spelling it out here only
-    // pushed the useful half off the end of the plate.
     const links = degrees.get(n.uuid) ?? 0;
-    return links > 0
-      ? `${t("swarm.state.relay")} · ${tp("swarm.node.links", links)}`
-      : t("swarm.state.relay");
+    return links > 0 ? tp("swarm.node.links", links) : "";
+  };
+
+  // What the drawing says, in words, for the tooltip a hover shows.
+  const kindOf = (n: PlacedNode): string => {
+    if (n.kind === "client") {
+      return t("composer.env.local");
+    }
+    if (isCurrent(n)) {
+      return t("swarm.node.here");
+    }
+    if (n.kind === "relay") {
+      return t("swarm.state.relay");
+    }
+    return n.transport === "tunnel"
+      ? t("swarm.state.dialsOut")
+      : t("swarm.state.agent");
   };
 
   const workOf = (n: PlacedNode): NodeActivity | null => {
@@ -223,9 +274,21 @@ export function TopologyGraph(props: {
     .filter(Boolean)
     .join(" ");
 
+  // Every node with a route is entered. The relay the map is drawn for is
+  // entered from a map opened over a node, where a click on it connects to the
+  // relay (issue #401); on the relay itself it stays put, as the node the app
+  // is on does: a click there would go where the app already is. A node the
+  // relay knows but has no route to is left alone.
+  const rootEnterable = props.rootEnterable === true;
+  const enterClient = props.onEnterClient;
   const enterable = useCallback(
-    (n: PlacedNode): boolean => !!enter && n.depth > 0 && n.path.length > 0,
-    [enter],
+    (n: PlacedNode): boolean =>
+      n.kind === "client"
+        ? !!enterClient
+        : !!enter &&
+          !(current && n.path.length > 0 && n.path.join("/") === current) &&
+          (n.depth === 0 ? rootEnterable : n.path.length > 0),
+    [enter, enterClient, rootEnterable, current],
   );
 
   // A way round and a dead link go down first, so a route in use always paints
@@ -259,7 +322,6 @@ export function TopologyGraph(props: {
           aria-label={t("swarm.graph.aria")}
           aria-describedby={descId}
         >
-          <ArrowDefs prefix={heads} />
 
           <g className="swarm-graph-spine" aria-hidden="true">
             {first && last ? (
@@ -314,7 +376,6 @@ export function TopologyGraph(props: {
               <Wire
                 key={e.id}
                 edge={e}
-                prefix={heads}
                 live={liveEdges.has(e.id)}
                 preview={previewEdges.has(e.id)}
                 busy={busyEdges.has(e.id)}
@@ -330,15 +391,24 @@ export function TopologyGraph(props: {
                   key={n.uuid}
                   node={n}
                   meta={metaOf(n)}
+                  kind={kindOf(n)}
                   work={workLine(work)}
                   state={stateOf(work)}
-                  current={!!current && n.path.join("/") === current}
+                  current={isCurrent(n)}
                   onRoute={onRoute.has(n.uuid)}
                   {...(enterable(n)
-                    ? {
-                        onEnter: enter,
-                        enterLabel: t("swarm.graph.enter", { node: n.name }),
-                      }
+                    ? n.kind === "client"
+                      ? {
+                          onEnter: () => enterClient?.(),
+                          enterLabel: t("swarm.graph.enterClient"),
+                        }
+                      : {
+                          onEnter: enter,
+                          enterLabel:
+                            n.kind === "relay"
+                              ? t("swarm.graph.enterRelay", { node: n.name })
+                              : t("swarm.graph.enter", { node: n.name }),
+                        }
                     : {})}
                   onPreview={setPreview}
                 />
@@ -352,22 +422,18 @@ export function TopologyGraph(props: {
           minimum width the graph would then have to scroll to. */}
       <ul className="swarm-graph-legend" aria-label={t("swarm.graph.legend")}>
         <LegendItem
-          prefix={heads}
           kind="route"
           label={t("swarm.state.route")}
         />
         <LegendItem
-          prefix={heads}
           kind="idle"
           label={t("swarm.state.wayRound")}
         />
         <LegendItem
-          prefix={heads}
           kind="dial"
           label={t("swarm.state.dialsOut")}
         />
         <LegendItem
-          prefix={heads}
           kind="down"
           label={t("swarm.state.offline")}
         />
@@ -377,73 +443,12 @@ export function TopologyGraph(props: {
 }
 
 /**
- * One marker per link state. A marker resolves its paint where it sits, in
- * defs, so it can never inherit the stroke of the path referencing it: each
- * head has to name its own token or it stops following the theme.
+ * A link, its state, and the name a route would call it by when that is not
+ * the name the node under it already carries. No arrowheads: the tiers say
+ * which way a hop runs, and the line's own stroke says the rest.
  */
-function ArrowDefs(props: { prefix: string }) {
-  const p = props.prefix;
-  return (
-    <defs>
-      <marker
-        id={`${p}-route`}
-        viewBox="0 0 12 12"
-        refX={11}
-        refY={6}
-        markerWidth={12}
-        markerHeight={12}
-        markerUnits="userSpaceOnUse"
-        orient="auto"
-      >
-        <path className="swarm-head-route" d="M1.5 1.9 L11 6 L1.5 10.1 Z" />
-      </marker>
-      <marker
-        id={`${p}-idle`}
-        viewBox="0 0 12 12"
-        refX={11}
-        refY={6}
-        markerWidth={12}
-        markerHeight={12}
-        markerUnits="userSpaceOnUse"
-        orient="auto"
-      >
-        <path className="swarm-head-idle" d="M3 2.4 L10.6 6 L3 9.6" />
-      </marker>
-      <marker
-        id={`${p}-down`}
-        viewBox="0 0 12 12"
-        refX={11}
-        refY={6}
-        markerWidth={12}
-        markerHeight={12}
-        markerUnits="userSpaceOnUse"
-        orient="auto"
-      >
-        <path className="swarm-head-down" d="M3 2.4 L10.6 6 L3 9.6" />
-      </marker>
-      {/* Sits at the near end of a dialled link and points back the way it
-          came: that node opened the connection, so it reaches inwards even
-          though the relay's reach runs outwards. */}
-      <marker
-        id={`${p}-dial`}
-        viewBox="0 0 10 10"
-        refX={0}
-        refY={5}
-        markerWidth={10}
-        markerHeight={10}
-        markerUnits="userSpaceOnUse"
-        orient="auto-start-reverse"
-      >
-        <path className="swarm-head-dial" d="M0 0.6 L5.6 5 L0 9.4 Z" />
-      </marker>
-    </defs>
-  );
-}
-
-/** A link, its state, and the name a route would call it by. */
 function Wire(props: {
   edge: PlacedEdge;
-  prefix: string;
   live: boolean;
   preview: boolean;
   busy: boolean;
@@ -463,8 +468,7 @@ function Wire(props: {
   ]
     .filter(Boolean)
     .join(" ");
-  const head = dead ? "down" : e.alternate ? "idle" : "route";
-  const label = clip(e.name, 16);
+  const label = e.name === e.to.name ? "" : clip(e.name, 16);
   const plate = chipWidth(label, 10, 9);
   return (
     <g
@@ -479,28 +483,28 @@ function Wire(props: {
         .filter(Boolean)
         .join(" ")}
     >
-      <path
-        className={cls}
-        d={c.d}
-        markerEnd={`url(#${props.prefix}-${head})`}
-        {...(dials ? { markerStart: `url(#${props.prefix}-dial)` } : {})}
-      />
-      <g
-        className="swarm-edge-chip"
-        transform={`translate(${c.labelX},${c.labelY})`}
-      >
-        <rect x={-plate / 2} y={-8} width={plate} height={16} rx={8} />
-        <text className="swarm-edge-label" y={3} textAnchor="middle">
-          {label}
-        </text>
-      </g>
+      <path className={cls} d={c.d} />
+      {label ? (
+        <g
+          className="swarm-edge-chip"
+          transform={`translate(${c.labelX},${c.labelY})`}
+        >
+          <rect x={-plate / 2} y={-8} width={plate} height={16} rx={8} />
+          <text className="swarm-edge-label" y={3} textAnchor="middle">
+            {label}
+          </text>
+        </g>
+      ) : null}
     </g>
   );
 }
 
 function Node(props: {
   node: PlacedNode;
+  /** The line under the name; empty when the drawing already says it all. */
   meta: string;
+  /** What the drawing says, in words: for the tooltip only. */
+  kind: string;
   /** Empty when nothing is running there and nothing is parked there. */
   work: string;
   state: WorkState;
@@ -516,6 +520,7 @@ function Node(props: {
   const cls = [
     "swarm-node",
     n.kind === "relay" ? "swarm-node-relay" : "swarm-node-agent",
+    n.kind === "client" ? "swarm-node-client" : "",
     n.depth === 0 ? "is-root" : "",
     n.online ? "is-online" : "is-offline",
     n.depth > 0 && n.path.length === 0 ? "is-stranded" : "",
@@ -524,7 +529,7 @@ function Node(props: {
   ]
     .filter(Boolean)
     .join(" ");
-  const title = [n.name, props.meta, props.work, props.enterLabel]
+  const title = [n.name, props.kind, props.meta, props.work, props.enterLabel]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -554,13 +559,24 @@ function Node(props: {
       {n.kind === "relay" ? (
         <RelayCard node={n} meta={props.meta} state={props.state} />
       ) : (
-        <AgentDisc node={n} meta={props.meta} state={props.state} />
+        <AgentDisc
+          node={n}
+          meta={props.meta}
+          state={props.state}
+          glyph={n.kind === "client" ? "screen" : "prompt"}
+        />
       )}
       {props.work ? (
         <WorkLine
           text={props.work}
           state={props.state}
-          y={n.kind === "relay" ? M.relayActivityDrop : M.agentActivityDrop}
+          y={
+            n.kind === "relay"
+              ? M.relayActivityDrop
+              : props.meta
+                ? M.agentActivityDrop
+                : M.agentMetaDrop
+          }
         />
       ) : null}
     </g>
@@ -630,19 +646,21 @@ function RelayCard(props: {
       <text
         className="swarm-node-label"
         x={TEXT_X}
-        y={M.relayNameDrop}
+        y={props.meta ? M.relayNameDrop : M.relayNameAloneDrop}
         textAnchor="start"
       >
         {clipToWidth(n.name, RELAY_TEXT_W, 12.5)}
       </text>
-      <text
-        className="swarm-node-meta"
-        x={TEXT_X}
-        y={M.relayMetaDrop}
-        textAnchor="start"
-      >
-        {clipToWidth(props.meta, RELAY_TEXT_W, 10.5)}
-      </text>
+      {props.meta ? (
+        <text
+          className="swarm-node-meta"
+          x={TEXT_X}
+          y={M.relayMetaDrop}
+          textAnchor="start"
+        >
+          {clipToWidth(props.meta, RELAY_TEXT_W, 10.5)}
+        </text>
+      ) : null}
       <StatusDot
         x={RELAY_HALF_W - M.statusInset}
         y={-RELAY_HALF_H + M.statusInset}
@@ -655,11 +673,16 @@ function RelayCard(props: {
   );
 }
 
-/** An agent does the work: a circle round a prompt, its name on a chip below. */
+/**
+ * An agent does the work: a circle round a prompt, its name on a chip below.
+ * The machine the page runs on is drawn the same way round a screen, since it
+ * is an agent too - the one this browser is at.
+ */
 function AgentDisc(props: {
   node: PlacedNode;
   meta: string;
   state: WorkState;
+  glyph?: "prompt" | "screen";
 }) {
   const n = props.node;
   const r = M.agentRadius;
@@ -672,12 +695,25 @@ function AgentDisc(props: {
       <circle className="swarm-node-shadow" cy={3} r={r - 1} />
       <circle className="swarm-node-ring" r={r + 6} />
       <circle className="swarm-node-body" r={r} />
-      <g className="swarm-node-glyph">
-        <path
-          d={`M${-0.327 * r} ${-0.231 * r} L${-0.096 * r} 0 L${-0.327 * r} ${0.231 * r}`}
-        />
-        <path d={`M${0.058 * r} ${0.25 * r} H${0.346 * r}`} />
-      </g>
+      {props.glyph === "screen" ? (
+        <g className="swarm-node-glyph">
+          <rect
+            x={-0.4 * r}
+            y={-0.34 * r}
+            width={0.8 * r}
+            height={0.52 * r}
+            rx={0.08 * r}
+          />
+          <path d={`M${-0.5 * r} ${0.34 * r} H${0.5 * r}`} />
+        </g>
+      ) : (
+        <g className="swarm-node-glyph">
+          <path
+            d={`M${-0.327 * r} ${-0.231 * r} L${-0.096 * r} 0 L${-0.327 * r} ${0.231 * r}`}
+          />
+          <path d={`M${0.058 * r} ${0.25 * r} H${0.346 * r}`} />
+        </g>
+      )}
       <StatusDot x={r * 0.7} y={-r * 0.7} online={n.online} />
       {n.transport === "tunnel" ? <DialBadge x={-r * 0.7} y={r * 0.7} /> : null}
       <g className="swarm-node-chip" transform={`translate(0,${M.chipDrop})`}>
@@ -692,9 +728,15 @@ function AgentDisc(props: {
           {label}
         </text>
       </g>
-      <text className="swarm-node-meta" y={M.agentMetaDrop} textAnchor="middle">
-        {clip(props.meta, 22)}
-      </text>
+      {props.meta ? (
+        <text
+          className="swarm-node-meta"
+          y={M.agentMetaDrop}
+          textAnchor="middle"
+        >
+          {clip(props.meta, 22)}
+        </text>
+      ) : null}
     </>
   );
 }
@@ -785,34 +827,23 @@ function DialBadge(props: { x: number; y: number }) {
   );
 }
 
-/** Draws each stroke with the very marker it is explaining. */
+/** Draws each stroke with the very line it is explaining. */
 function LegendItem(props: {
-  prefix: string;
   kind: "route" | "idle" | "dial" | "down";
   label: string;
 }) {
-  const dial = props.kind === "dial";
   const cls = [
     "swarm-edge",
     props.kind === "idle" ? "is-alternate" : "",
     props.kind === "down" ? "is-down" : "",
-    dial ? "is-dialled" : "",
+    props.kind === "dial" ? "is-dialled" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  const head = dial ? "route" : props.kind;
   return (
     <li className="swarm-legend-item">
       <svg className="swarm-legend-mark" viewBox="0 0 42 12" aria-hidden="true">
-        <ArrowDefs prefix={`${props.prefix}-lg-${props.kind}`} />
-        <path
-          className={cls}
-          d="M2 6 H30"
-          markerEnd={`url(#${props.prefix}-lg-${props.kind}-${head})`}
-          {...(dial
-            ? { markerStart: `url(#${props.prefix}-lg-${props.kind}-dial)` }
-            : {})}
-        />
+        <path className={cls} d="M2 6 H40" />
       </svg>
       <span>{props.label}</span>
     </li>
