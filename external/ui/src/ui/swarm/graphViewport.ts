@@ -14,6 +14,7 @@ type Geometry = {
   viewport: Size;
   padding: number;
   fitScale: number;
+  maxScale: number;
 };
 
 const FALLBACK_CAMERA: GraphCamera = {
@@ -33,13 +34,14 @@ export function fitCamera(
   if (!geometry) return { ...FALLBACK_CAMERA };
 
   const { fitScale } = geometry;
-  return {
+  const camera = {
     x: centeredOffset(bounds.x, bounds.width, viewport.width, fitScale),
     y: centeredOffset(bounds.y, bounds.height, viewport.height, fitScale),
     scale: fitScale,
     fitScale,
     userAdjusted: false,
   };
+  return isFiniteCamera(camera) ? camera : { ...FALLBACK_CAMERA };
 }
 
 export function zoomCameraAt(
@@ -57,15 +59,23 @@ export function zoomCameraAt(
   const scale = clamp(
     current.scale * positiveOr(factor, 1),
     geometry.fitScale,
-    geometry.fitScale * 3,
+    geometry.maxScale,
   );
   const graph = graphPoint(current, focus);
   const safeFocus = finitePoint(focus);
+  const x = safeFocus.x - graph.x * scale;
+  const y = safeFocus.y - graph.y * scale;
+  if (!isFiniteNumber(graph.x) || !isFiniteNumber(graph.y)) {
+    return { ...FALLBACK_CAMERA };
+  }
+  if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+    return { ...FALLBACK_CAMERA };
+  }
 
   return clampCamera(
     {
-      x: safeFocus.x - graph.x * scale,
-      y: safeFocus.y - graph.y * scale,
+      x,
+      y,
       scale,
       fitScale: geometry.fitScale,
       userAdjusted: true,
@@ -88,11 +98,16 @@ export function panCamera(
   if (!geometry) return { ...FALLBACK_CAMERA };
 
   const current = clampCamera(camera, bounds, viewport, padding);
+  const x = current.x + finiteOr(dx, 0);
+  const y = current.y + finiteOr(dy, 0);
+  if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+    return { ...FALLBACK_CAMERA };
+  }
   return clampCamera(
     {
       ...current,
-      x: current.x + finiteOr(dx, 0),
-      y: current.y + finiteOr(dy, 0),
+      x,
+      y,
       userAdjusted: true,
     },
     bounds,
@@ -113,25 +128,30 @@ export function clampCamera(
   const scale = clamp(
     positiveOr(camera.scale, geometry.fitScale),
     geometry.fitScale,
-    geometry.fitScale * 3,
+    geometry.maxScale,
   );
+  const x = clampAxis(
+    finiteOr(camera.x, 0),
+    bounds.x,
+    bounds.width,
+    viewport.width,
+    geometry.padding,
+    scale,
+  );
+  const y = clampAxis(
+    finiteOr(camera.y, 0),
+    bounds.y,
+    bounds.height,
+    viewport.height,
+    geometry.padding,
+    scale,
+  );
+  if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+    return { ...FALLBACK_CAMERA };
+  }
   return {
-    x: clampAxis(
-      finiteOr(camera.x, 0),
-      bounds.x,
-      bounds.width,
-      viewport.width,
-      geometry.padding,
-      scale,
-    ),
-    y: clampAxis(
-      finiteOr(camera.y, 0),
-      bounds.y,
-      bounds.height,
-      viewport.height,
-      geometry.padding,
-      scale,
-    ),
+    x,
+    y,
     scale,
     fitScale: geometry.fitScale,
     userAdjusted: camera.userAdjusted === true,
@@ -184,9 +204,70 @@ function geometryFor(
     availableWidth / bounds.width,
     availableHeight / bounds.height,
   );
-  if (!isPositive(fitScale)) return null;
+  const maxScale = fitScale * 3;
+  if (
+    !isPositive(fitScale) ||
+    !isPositive(maxScale) ||
+    !hasFiniteAxisMath(
+      bounds.x,
+      bounds.width,
+      viewport.width,
+      safePadding,
+      fitScale,
+    ) ||
+    !hasFiniteAxisMath(
+      bounds.y,
+      bounds.height,
+      viewport.height,
+      safePadding,
+      fitScale,
+    ) ||
+    !hasFiniteAxisMath(
+      bounds.x,
+      bounds.width,
+      viewport.width,
+      safePadding,
+      maxScale,
+    ) ||
+    !hasFiniteAxisMath(
+      bounds.y,
+      bounds.height,
+      viewport.height,
+      safePadding,
+      maxScale,
+    )
+  ) {
+    return null;
+  }
 
-  return { bounds, viewport, padding: safePadding, fitScale };
+  return { bounds, viewport, padding: safePadding, fitScale, maxScale };
+}
+
+function hasFiniteAxisMath(
+  origin: number,
+  size: number,
+  viewportSize: number,
+  padding: number,
+  scale: number,
+): boolean {
+  const scaledSize = size * scale;
+  const scaledOrigin = origin * scale;
+  const centered = (viewportSize - scaledSize) / 2 - scaledOrigin;
+  if (
+    !isFiniteNumber(scaledSize) ||
+    !isFiniteNumber(scaledOrigin) ||
+    !isFiniteNumber(centered)
+  ) {
+    return false;
+  }
+  if (scaledSize <= viewportSize) return true;
+
+  const scaledEnd = (origin + size) * scale;
+  const min = viewportSize - padding - scaledEnd;
+  const max = padding - scaledOrigin;
+  return (
+    isFiniteNumber(scaledEnd) && isFiniteNumber(min) && isFiniteNumber(max)
+  );
 }
 
 function clampAxis(
@@ -222,6 +303,15 @@ function clamp(value: number, min: number, max: number): number {
 
 function finitePoint(point: Point): Point {
   return { x: finiteOr(point.x, 0), y: finiteOr(point.y, 0) };
+}
+
+function isFiniteCamera(camera: GraphCamera): boolean {
+  return (
+    isFiniteNumber(camera.x) &&
+    isFiniteNumber(camera.y) &&
+    isFiniteNumber(camera.scale) &&
+    isFiniteNumber(camera.fitScale)
+  );
 }
 
 function positiveOr(value: number, fallback: number): number {

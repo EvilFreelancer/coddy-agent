@@ -15,6 +15,25 @@ import {
 const bounds: Bounds = { x: 0, y: 0, width: 1000, height: 500 };
 const viewport: Size = { width: 500, height: 300 };
 const padding = 20;
+const fallbackCamera: GraphCamera = {
+  x: 0,
+  y: 0,
+  scale: 1,
+  fitScale: 1,
+  userAdjusted: false,
+};
+const extremeBounds = [
+  { axis: "x", bounds: { x: Number.MAX_VALUE, y: 0, width: 100, height: 100 } },
+  { axis: "y", bounds: { x: 0, y: Number.MAX_VALUE, width: 100, height: 100 } },
+];
+const unpaddedViewport: Size = { width: 500, height: 300 };
+const validCamera: GraphCamera = {
+  x: 0,
+  y: 0,
+  scale: 2,
+  fitScale: 1,
+  userAdjusted: false,
+};
 
 function expectFinite(camera: GraphCamera): void {
   for (const value of Object.values(camera)) {
@@ -145,6 +164,47 @@ describe("graph viewport camera math", () => {
       ),
     );
   });
+
+  it.each(extremeBounds)(
+    "fits $axis-axis geometry with overflowing scale to fallback",
+    ({ bounds }) => {
+      expect(fitCamera(bounds, unpaddedViewport, 0)).toEqual(fallbackCamera);
+    },
+  );
+
+  it.each(extremeBounds)(
+    "clamps $axis-axis geometry with overflowing scale to fallback",
+    ({ bounds }) => {
+      expect(clampCamera(validCamera, bounds, unpaddedViewport, 0)).toEqual(
+        fallbackCamera,
+      );
+    },
+  );
+
+  it.each(extremeBounds)(
+    "zooms $axis-axis geometry with overflowing scale to fallback",
+    ({ bounds }) => {
+      expect(
+        zoomCameraAt(
+          validCamera,
+          2,
+          { x: 250, y: 150 },
+          bounds,
+          unpaddedViewport,
+          0,
+        ),
+      ).toEqual(fallbackCamera);
+    },
+  );
+
+  it.each(extremeBounds)(
+    "pans $axis-axis geometry with overflowing scale to fallback",
+    ({ bounds }) => {
+      expect(
+        panCamera(validCamera, 10, 10, bounds, unpaddedViewport, 0),
+      ).toEqual(fallbackCamera);
+    },
+  );
 
   it("marks fit cameras untouched and zoomed or panned cameras adjusted", () => {
     const fitted = fitCamera(bounds, viewport, padding);
