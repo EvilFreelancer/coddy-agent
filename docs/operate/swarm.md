@@ -235,12 +235,32 @@ the rail - on a plain agent it is not there at all.
 The Swarm screen shows the topology and a search box that goes to the relay. It opens in a dock as
 wide as the documentation reader's, and the map fills it.
 
+**Choose a layout, then explore the canvas.** The map starts in **Tree layout**, the rooted view
+that shows hop tiers. The **Star layout** is a deterministic rooted free graph for inspecting rings
+and cross-links: the relay is its root, or the local computer is the root when the map shows the
+machine that started the connection. The choice belongs only to this browser, under localStorage
+key `coddy_swarm_layout`; it does not change the relay configuration or another browser. If the
+key is absent, unavailable or invalid, Tree remains the default.
+
+The map has Tree and Star selectors plus **Zoom out**, **Fit graph**, and **Zoom in** controls.
+Wheel zoom centres on the pointer; drag pans; two fingers pinch to zoom; and a drag or pinch does
+not activate a node. With the canvas focused, **`+`** or **`=`** zooms in, **`-`** zooms out, and
+**`0`** fits the entire graph. Canvas controls are 40px touch targets on the stacked shell. Fit
+resets the camera, as does changing the relay or layout; ordinary five-second topology polling
+does not discard a manual pan or zoom, though it keeps the camera inside changed graph bounds.
+
+The route in use is an accent path. Every relay it crosses is outlined, with the relay the app is
+currently driving outlined more strongly; alternate routes remain visibly secondary. This makes a
+transit relay readable as part of the connection without implying that it is the selected target.
+
 **A relay's home screen is the swarm.** Of an agent's API a relay serves only its own settings
 (`/coddy/config*`) - no sessions, no workspace, no model, no documentation - so there is nothing
 for a composer to send to and nothing for a history drawer to list. Pointed at a relay the app therefore drops the chat screen, hides History and
 Scheduler in the rail, and shows the map instead. The environment selector moves into the
-map's header, since the composer that usually carries it is not on screen. Enter a node and
-all of it comes back, because the node does have those things.
+map's header, since the composer that usually carries it is not on screen. The selector remains in
+that header even while the map reports an error, including a relay that needs a token, so the
+operator can switch environments or supply the needed credentials. Enter a node and all of it
+comes back, because the node does have those things.
 
 **Working on a node.** Click a node on the map and the app points at that node's mount, with the
 map left open over it until you choose what to do there. From there every screen that already

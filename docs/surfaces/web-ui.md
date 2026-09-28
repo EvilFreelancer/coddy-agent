@@ -1216,7 +1216,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a relay the swarm map **is** the home screen: no composer, no `ChatScreen`,
   no History entry and no Scheduler entry, because a relay holds no sessions of
   its own. Its header carries the environment selector, which normally lives in
-  the composer.
+  the composer; the selector remains there in the map's empty and error states
+  as well, so an unavailable relay does not remove the way to change environments.
 - **Clicking a node on the map switches to it** and leaves the map open over
   it, the node now ringed; what to do there is the next click. There is no list
   of nodes under the map and no filter chips: from a node, every ordinary screen
@@ -1228,7 +1229,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
   as it was.
 - The map rings the node the app is on (on the relay itself, the relay's card)
   and draws the route to it from the attached relay as one connected accent path; everything off that route
-  recedes. Hovering another node previews where a click would take you, and its
+  recedes. Every relay on that route has an outline, and the current relay has
+  the stronger current-node outline. Hovering another node previews where a click would take you, and its
   tooltip names what the drawing shows: what the node is, whether it dials out,
   what it is doing. The map writes words under a node only for trouble
   (*offline*, *no route*) and counts a relay's links on its card; wires carry
@@ -1246,6 +1248,18 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a phone (below 1200 px) the screen opens under the top bar and above the
   dimmed backdrop, so taps reach the map, the search and the nodes; tapping the
   top bar's own entries still leaves it.
+- **Tree** is the default canvas layout. **Star** is a deterministic rooted free
+  graph for rings and cross-links, rooted at the relay or, when drawn, at the
+  local computer that starts the connection. Selecting Tree or Star is
+  browser-only state in localStorage key `coddy_swarm_layout`; an absent,
+  blocked or invalid value selects Tree and no server configuration changes.
+- The canvas starts fitted. Its Tree/Star selector and **Zoom out**, **Fit
+  graph**, and **Zoom in** controls are usable with 40px targets on the stacked
+  shell. Wheel zoom follows the pointer, drag pans, two-finger pinch zooms, and
+  drag/pinch gestures do not open nodes. When focused, **`+`** / **`=`**, **`-`**
+  and **`0`** zoom in, zoom out and fit. Fit, a relay change, or a layout change
+  resets the camera; polling refits only an untouched camera and otherwise
+  preserves the operator's pan and zoom within changed bounds.
 - Built with `-tags "swarm ui"` the relay serves this SPA at its own address;
   without the `ui` tag its root explains how to rebuild.
 - The environment selector in the map header opens **downward**, because on a
