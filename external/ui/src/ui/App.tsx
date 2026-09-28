@@ -5669,6 +5669,9 @@ export function App() {
    */
   const sessionEnvironments = useMemo<SessionsEnvironmentOption[]>(() => {
     const onRemote = activeEnv.mode === "remote";
+    const activeConfiguredRemote = onRemote
+      ? configuredRemoteFor(activeEnv.baseUrl, configuredRemotes)
+      : undefined;
     // The first three rows filter whichever server is active. Configured
     // remote rows below switch the server the whole app reads instead.
     const narrowTo = (origin: SessionOriginFilter) => () => {
@@ -5699,15 +5702,11 @@ export function App() {
       },
     ];
     for (const remote of configuredRemotes) {
-      const remoteBase = remote.url.replace(/\/+$/, "");
       rows.push({
         kind: "switch",
         key: remote.url,
         label: remote.name.trim() || remote.url,
-        active:
-          onRemote &&
-          (activeEnv.baseUrl === remoteBase ||
-            activeEnv.baseUrl.startsWith(`${remoteBase}/swarm/nodes/`)),
+        active: remote === activeConfiguredRemote,
         // A configured remote is an environment switch, not an origin filter.
         onPick: () => connectConfiguredRemote(remote),
       });

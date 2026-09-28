@@ -7,7 +7,7 @@ import { initLocale } from "./i18n/i18n";
 import { resetSettingsConfigForTests } from "./settings/settingsConfigStore";
 import { resetConfiguredRemotesForTests } from "./env/configuredRemotes";
 import { rememberSchedulerLinked } from "./env/pageMemory";
-import { installRemoteFetchShim } from "./env/remoteEnv";
+import { installRemoteFetchShim, setEnv } from "./env/remoteEnv";
 
 /**
  * The swarm map over a node (issue #401). Inside a node the environment is the
@@ -134,17 +134,14 @@ beforeEach(() => {
   resetConfiguredRemotesForTests();
   initLocale("en");
   localStorage.clear();
-  localStorage.setItem(
-    "coddy_env",
-    JSON.stringify({
-      mode: "remote",
-      baseUrl: RELAY + "/swarm/nodes/worker-a",
-      token: "client",
-      name: "worker-a",
-      swarmRelay: RELAY,
-      swarmNode: "worker-a",
-    }),
-  );
+  setEnv({
+    mode: "remote",
+    baseUrl: NODE_MOUNT,
+    token: "client",
+    name: "worker-a",
+    swarmRelay: RELAY,
+    swarmNode: "worker-a",
+  });
   relayAsked.length = 0;
   pageRemotes = [];
   schedulerAnswer = null;
@@ -265,6 +262,73 @@ test("History origin filters the active swarm node without switching environment
   expect(document.cookie).not.toContain("coddy_sessions_origin=gateway");
   expect(switched).not.toHaveBeenCalled();
   expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
+});
+
+test("History environment selects the exact mounted remote over its parent", async () => {
+  document.cookie = "coddy_sessions_origin=gateway; Path=/; SameSite=Lax";
+  pageRemotes = [
+    { name: "office", url: RELAY },
+    { name: "worker-a", url: NODE_MOUNT },
+  ];
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("worker-a · Gateway"),
+  );
+
+  const exact = screen.getByTestId(`sessions-filter-env-${NODE_MOUNT}`);
+  const parent = screen.getByTestId(`sessions-filter-env-${RELAY}`);
+  expect(exact).toHaveAttribute("aria-current", "true");
+  expect(parent).not.toHaveAttribute("aria-current");
+  expect(
+    exact.closest(".sessions-filter-submenu")?.querySelectorAll(
+      '[aria-current="true"]',
+    ),
+  ).toHaveLength(1);
+});
+
+test("History environment selects the deepest nested remote regardless of order", async () => {
+  setEnv({
+    mode: "remote",
+    baseUrl: NODE_MOUNT + "/swarm/nodes/nested",
+    token: "client",
+    name: "nested",
+    swarmRelay: RELAY,
+    swarmNode: "worker-a/nested",
+  });
+  pageRemotes = [
+    { name: "worker-a", url: NODE_MOUNT },
+    { name: "office", url: RELAY },
+  ];
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("worker-a"),
+  );
+
+  const deepest = screen.getByTestId(`sessions-filter-env-${NODE_MOUNT}`);
+  const parent = screen.getByTestId(`sessions-filter-env-${RELAY}`);
+  expect(deepest).toHaveAttribute("aria-current", "true");
+  expect(parent).not.toHaveAttribute("aria-current");
+  expect(
+    deepest.closest(".sessions-filter-submenu")?.querySelectorAll(
+      '[aria-current="true"]',
+    ),
+  ).toHaveLength(1);
 });
 
 test("the swarm map opens over a node without leaving it", async () => {
