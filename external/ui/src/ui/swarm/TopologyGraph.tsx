@@ -238,9 +238,11 @@ export function TopologyGraph(props: {
     return tp("swarm.activity.sessions", work.sessions);
   };
 
-  // role="img" collapses the subtree, so every per-node title and button role
-  // inside is announced as nothing. This paragraph is the picture in words, and
-  // it has to carry the live half of it too.
+  // The SVG is role="group" rather than role="img": role="img" would collapse
+  // the subtree, and the interactive per-node buttons inside must stay in the
+  // accessibility tree. This paragraph is a supplemental description of the
+  // picture (via aria-describedby), and it has to carry the live half of it
+  // too.
   const summary = [
     ...layout.tiers.map((row) =>
       t("swarm.graph.tierNodes", {

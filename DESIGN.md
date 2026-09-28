@@ -1164,10 +1164,12 @@ is the screen: there is no list of nodes under it, because everything the list d
   state is said twice, never in colour alone: the route in use is solid, heavier and in the
   accent, a way round a ring is grey and dashed, a link into an offline node is coarsely dashed and
   dimmed, and a node that dials out carries a badge as well as a dotted wire. Every relay on the
-  active route is outlined, while the current relay has the stronger current-node ring. Because
-  **`role="img"`** collapses the subtree, the SVG is described by a visually hidden paragraph
-  naming each tier, its nodes, where the app is and what is running. The SVG keeps its intrinsic
-  size and scrolls inside **`.swarm-graph-scroll`** rather than scaling its labels below
+  active route is outlined, while the current relay has the stronger current-node ring. The SVG is a
+  **`role="group"`** labelled by the map's name - not **`role="img"`**, which would collapse the
+  subtree and hide the interactive per-node controls it carries - and a visually hidden paragraph
+  added through **`aria-describedby`** names each tier, its nodes, where the app is and what is
+  running. The SVG keeps its intrinsic
+  size and scrolls inside **`.swarm-graph-viewport`** rather than scaling its labels below
   legibility on a phone, and the legend below it wraps instead of setting a minimum width.
 - **Words on the map are for what the drawing cannot say.** Under a node there is a line of words
   only for trouble - *offline*, *no route* - and on a relay's card, how many links it carries
