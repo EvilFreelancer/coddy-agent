@@ -804,7 +804,9 @@ body {
      and the swarm map - which share one look (issue #401). */
   --coddy-dock-width: min(
     1350px,
-    calc(100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px)
+    calc(
+      100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px
+    )
   );
 }
 
@@ -1739,7 +1741,6 @@ a.rail-brand {
   font-size: 12px;
 }
 
-
 /* A heading, the control that starts a chat in it, and the row count. The end
    padding matches a session row's, so the count lands in the same column as the
    rows' own ⋮ below it rather than a few pixels past it. */
@@ -1749,7 +1750,6 @@ a.rail-brand {
   gap: 2px;
   padding-right: 8px;
 }
-
 
 /* In the column the rows' own control sits in, and visible at rest: a way to
    start work in this folder is worth a glance, not a hunt with the pointer. */
@@ -4368,7 +4368,6 @@ a.rail-brand {
   background: color-mix(in srgb, var(--accent) 82%, var(--coddy-blend-base));
 }
 
-
 .slash-sheet-backdrop {
   position: fixed;
   inset: 0;
@@ -6614,7 +6613,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
        one is shown: the banner publishes its height (EnvHealthBanner.tsx), so
        everything placed by the inset starts below both. */
     --coddy-mobile-bar-h: calc(78px + env(safe-area-inset-top, 0px));
-    --coddy-mobile-top-inset: calc(var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px));
+    --coddy-mobile-top-inset: calc(
+      var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px)
+    );
     /* Same rhythm as title row to first message (.messages-inner gap, sticky-head padding-bottom) */
     --coddy-mobile-chat-stack-gap: 12px;
     --coddy-mobile-title-sticky-top: calc(
@@ -8266,8 +8267,7 @@ html:not([data-theme="light"]) .context-usage-note--error {
   flex-direction: column;
   gap: 14px;
   padding: 14px 12px 16px;
-  border: 1px solid
-    color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+  border: 1px solid color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
   border-radius: 12px;
 }
 
@@ -9808,7 +9808,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* No header bar above it (the call's arguments name nothing), so the body is the
    whole card and closes its own top edge. */
 .permission-preview-viewport--headless {
-  border-top: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
   border-radius: 12px;
 }
 
@@ -10047,7 +10048,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
   margin-top: 0;
 }
 
-.permission-preview-bar > .todo-tool-preview-mark + .permission-preview-location {
+.permission-preview-bar
+  > .todo-tool-preview-mark
+  + .permission-preview-location {
   font-family: inherit;
   font-size: 12px;
 }
@@ -10333,7 +10336,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .structured-tool-answer:not(:first-child) {
   padding-top: 10px;
   /* 16%: on the light theme's grey inset a lighter mix vanishes into the body. */
-  border-top: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
 }
 
 /* A request that skips the certificate check says so in the failure colour. */
@@ -11732,8 +11736,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 2px;
 }
 
-
-
 /* Tab controls hanging off the card above them, like the More / Less row: the
    body is a flex column with an 8px gap, and these cancel it. */
 .tool-bgtask-actions {
@@ -11857,8 +11859,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 .bgtask-section-action:hover {
   color: var(--text);
 }
-
-
 
 /* One card for every task - a shell command, a subagent run, the memory run of a
    turn, running or finished. Same parts in the same place: status dot, a tag that says
@@ -12296,13 +12296,18 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   position: relative;
   z-index: 3;
   display: grid;
-  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(170px, 210px);
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(
+      170px,
+      210px
+    );
   grid-template-areas: "title search actions";
   column-gap: 32px;
   align-items: center;
-  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px var(--docs-inline);
+  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px
+    var(--docs-inline);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
 .docs-title-block {
@@ -12413,7 +12418,10 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   box-sizing: border-box;
   padding: var(--docs-top) 0 var(--docs-bottom);
   display: grid;
-  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(170px, 210px);
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(
+      170px,
+      210px
+    );
   gap: 32px;
   align-items: start;
 }
@@ -12479,7 +12487,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
   color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   text-align: center;
   pointer-events: none;
 }
@@ -12589,7 +12601,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 /* On this page: a thin rule on the left, the section being read on it. */
 .docs-outline ul {
   gap: 0;
-  border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-left: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
 }
 
 .docs-outline a {
@@ -12734,7 +12747,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   padding-bottom: 8px;
   font-size: 20px;
   font-weight: 600;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-article .md :where(h3) {
@@ -12950,7 +12964,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   gap: 12px;
   margin-top: 40px;
   padding-top: 18px;
-  border-top: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-pager-link {
@@ -13038,7 +13053,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
       "title actions"
       "search search";
     row-gap: 10px;
-    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px var(--docs-inline);
+    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px
+      var(--docs-inline);
   }
   .docs-header-search {
     max-width: none;
@@ -13272,21 +13288,93 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   border: 0;
 }
 
-/* The graph keeps the size it was drawn at and scrolls inside this box.
-   Scaling a wide swarm down to fit takes its 11px labels below legibility. */
-.swarm-graph-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+/* The graph itself, not the page, receives every navigation gesture. */
+.swarm-graph-viewport {
+  position: relative;
+  min-height: 320px;
+  height: min(60vh, 560px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: var(--coddy-glass-panel-radius, var(--radius));
   background: var(--swarm-ground);
-  padding: 10px;
+  cursor: grab;
+}
+
+.swarm-graph-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.swarm-graph-viewport:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .swarm-graph {
   display: block;
-  margin: 0 auto;
   font-family: inherit;
+}
+
+.swarm-graph-camera {
+  transition: transform 0.12s ease-out;
+}
+
+.swarm-layout-control,
+.swarm-viewport-control {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  border-radius: 10px;
+  background: var(--coddy-glass-panel-bg);
+  backdrop-filter: var(--coddy-glass-panel-backdrop);
+  box-shadow: 0 3px 10px color-mix(in srgb, #000 20%, transparent);
+}
+
+.swarm-layout-control {
+  top: 10px;
+  left: 10px;
+}
+
+.swarm-viewport-control {
+  right: 10px;
+  bottom: 10px;
+}
+
+.swarm-canvas-control {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text) 78%, var(--coddy-blend-base));
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.swarm-canvas-control:hover,
+.swarm-canvas-control:focus-visible,
+.swarm-canvas-control[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--coddy-blend-base));
+}
+
+.swarm-canvas-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* The spine: a light upright with one tick per hop, so distance is counted
@@ -13677,6 +13765,15 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-width: 2;
 }
 
+/* Every relay a live route crosses remains visible as the route's structure.
+   The root still has its filled accent tile, and the current relay keeps the
+   stronger current-node ring above this quieter transit outline. */
+.swarm-node-relay.is-route-relay .swarm-node-ring {
+  opacity: 0.78;
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+
 /* Off the traced path: still readable, no longer competing with it. */
 .swarm-graph-nodes.is-tracing .swarm-node:not(.is-on-route) .swarm-node-label,
 .swarm-graph-nodes.is-tracing .swarm-node:not(.is-on-route) .swarm-node-meta,
@@ -13714,7 +13811,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .swarm-node-ring {
+  .swarm-node-ring,
+  .swarm-graph-camera,
+  .swarm-canvas-control {
     transition: none;
   }
 
@@ -14257,7 +14356,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   cursor: pointer;
   background: transparent;
   color: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  border: 1px dashed color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  border: 1px dashed
+    color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
   transition:
     color 140ms ease,
     border-color 140ms ease;
@@ -14373,7 +14473,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for focus rings inside the scroller. */
     padding: 3px;
     margin: -3px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14413,7 +14517,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for the 3px glow of the plan / ask / bypass chips and focus rings. */
     padding: 4px;
     margin: -4px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14492,7 +14600,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     font-size: 16px;
   }
 
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="color"]
+    ):not([type="file"]),
   select,
   textarea:not(#composer) {
     font-size: max(16px, 1em);

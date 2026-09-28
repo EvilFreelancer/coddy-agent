@@ -105,80 +105,119 @@ export const messagesEn: Record<string, string> = {
   "settings.section.swarm.desc": "Address, tokens, CORS, nodes",
   "settings.secret.keep": "Set. Leave empty to keep it",
   "settings.secret.unset": "Not set",
-  "settings.secret.listSet.one": "{count} is set and not shown. Values entered here replace it.",
-  "settings.secret.listSet.other": "{count} are set and not shown. Values entered here replace them all.",
+  "settings.secret.listSet.one":
+    "{count} is set and not shown. Values entered here replace it.",
+  "settings.secret.listSet.other":
+    "{count} are set and not shown. Values entered here replace them all.",
   "settings.schema.swarm.label": "Swarm relay",
-  "settings.schema.swarm.desc": "This relay's deployment: its name and address, the tokens of its clients and nodes, CORS for pages served elsewhere, the nodes it dials itself and the relays it joins. A save rebuilds the relay; a new address takes a restart.",
+  "settings.schema.swarm.desc":
+    "This relay's deployment: its name and address, the tokens of its clients and nodes, CORS for pages served elsewhere, the nodes it dials itself and the relays it joins. A save rebuilds the relay; a new address takes a restart.",
   "settings.schema.swarm.name.label": "Name",
-  "settings.schema.swarm.name.desc": "The relay's name on the map and in /swarm/info.",
+  "settings.schema.swarm.name.desc":
+    "The relay's name on the map and in /swarm/info.",
   "settings.schema.swarm.host.label": "Listen host",
-  "settings.schema.swarm.host.desc": "Address to bind. 0.0.0.0 listens on every interface. Takes effect on a restart.",
+  "settings.schema.swarm.host.desc":
+    "Address to bind. 0.0.0.0 listens on every interface. Takes effect on a restart.",
   "settings.schema.swarm.port.label": "Listen port",
   "settings.schema.swarm.port.desc": "Port to bind. Takes effect on a restart.",
   "settings.schema.swarm.auth_token.label": "Client token",
-  "settings.schema.swarm.auth_token.desc": "Bearer token a client presents to use this relay, and every node behind it. A new one signs out every client, this page included: enter it again with Connect to… in the environment menu.",
+  "settings.schema.swarm.auth_token.desc":
+    "Bearer token a client presents to use this relay, and every node behind it. A new one signs out every client, this page included: enter it again with Connect to… in the environment menu.",
   "settings.schema.swarm.pairing_tokens.label": "Pairing tokens",
-  "settings.schema.swarm.pairing_tokens.desc": "Tokens a node presents to join this relay. The list is not shown; tokens entered here replace the ones set.",
+  "settings.schema.swarm.pairing_tokens.desc":
+    "Tokens a node presents to join this relay. The list is not shown; tokens entered here replace the ones set.",
   "settings.schema.swarm.cors.label": "CORS",
-  "settings.schema.swarm.cors.desc": "Pages served from another origin, such as a laptop's coddy serve, that may call this relay from the browser.",
+  "settings.schema.swarm.cors.desc":
+    "Pages served from another origin, such as a laptop's coddy serve, that may call this relay from the browser.",
   "settings.schema.swarm.cors.enable.label": "Enable CORS",
-  "settings.schema.swarm.cors.enable.desc": "Answer cross-origin requests from the origins below.",
+  "settings.schema.swarm.cors.enable.desc":
+    "Answer cross-origin requests from the origins below.",
   "settings.schema.swarm.cors.allowed_origins.label": "Allowed origins",
-  "settings.schema.swarm.cors.allowed_origins.desc": "Exact origins, for example http://localhost:12345, or * for any.",
+  "settings.schema.swarm.cors.allowed_origins.desc":
+    "Exact origins, for example http://localhost:12345, or * for any.",
   "settings.schema.swarm.tls.label": "TLS",
-  "settings.schema.swarm.tls.desc": "Certificate and key the relay serves HTTPS with. Both or neither.",
+  "settings.schema.swarm.tls.desc":
+    "Certificate and key the relay serves HTTPS with. Both or neither.",
   "settings.schema.swarm.tls.cert_file.label": "Certificate file",
   "settings.schema.swarm.tls.cert_file.desc": "PEM certificate chain.",
   "settings.schema.swarm.tls.key_file.label": "Key file",
   "settings.schema.swarm.tls.key_file.desc": "PEM private key.",
   "settings.schema.swarm.lease_ttl_seconds.label": "Lease TTL (seconds)",
-  "settings.schema.swarm.lease_ttl_seconds.desc": "How long a registration lasts without a refresh; nodes refresh at a third of it.",
-  "settings.schema.swarm.fanout_timeout_seconds.label": "Fan-out timeout (seconds)",
-  "settings.schema.swarm.fanout_timeout_seconds.desc": "How long the aggregated session list and the topology wait for a node.",
+  "settings.schema.swarm.lease_ttl_seconds.desc":
+    "How long a registration lasts without a refresh; nodes refresh at a third of it.",
+  "settings.schema.swarm.fanout_timeout_seconds.label":
+    "Fan-out timeout (seconds)",
+  "settings.schema.swarm.fanout_timeout_seconds.desc":
+    "How long the aggregated session list and the topology wait for a node.",
   "settings.schema.swarm.upstreams.label": "Upstreams",
-  "settings.schema.swarm.upstreams.desc": "Nodes this relay dials itself, pinned on the map whether or not they check in.",
+  "settings.schema.swarm.upstreams.desc":
+    "Nodes this relay dials itself, pinned on the map whether or not they check in.",
   "settings.schema.swarm.upstreams.name.label": "Name",
-  "settings.schema.swarm.upstreams.name.desc": "Name the node is mounted under: /swarm/nodes/<name>.",
+  "settings.schema.swarm.upstreams.name.desc":
+    "Name the node is mounted under: /swarm/nodes/<name>.",
   "settings.schema.swarm.upstreams.url.label": "URL",
-  "settings.schema.swarm.upstreams.url.desc": "Address the relay dials the node at.",
+  "settings.schema.swarm.upstreams.url.desc":
+    "Address the relay dials the node at.",
   "settings.schema.swarm.upstreams.kind.label": "Kind",
-  "settings.schema.swarm.upstreams.kind.desc": "agent, or relay for a relay chained under this one.",
+  "settings.schema.swarm.upstreams.kind.desc":
+    "agent, or relay for a relay chained under this one.",
   "settings.schema.swarm.upstreams.token.label": "Token",
-  "settings.schema.swarm.upstreams.token.desc": "The node's own bearer token, which the relay presents when it proxies.",
+  "settings.schema.swarm.upstreams.token.desc":
+    "The node's own bearer token, which the relay presents when it proxies.",
   "settings.schema.swarm.upstreams.dial.label": "Dialling",
-  "settings.schema.swarm.upstreams.dial.desc": "How the relay reaches the node: an outbound proxy and the certificate check.",
+  "settings.schema.swarm.upstreams.dial.desc":
+    "How the relay reaches the node: an outbound proxy and the certificate check.",
   "settings.schema.swarm.upstreams.dial.proxy.label": "Proxy",
-  "settings.schema.swarm.upstreams.dial.proxy.desc": "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
+  "settings.schema.swarm.upstreams.dial.proxy.desc":
+    "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
   "settings.schema.swarm.upstreams.dial.ca_file.label": "CA file",
-  "settings.schema.swarm.upstreams.dial.ca_file.desc": "PEM bundle trusted for the node's certificate, besides the system roots.",
-  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.label": "Skip certificate check",
-  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.desc": "For a lab only: every connection is logged as insecure.",
+  "settings.schema.swarm.upstreams.dial.ca_file.desc":
+    "PEM bundle trusted for the node's certificate, besides the system roots.",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.label":
+    "Skip certificate check",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.desc":
+    "For a lab only: every connection is logged as insecure.",
   "settings.schema.swarm.join.label": "Joins",
-  "settings.schema.swarm.join.desc": "Parent relays this relay registers into, which is how relays chain.",
+  "settings.schema.swarm.join.desc":
+    "Parent relays this relay registers into, which is how relays chain.",
   "settings.schema.swarm.join.url.label": "Relay URL",
-  "settings.schema.swarm.join.url.desc": "Parent relay this relay registers into.",
+  "settings.schema.swarm.join.url.desc":
+    "Parent relay this relay registers into.",
   "settings.schema.swarm.join.name.label": "Name",
-  "settings.schema.swarm.join.name.desc": "Name this relay registers under; empty takes the host name.",
+  "settings.schema.swarm.join.name.desc":
+    "Name this relay registers under; empty takes the host name.",
   "settings.schema.swarm.join.pairing_token.label": "Pairing token",
-  "settings.schema.swarm.join.pairing_token.desc": "The parent's pairing token.",
+  "settings.schema.swarm.join.pairing_token.desc":
+    "The parent's pairing token.",
   "settings.schema.swarm.join.advertise_url.label": "Advertise URL",
-  "settings.schema.swarm.join.advertise_url.desc": "Address the parent dials this relay at. Empty dials out: the parent drives this relay back down a tunnel.",
+  "settings.schema.swarm.join.advertise_url.desc":
+    "Address the parent dials this relay at. Empty dials out: the parent drives this relay back down a tunnel.",
   "settings.schema.swarm.join.token.label": "Token",
-  "settings.schema.swarm.join.token.desc": "This relay's own client token, which the parent presents when it proxies.",
+  "settings.schema.swarm.join.token.desc":
+    "This relay's own client token, which the parent presents when it proxies.",
   "settings.schema.swarm.join.dial.label": "Dialling",
-  "settings.schema.swarm.join.dial.desc": "How this relay reaches the parent: an outbound proxy and the certificate check.",
+  "settings.schema.swarm.join.dial.desc":
+    "How this relay reaches the parent: an outbound proxy and the certificate check.",
   "settings.schema.swarm.join.dial.proxy.label": "Proxy",
-  "settings.schema.swarm.join.dial.proxy.desc": "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
+  "settings.schema.swarm.join.dial.proxy.desc":
+    "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
   "settings.schema.swarm.join.dial.ca_file.label": "CA file",
-  "settings.schema.swarm.join.dial.ca_file.desc": "PEM bundle trusted for the parent's certificate, besides the system roots.",
-  "settings.schema.swarm.join.dial.insecure_skip_verify.label": "Skip certificate check",
-  "settings.schema.swarm.join.dial.insecure_skip_verify.desc": "For a lab only: every connection is logged as insecure.",
-  "settings.schema.swarm.allow_private_upstreams.label": "Private upstream hosts",
-  "settings.schema.swarm.allow_private_upstreams.desc": "Host names allowed to resolve into private ranges when a node advertises a URL.",
+  "settings.schema.swarm.join.dial.ca_file.desc":
+    "PEM bundle trusted for the parent's certificate, besides the system roots.",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.label":
+    "Skip certificate check",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.desc":
+    "For a lab only: every connection is logged as insecure.",
+  "settings.schema.swarm.allow_private_upstreams.label":
+    "Private upstream hosts",
+  "settings.schema.swarm.allow_private_upstreams.desc":
+    "Host names allowed to resolve into private ranges when a node advertises a URL.",
   "settings.schema.swarm.allow_insecure.label": "Allow without a client token",
-  "settings.schema.swarm.allow_insecure.desc": "Let a relay bound off loopback run without a client token. For a lab only.",
+  "settings.schema.swarm.allow_insecure.desc":
+    "Let a relay bound off loopback run without a client token. For a lab only.",
   "settings.schema.swarm.insecure_open_registration.label": "Open registration",
-  "settings.schema.swarm.insecure_open_registration.desc": "Let any node join without a pairing token. For a lab only.",
+  "settings.schema.swarm.insecure_open_registration.desc":
+    "Let any node join without a pairing token. For a lab only.",
   "settings.section.logger.label": "Logger",
   "settings.section.logger.desc": "Level, outputs, rotation",
   "settings.section.gateways.label": "Gateways",
@@ -1825,6 +1864,12 @@ export const messagesEn: Record<string, string> = {
   "swarm.graph.enter": "Open {node} through this relay",
   "swarm.graph.enterRelay": "Connect to the relay {node}",
   "swarm.graph.enterClient": "Open the local machine",
+  "swarm.layout.label": "Graph layout",
+  "swarm.layout.tree": "Tree layout",
+  "swarm.layout.star": "Star layout",
+  "swarm.viewport.zoomIn": "Zoom in",
+  "swarm.viewport.zoomOut": "Zoom out",
+  "swarm.viewport.fit": "Fit graph",
   "swarm.tier.client": "this machine",
   "swarm.graph.hereIs": "You are working on {node}, reached through {route}.",
   "swarm.graph.busy": "Work is running on {names}.",

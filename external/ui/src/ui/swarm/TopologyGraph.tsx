@@ -1,11 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useId, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   CLIENT_UUID,
   NODE_METRICS as M,
@@ -18,6 +12,9 @@ import {
   type TierRow,
   type TopologyLayout,
 } from "./layout";
+import { layoutTopologyStar } from "./forceLayout";
+import type { SwarmLayoutMode } from "./layoutMode";
+import { useGraphViewport } from "./useGraphViewport";
 import type { NodeActivity } from "./routes";
 import type { SwarmTopology } from "./types";
 import { useT } from "../i18n/I18nProvider";
@@ -75,6 +72,9 @@ export function TopologyGraph(props: {
    */
   client?: { name: string };
   onEnterClient?: () => void;
+  layoutMode: SwarmLayoutMode;
+  onLayoutModeChange: (mode: SwarmLayoutMode) => void;
+  resetKey: string;
 }) {
   const { t, tp } = useT();
   // SwarmView re-polls every five seconds; without this every poll rebuilds the
@@ -82,11 +82,11 @@ export function TopologyGraph(props: {
   const clientName = props.client?.name ?? "";
   const layout = useMemo(
     () =>
-      layoutTopology(
+      (props.layoutMode === "star" ? layoutTopologyStar : layoutTopology)(
         props.topology,
         clientName ? { client: { name: clientName } } : {},
       ),
-    [props.topology, clientName],
+    [props.topology, clientName, props.layoutMode],
   );
   // Two graphs on one page would otherwise share the id their description is
   // found by. useId can contain colons, so only id-safe characters survive.
@@ -97,12 +97,18 @@ export function TopologyGraph(props: {
   const current = props.currentNode || "";
   const rootCurrent = !current && props.rootCurrent === true;
   const { width, height, spineX } = layout;
+  const bounds = useMemo(
+    () => ({ x: 0, y: 0, width, height }),
+    [width, height],
+  );
+  const viewport = useGraphViewport({
+    bounds,
+    resetKey: props.resetKey,
+  });
 
   // Previewing a route on hover needs no data, only which node the pointer is
   // over. Focus feeds the same state so the keyboard sees what the mouse does.
   const [preview, setPreview] = useState<string>("");
-
-  const scroller = useRef<HTMLDivElement | null>(null);
 
   // Degree, not out-degree: "2 links" should count every wire the node carries.
   // The wire from the machine the page runs on is how this page reaches the
@@ -152,26 +158,6 @@ export function TopologyGraph(props: {
   }, [layout, liveEdges]);
 
   const tracing = liveEdges.size > 0 || previewEdges.size > 0;
-
-  // A swarm wider than the box opens on its left gutter, which on a phone is
-  // an empty margin. Start where the reader is instead - the node the app is
-  // on, or the relay everything hangs off. Keyed to the width and to that
-  // node, so a poll that changes neither never yanks the view back.
-  const focusX = useMemo(() => {
-    const node =
-      layout.nodes.find(
-        (n) => current && n.path.length > 0 && n.path.join("/") === current,
-      ) ?? layout.nodes.find((n) => n.depth === 0);
-    return node ? node.x : 0;
-  }, [layout, current]);
-
-  useEffect(() => {
-    const box = scroller.current;
-    if (!box || box.scrollWidth <= box.clientWidth) {
-      return;
-    }
-    box.scrollLeft = focusX - box.clientWidth / 2;
-  }, [focusX, width]);
 
   const tierName = (row: TierRow): string => {
     if (row.depth < 0) {
@@ -306,139 +292,254 @@ export function TopologyGraph(props: {
   const nodes = layout.nodes;
   const first = layout.tiers[0];
   const last = layout.tiers[layout.tiers.length - 1];
+  const star = props.layoutMode === "star";
 
   return (
     <div className="swarm-graph-panel">
       <p id={descId} className="swarm-graph-summary">
         {summary}
       </p>
-      <div className="swarm-graph-scroll" ref={scroller}>
+      <div
+        ref={viewport.viewportRef}
+        className={`swarm-graph-viewport${viewport.isPanning ? " is-panning" : ""}`}
+        data-testid="swarm-graph-viewport"
+        tabIndex={0}
+        {...viewport.stageProps}
+      >
         <svg
-          className="swarm-graph"
-          viewBox={`0 0 ${width} ${height}`}
-          width={width}
-          height={height}
+          className={`swarm-graph${star ? " swarm-graph--star" : ""}`}
+          width="100%"
+          height="100%"
           role="img"
           aria-label={t("swarm.graph.aria")}
           aria-describedby={descId}
         >
-
-          <g className="swarm-graph-spine" aria-hidden="true">
-            {first && last ? (
-              <line
-                className="swarm-spine-rule"
-                x1={spineX}
-                y1={first.y - 34}
-                x2={spineX}
-                y2={last.y + 34}
-              />
-            ) : null}
-            {layout.tiers.map((row) => (
-              <g
-                key={row.depth}
-                className={
-                  row.reachable ? "swarm-tier" : "swarm-tier is-parked"
-                }
-              >
-                <line
-                  className="swarm-tier-tick"
-                  x1={spineX - 5}
-                  y1={row.y}
-                  x2={spineX + 7}
-                  y2={row.y}
-                />
-                <text
-                  className="swarm-tier-label"
-                  x={spineX - 12}
-                  y={row.y - 1}
-                  textAnchor="end"
-                >
-                  {tierName(row)}
-                </text>
-                <text
-                  className="swarm-tier-count"
-                  x={spineX - 12}
-                  y={row.y + 13}
-                  textAnchor="end"
-                >
-                  {tp("swarm.summary.nodes", row.count)}
-                </text>
-              </g>
-            ))}
-          </g>
-
-          {/* A wire crossing a node must never swallow a click meant for it. */}
           <g
-            className={`swarm-graph-edges${tracing ? " is-tracing" : ""}`}
-            aria-hidden="true"
+            className="swarm-graph-camera"
+            transform={viewport.transform}
+            data-user-adjusted={String(viewport.userAdjusted)}
           >
-            {edges.map((e) => (
-              <Wire
-                key={e.id}
-                edge={e}
-                live={liveEdges.has(e.id)}
-                preview={previewEdges.has(e.id)}
-                busy={busyEdges.has(e.id)}
-              />
-            ))}
-          </g>
+            {!star ? (
+              <g className="swarm-graph-spine" aria-hidden="true">
+                {first && last ? (
+                  <line
+                    className="swarm-spine-rule"
+                    x1={spineX}
+                    y1={first.y - 34}
+                    x2={spineX}
+                    y2={last.y + 34}
+                  />
+                ) : null}
+                {layout.tiers.map((row) => (
+                  <g
+                    key={row.depth}
+                    className={
+                      row.reachable ? "swarm-tier" : "swarm-tier is-parked"
+                    }
+                  >
+                    <line
+                      className="swarm-tier-tick"
+                      x1={spineX - 5}
+                      y1={row.y}
+                      x2={spineX + 7}
+                      y2={row.y}
+                    />
+                    <text
+                      className="swarm-tier-label"
+                      x={spineX - 12}
+                      y={row.y - 1}
+                      textAnchor="end"
+                    >
+                      {tierName(row)}
+                    </text>
+                    <text
+                      className="swarm-tier-count"
+                      x={spineX - 12}
+                      y={row.y + 13}
+                      textAnchor="end"
+                    >
+                      {tp("swarm.summary.nodes", row.count)}
+                    </text>
+                  </g>
+                ))}
+              </g>
+            ) : null}
 
-          <g className={`swarm-graph-nodes${tracing ? " is-tracing" : ""}`}>
-            {nodes.map((n) => {
-              const work = workOf(n);
-              return (
-                <Node
-                  key={n.uuid}
-                  node={n}
-                  meta={metaOf(n)}
-                  kind={kindOf(n)}
-                  work={workLine(work)}
-                  state={stateOf(work)}
-                  current={isCurrent(n)}
-                  onRoute={onRoute.has(n.uuid)}
-                  {...(enterable(n)
-                    ? n.kind === "client"
-                      ? {
-                          onEnter: () => enterClient?.(),
-                          enterLabel: t("swarm.graph.enterClient"),
-                        }
-                      : {
-                          onEnter: enter,
-                          enterLabel:
-                            n.kind === "relay"
-                              ? t("swarm.graph.enterRelay", { node: n.name })
-                              : t("swarm.graph.enter", { node: n.name }),
-                        }
-                    : {})}
-                  onPreview={setPreview}
+            {/* A wire crossing a node must never swallow a click meant for it. */}
+            <g
+              className={`swarm-graph-edges${tracing ? " is-tracing" : ""}`}
+              aria-hidden="true"
+            >
+              {edges.map((e) => (
+                <Wire
+                  key={e.id}
+                  edge={e}
+                  live={liveEdges.has(e.id)}
+                  preview={previewEdges.has(e.id)}
+                  busy={busyEdges.has(e.id)}
                 />
-              );
-            })}
+              ))}
+            </g>
+
+            <g className={`swarm-graph-nodes${tracing ? " is-tracing" : ""}`}>
+              {nodes.map((n) => {
+                const work = workOf(n);
+                return (
+                  <Node
+                    key={n.uuid}
+                    node={n}
+                    meta={metaOf(n)}
+                    kind={kindOf(n)}
+                    work={workLine(work)}
+                    state={stateOf(work)}
+                    current={isCurrent(n)}
+                    onRoute={onRoute.has(n.uuid)}
+                    consumeGestureClick={viewport.consumeGestureClick}
+                    {...(enterable(n)
+                      ? n.kind === "client"
+                        ? {
+                            onEnter: () => enterClient?.(),
+                            enterLabel: t("swarm.graph.enterClient"),
+                          }
+                        : {
+                            onEnter: enter,
+                            enterLabel:
+                              n.kind === "relay"
+                                ? t("swarm.graph.enterRelay", { node: n.name })
+                                : t("swarm.graph.enter", { node: n.name }),
+                          }
+                      : {})}
+                    onPreview={setPreview}
+                  />
+                );
+              })}
+            </g>
           </g>
         </svg>
+        <div
+          className="swarm-layout-control"
+          role="group"
+          aria-label={t("swarm.layout.label")}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <CanvasButton
+            label={t("swarm.layout.tree")}
+            pressed={!star}
+            onClick={() => props.onLayoutModeChange("tree")}
+          >
+            <TreeIcon />
+          </CanvasButton>
+          <CanvasButton
+            label={t("swarm.layout.star")}
+            pressed={star}
+            onClick={() => props.onLayoutModeChange("star")}
+          >
+            <StarIcon />
+          </CanvasButton>
+        </div>
+        <div
+          className="swarm-viewport-control"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <CanvasButton
+            label={t("swarm.viewport.zoomOut")}
+            onClick={viewport.zoomOut}
+          >
+            <MinusIcon />
+          </CanvasButton>
+          <CanvasButton label={t("swarm.viewport.fit")} onClick={viewport.fit}>
+            <FitIcon />
+          </CanvasButton>
+          <CanvasButton
+            label={t("swarm.viewport.zoomIn")}
+            onClick={viewport.zoomIn}
+          >
+            <PlusIcon />
+          </CanvasButton>
+        </div>
       </div>
 
       {/* HTML rather than SVG so it wraps on a phone instead of setting a
           minimum width the graph would then have to scroll to. */}
       <ul className="swarm-graph-legend" aria-label={t("swarm.graph.legend")}>
-        <LegendItem
-          kind="route"
-          label={t("swarm.state.route")}
-        />
-        <LegendItem
-          kind="idle"
-          label={t("swarm.state.wayRound")}
-        />
-        <LegendItem
-          kind="dial"
-          label={t("swarm.state.dialsOut")}
-        />
-        <LegendItem
-          kind="down"
-          label={t("swarm.state.offline")}
-        />
+        <LegendItem kind="route" label={t("swarm.state.route")} />
+        <LegendItem kind="idle" label={t("swarm.state.wayRound")} />
+        <LegendItem kind="dial" label={t("swarm.state.dialsOut")} />
+        <LegendItem kind="down" label={t("swarm.state.offline")} />
       </ul>
     </div>
+  );
+}
+
+function CanvasButton(props: {
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="swarm-canvas-control"
+      aria-label={props.label}
+      title={props.label}
+      {...(props.pressed === undefined
+        ? {}
+        : { "aria-pressed": props.pressed })}
+      onClick={(event) => {
+        event.stopPropagation();
+        props.onClick();
+      }}
+    >
+      {props.children}
+    </button>
+  );
+}
+
+function TreeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 3v10M3 5h5M3 10h5M8 5v-2M8 10v2" />
+      <circle cx="8" cy="3" r="1.4" />
+      <circle cx="8" cy="12" r="1.4" />
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 8 3 3M8 8h5M8 8l-4 5M8 8l2-5" />
+      <circle cx="8" cy="8" r="1.5" />
+      <circle cx="3" cy="3" r="1.2" />
+      <circle cx="13" cy="8" r="1.2" />
+      <circle cx="4" cy="13" r="1.2" />
+      <circle cx="10" cy="3" r="1.2" />
+    </svg>
+  );
+}
+
+function MinusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 8h10" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 8h10M8 3v10" />
+    </svg>
+  );
+}
+
+function FitIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" />
+    </svg>
   );
 }
 
@@ -510,6 +611,7 @@ function Node(props: {
   state: WorkState;
   current: boolean;
   onRoute: boolean;
+  consumeGestureClick: () => boolean;
   onEnter?: (node: PlacedNode) => void;
   enterLabel?: string;
   onPreview: (route: string) => void;
@@ -526,6 +628,7 @@ function Node(props: {
     n.depth > 0 && n.path.length === 0 ? "is-stranded" : "",
     props.current ? "is-current" : "",
     props.onRoute ? "is-on-route" : "",
+    n.kind === "relay" && props.onRoute ? "is-route-relay" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -536,7 +639,13 @@ function Node(props: {
     <g
       className={cls}
       transform={`translate(${n.x},${n.y})`}
-      onClick={enter ? () => enter(n) : undefined}
+      onClick={
+        enter
+          ? () => {
+              if (!props.consumeGestureClick()) enter(n);
+            }
+          : undefined
+      }
       role={enter ? "button" : undefined}
       tabIndex={enter ? 0 : undefined}
       aria-label={enter ? props.enterLabel : undefined}

@@ -9,6 +9,7 @@ import {
 import type { RelayTarget, SwarmHttpError } from "./api";
 import { nodeActivity, routeLabel, sessionKey } from "./routes";
 import { topologySummary } from "./layout";
+import { readSwarmLayoutMode, writeSwarmLayoutMode } from "./layoutMode";
 import { TopologyGraph } from "./TopologyGraph";
 import { useT } from "../i18n/I18nProvider";
 import { getEnv } from "../env/remoteEnv";
@@ -98,6 +99,7 @@ export function SwarmView(props: {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(!picture);
+  const [layoutMode, setLayoutMode] = useState(readSwarmLayoutMode);
 
   const searchRef = useRef(search);
   searchRef.current = search;
@@ -193,10 +195,22 @@ export function SwarmView(props: {
   const summary = topology ? topologySummary(topology) : null;
   const current = props.currentNode?.join("/") || "";
   const query = search.trim();
+  const setLayout = (mode: typeof layoutMode) => {
+    setLayoutMode(mode);
+    writeSwarmLayoutMode(mode);
+  };
+  // The relay and the layout are a new picture. A five-second poll is not.
+  const graphResetKey = `${info?.uuid || relayBase || pictureKey(relayBase)}:${layoutMode}`;
 
   if (!info && !loading) {
     return (
       <section className="swarm-view" data-testid="swarm-view">
+        <header className="swarm-header">
+          <div>
+            <h1 className="swarm-title">{t("swarm.title")}</h1>
+          </div>
+          <div className="swarm-header-actions">{props.headerSlot}</div>
+        </header>
         <p className="swarm-empty">{error || t("swarm.empty.noSwarm")}</p>
       </section>
     );
@@ -245,6 +259,9 @@ export function SwarmView(props: {
           topology={topology}
           currentNode={current}
           activity={activity}
+          layoutMode={layoutMode}
+          onLayoutModeChange={setLayout}
+          resetKey={graphResetKey}
           {...(props.onOpenNode || props.onOpenRelay
             ? { onEnterNode: (n) => enterNode(n.path, n.kind, n.name) }
             : {})}

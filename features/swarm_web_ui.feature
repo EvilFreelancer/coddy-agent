@@ -10,3 +10,6 @@ Feature: The swarm screen in the web UI
 
   Scenario: History origin filtering stays on the active swarm node
     Then the History origin filter applies to the node currently open through the relay without leaving it
+
+  Scenario: The swarm canvas remembers a selected layout
+    Then the swarm canvas starts as a tree and remembers the star layout in this browser
