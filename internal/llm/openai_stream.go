@@ -149,22 +149,94 @@ func (e *streamServerError) Error() string {
 	return "server error: " + e.msg
 }
 
-// streamTruncatedError reports an SSE stream that ended cleanly at the
-// transport level but never carried a terminal marker: no [DONE] and no
+// streamTruncatedError reports an SSE stream that was cut mid-generation by
+// the server or a proxy. Two forms: a stream that ended cleanly at the
+// transport level but never carried a terminal marker (no [DONE] and no
 // finish_reason for the OpenAI dialect, no stop_reason-bearing message_delta
-// for the Anthropic one. The response was cut mid-generation by the server
-// or a proxy (issue #86). emitted mirrors streamServerError.emitted: once
-// deltas reached the caller a retry would stream the same text twice, so
-// classification refuses to retry (see isRetryableLLMError).
+// for the Anthropic one, neither response.completed nor response.incomplete
+// for Codex; issue #86), and a frame or event that arrived framed but ended
+// inside its JSON, which the decoder reports as a syntax error at the end of
+// its input (issue #384); the second form carries that error as cause.
+// emitted mirrors streamServerError.emitted: once deltas reached the caller a
+// retry would stream the same text twice, so classification refuses to retry
+// (see isRetryableLLMError).
 type streamTruncatedError struct {
 	emitted bool
+	// cause is the decoder's error for an event cut inside its JSON, nil for
+	// a stream cut between events; reachable through Unwrap for logs.
+	cause error
 }
 
 func (e *streamTruncatedError) Error() string {
+	if e.cause != nil {
+		// The cause can carry server bytes (the OpenAI reader's frame
+		// snippet); httpStatusFromError matches this type ahead of its
+		// message scan, so they are never read as a status.
+		return "stream truncated: an event arrived with incomplete JSON (" + e.cause.Error() + ")"
+	}
 	// Digit-free on purpose: httpStatusFromError falls back to scanning the
 	// message for status-code substrings.
 	return "stream truncated: connection closed before a terminal marker ([DONE] or finish_reason)"
 }
+
+func (e *streamTruncatedError) Unwrap() error { return e.cause }
+
+// streamDecodeTruncation classifies err, the failure of decoding one framed
+// SSE event, as a cut inside that event: a *json.SyntaxError whose diagnostic
+// is the decoder's end-of-input one. encoding/json spells it "unexpected end
+// of JSON input" when the input stops between tokens, and "invalid character
+// ' ' ..." when its end-of-input probe (a single space) lands inside an
+// unfinished literal or number. The SDK decoders append a newline to every
+// data line and never trim, so on their path the same cut reads "invalid
+// character '\n' ...", inside a string literal included. Every other syntax
+// error names a byte the server did send: a malformed event, not a cut, and
+// nil is returned so the caller keeps its own contract for it.
+//
+// payloadLen, when the caller has the decoded payload (the OpenAI-compatible
+// reader), is its length, and the error must then sit at its end: that rules
+// out a malformed but complete event whose whitespace happens to fall inside
+// a token, such as `{"a":nu ll}` or a JSON string split across two data:
+// lines. The SDK streams hand out no payload, so Codex and Anthropic pass 0
+// and take the diagnostic alone: a bounded heuristic that treats such an
+// event as a cut too - kept text, no tool call, a retry before output or a
+// continue after it, never a replay - which is the safe side of the
+// ambiguity, and no encoder writes a raw space or newline inside a literal,
+// a number or an SSE data string.
+func streamDecodeTruncation(err error, emitted bool, payloadLen int) *streamTruncatedError {
+	var syn *json.SyntaxError
+	if !errors.As(err, &syn) {
+		return nil
+	}
+	msg := syn.Error()
+	if msg != "unexpected end of JSON input" &&
+		!strings.HasPrefix(msg, "invalid character ' '") &&
+		!strings.HasPrefix(msg, `invalid character '\n'`) {
+		return nil
+	}
+	if payloadLen > 0 && syn.Offset != int64(payloadLen) {
+		return nil
+	}
+	return &streamTruncatedError{emitted: emitted, cause: err}
+}
+
+// streamUndecodableError is a non-empty data frame of the OpenAI-compatible
+// stream that is not JSON: the stream is corrupt (a server or a proxy wrote
+// something else into it), so the read stops there. The message carries the
+// frame so the operator sees what the server sent, and the decoder's own
+// error stays reachable through Unwrap. It is final: never retried, before
+// or after output, since a malformed stream is not a cut
+// (isRetryableLLMError), and its text is never scanned for a status
+// (httpStatusFromError), whatever the frame holds. A frame whose JSON merely
+// stops short is not this error but a streamTruncatedError with this one as
+// its cause (streamDecodeTruncation).
+type streamUndecodableError struct {
+	snippet string
+	cause   error
+}
+
+func (e *streamUndecodableError) Error() string { return "undecodable SSE frame: " + e.snippet }
+
+func (e *streamUndecodableError) Unwrap() error { return e.cause }
 
 // IsStreamTruncated reports whether err carries a mid-response stream
 // truncation, so callers (the ReAct loop) can persist the partial answer the
@@ -284,7 +356,18 @@ func (p *openAIProvider) Stream(ctx context.Context, messages []Message, tools [
 			// A non-empty data frame that is not JSON means the stream is
 			// corrupt; failing silently here would truncate the response.
 			// Carry the payload so the operator sees what the server sent.
-			streamErr = fmt.Errorf("undecodable SSE frame: %s", streamErrorSnippet(payload))
+			// The reader also dispatches a last frame the server closed
+			// without a blank line after it (sseScanner.Next), so a body cut
+			// inside a data: line arrives here: when the decoder says the
+			// JSON stopped short, this is a truncation like a stream cut
+			// between frames (issue #384), and the branch after the loop
+			// keeps the delivered text and drops the unfinished tool calls.
+			und := &streamUndecodableError{snippet: streamErrorSnippet(payload), cause: err}
+			if trunc := streamDecodeTruncation(und, emitted, len(payload)); trunc != nil {
+				streamErr = trunc
+			} else {
+				streamErr = und
+			}
 			break
 		}
 
