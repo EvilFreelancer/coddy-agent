@@ -9,6 +9,7 @@ import {
   environmentKey,
   getEnv,
   onEnvironmentSwitch,
+  subscribeEnv,
   type CoddyEnv,
 } from "./remoteEnv";
 import { probeRemote, type RemoteProbe } from "./remoteProbe";
@@ -32,6 +33,10 @@ let started = false;
  * landing after a newer "up" put a remote that had just come back down again.
  */
 let asked = 0;
+/** The environment the verdict in `state` is about. */
+let stateKey = "";
+/** The token the newest ask presented. */
+let askedToken = "";
 const listeners = new Set<() => void>();
 
 function set(next: ActiveEnvProbe): void {
@@ -68,6 +73,7 @@ export async function probeEnvHealth(env: CoddyEnv): Promise<EnvHealth> {
 async function tick(): Promise<void> {
   const env = getEnv();
   if (env.mode !== "remote") {
+    stateKey = environmentKey(env);
     set({ health: "up", probe: null });
     return;
   }
@@ -77,22 +83,45 @@ async function tick(): Promise<void> {
   // "checking" is only where a remote starts (startActiveHealthMonitor, a
   // switch in place).
   const mine = ++asked;
+  askedToken = env.token;
   const probe = await probeActiveEnv(env);
   // A newer ask is on its way, or the app moved to another remote while this
   // one was asked: this answer is not the one to keep.
   if (mine !== asked || environmentKey(getEnv()) !== environmentKey(env)) {
     return;
   }
+  stateKey = environmentKey(env);
   set({ health: !probe || probe.reach === "up" ? "up" : "down", probe });
 }
 
-// A switch to another remote in place: its health is not the last one's.
+// A switch in place: another remote starts from "checking", its health is not
+// the last one's; the same remote chosen again keeps its verdict on screen
+// until the new ask answers, as on any other ask.
 onEnvironmentSwitch(() => {
   if (!started) {
     return;
   }
-  set({ health: "checking", probe: null });
+  if (environmentKey(getEnv()) !== stateKey) {
+    set({ health: "checking", probe: null });
+  }
   void tick();
+});
+
+// A token rotated under the same remote (configuredRemotes.syncActiveToken)
+// is asked with at once: the verdict is about the token presented, and an ask
+// still on its way with the old one is superseded.
+subscribeEnv(() => {
+  if (!started) {
+    return;
+  }
+  const env = getEnv();
+  if (
+    env.mode === "remote" &&
+    environmentKey(env) === stateKey &&
+    env.token !== askedToken
+  ) {
+    void tick();
+  }
 });
 
 /** startActiveHealthMonitor begins probing the active environment (idempotent). */
@@ -100,6 +129,7 @@ export function startActiveHealthMonitor(): void {
   if (started || typeof window === "undefined") return;
   started = true;
   state = { health: getEnv().mode === "remote" ? "checking" : "up", probe: null };
+  stateKey = environmentKey(getEnv());
   void tick();
   window.setInterval(() => void tick(), PROBE_INTERVAL_MS);
   window.addEventListener("focus", () => void tick());

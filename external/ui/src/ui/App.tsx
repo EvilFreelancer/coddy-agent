@@ -1856,15 +1856,20 @@ export function App() {
           setSchedulerOpen(false);
           setSchedulerEditor(null);
           msg = t("scheduler.apiNotAvailable");
-          const sid = sessionId.trim();
-          if (sid) {
-            setSessionHashInLocation(sid);
-          } else if (window.location.hash) {
-            history.replaceState(
-              null,
-              "",
-              `${window.location.pathname}${window.location.search}`,
-            );
+          // The answer is about the scheduler screen: the address is left
+          // alone once the reader has moved on from it, or the app from the
+          // environment it asked (a switch in place keeps the request alive).
+          if (isAppEnvironment() && parseAppHash().branch === "scheduler") {
+            const sid = sessionId.trim();
+            if (sid) {
+              setSessionHashInLocation(sid);
+            } else if (window.location.hash) {
+              history.replaceState(
+                null,
+                "",
+                `${window.location.pathname}${window.location.search}`,
+              );
+            }
           }
           setSchedulerListError(msg);
           setSchedulerJobs([]);
@@ -1890,7 +1895,7 @@ export function App() {
       setSchedulerInfo(res.data.scheduler);
       setSchedulerJobs(res.data.jobs || []);
     },
-    [sessionId, t],
+    [sessionId, t, isAppEnvironment],
   );
 
   const applyLocationHash = useCallback(() => {

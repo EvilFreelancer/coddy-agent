@@ -6,6 +6,7 @@ import { ConfirmProvider } from "./components/useConfirm";
 import { initLocale } from "./i18n/i18n";
 import { resetSettingsConfigForTests } from "./settings/settingsConfigStore";
 import { resetConfiguredRemotesForTests } from "./env/configuredRemotes";
+import { rememberSchedulerLinked } from "./env/pageMemory";
 
 /**
  * The swarm map over a node (issue #401). Inside a node the environment is the
@@ -96,6 +97,8 @@ vi.mock("./env/remoteEnv", async (importOriginal) => {
 
 // The remotes the page's own server lists (httpserver.remotes).
 let pageRemotes: Array<Record<string, string>> = [];
+// Set by a test that answers the scheduler routes itself.
+let schedulerAnswer: (() => Promise<Response>) | null = null;
 
 // The node, reached the way the environment shim would reach it.
 const nodeFetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -105,6 +108,9 @@ const nodeFetch = vi.fn(async (input: RequestInfo | URL) => {
     return json({ httpserver: { remotes: pageRemotes } });
   }
   if (path === "/coddy/scheduler/jobs") {
+    if (schedulerAnswer) {
+      return schedulerAnswer();
+    }
     return json({ scheduler: { enabled: true, dir: "/tmp", timeout: "30m", max_queue: 1, runs_active: 0, retain_sessions: 1 }, jobs: [] });
   }
   if (path.startsWith("/coddy/sessions?")) return json({ sessions: [] });
@@ -134,6 +140,7 @@ beforeEach(() => {
   );
   relayAsked.length = 0;
   pageRemotes = [];
+  schedulerAnswer = null;
   nodeFetch.mockClear();
   switched.mockClear();
   vi.stubGlobal("fetch", nodeFetch);
@@ -299,4 +306,29 @@ test("the local machine is on the map above the relay and opens local", async ()
   expect(local.textContent).not.toContain(window.location.host);
   fireEvent.click(local);
   expect(switched).toHaveBeenCalledWith("local");
+});
+
+// A node's scheduler that answers "not here" (404) after the reader has moved on
+// - to a session, another environment - must not rewrite the address the
+// reader is at now: the answer is about a screen that is no longer on it.
+test("a late 404 from the scheduler leaves the address the reader moved to", async () => {
+  // Another server of the page has a scheduler, so this node starts from "yes".
+  rememberSchedulerLinked("remote:http://elsewhere", true);
+  const pending: Array<() => void> = [];
+  schedulerAnswer = () =>
+    new Promise<Response>((resolve) => {
+      pending.push(() => resolve(json({}, 404)));
+    });
+  history.replaceState(null, "", "/#/scheduler");
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(pending.length).toBeGreaterThan(1));
+  window.location.hash = "#/s/sess_elsewhere";
+  await new Promise((r) => setTimeout(r, 20));
+  for (const answer of pending) answer();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(window.location.hash).toBe("#/s/sess_elsewhere");
 });

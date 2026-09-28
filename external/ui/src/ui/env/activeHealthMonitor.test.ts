@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { setEnv } from "./remoteEnv";
+import { connectRemote, getEnv, setEnv } from "./remoteEnv";
 import { snapshotHealth, startActiveHealthMonitor } from "./activeHealth";
 
 // The monitor asks the active remote again every 30 seconds and on every focus
@@ -53,6 +53,40 @@ test("the newest ask decides, not the one that answers last", async () => {
   held[1]!(new Response(JSON.stringify({ data: [] }), { status: 200 }));
   await vi.waitFor(() => expect(snapshotHealth()).toBe("up"));
   held[0]!(Object.assign(new Error("signal timed out"), { name: "TimeoutError" }));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(snapshotHealth()).toBe("up");
+});
+
+// Choosing the remote the page is on again (to read everything again after it
+// came back) starts the app over, and asks again: the verdict it had stays on
+// screen until that ask answers, as on an interval ask.
+test("the same remote chosen again keeps its verdict while it is asked", async () => {
+  holding = false;
+  hang = false;
+  setEnv({ mode: "remote", baseUrl: "http://dead2.lan:12345", token: "" });
+  window.dispatchEvent(new Event("focus"));
+  await vi.waitFor(() => expect(snapshotHealth()).toBe("down"));
+  hang = true;
+  connectRemote("http://dead2.lan:12345", "", "dead2");
+  expect(snapshotHealth()).toBe("down");
+});
+
+// A token rotated in the configuration reaches the active environment through
+// setEnv (configuredRemotes.syncActiveToken): it is asked with at once, and an
+// answer to the old token that lands after that is not the one kept.
+test("a rotated token is asked with at once, and the old token's answer dropped", async () => {
+  hang = false;
+  holding = true;
+  held = [];
+  const env = getEnv();
+  if (env.mode !== "remote") throw new Error("expected a remote environment");
+  window.dispatchEvent(new Event("focus"));
+  await vi.waitFor(() => expect(held.length).toBe(1));
+  setEnv({ ...env, token: "rotated" });
+  await vi.waitFor(() => expect(held.length).toBe(2));
+  held[1]!(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+  await vi.waitFor(() => expect(snapshotHealth()).toBe("up"));
+  held[0]!(new Response("{}", { status: 401 }));
   await new Promise((r) => setTimeout(r, 0));
   expect(snapshotHealth()).toBe("up");
 });
