@@ -7,6 +7,7 @@ import { initLocale } from "./i18n/i18n";
 import { resetSettingsConfigForTests } from "./settings/settingsConfigStore";
 import { resetConfiguredRemotesForTests } from "./env/configuredRemotes";
 import { rememberSchedulerLinked } from "./env/pageMemory";
+import { installRemoteFetchShim } from "./env/remoteEnv";
 
 /**
  * The swarm map over a node (issue #401). Inside a node the environment is the
@@ -21,6 +22,7 @@ vi.mock("./chat/ChatScreen", () => ({
 }));
 
 const RELAY = "http://relay.test";
+const NODE_MOUNT = RELAY + "/swarm/nodes/worker-a";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -101,26 +103,31 @@ let pageRemotes: Array<Record<string, string>> = [];
 let schedulerAnswer: (() => Promise<Response>) | null = null;
 
 // The node, reached the way the environment shim would reach it.
-const nodeFetch = vi.fn(async (input: RequestInfo | URL) => {
-  const path = String(input);
-  if (path === "/coddy/events") return heldStream();
-  if (path === "/coddy/config") {
-    return json({ httpserver: { remotes: pageRemotes } });
-  }
-  if (path === "/coddy/scheduler/jobs") {
-    if (schedulerAnswer) {
-      return schedulerAnswer();
+const nodeFetch = vi.fn(
+  async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const requested = String(input);
+    const path = requested.startsWith(NODE_MOUNT)
+      ? requested.slice(NODE_MOUNT.length)
+      : requested;
+    if (path === "/coddy/events") return heldStream();
+    if (path === "/coddy/config") {
+      return json({ httpserver: { remotes: pageRemotes } });
     }
-    return json({ scheduler: { enabled: true, dir: "/tmp", timeout: "30m", max_queue: 1, runs_active: 0, retain_sessions: 1 }, jobs: [] });
-  }
-  if (path.startsWith("/coddy/sessions?")) return json({ sessions: [] });
-  // The page's own server (localFetch falls back to this fetch in a test).
-  if (path === "/coddy/info") {
-    return json({ object: "coddy.info", version: "1.2.3", hostname: "pasha-lt" });
-  }
-  // A node is not a relay.
-  return json({}, 404);
-});
+    if (path === "/coddy/scheduler/jobs") {
+      if (schedulerAnswer) {
+        return schedulerAnswer();
+      }
+      return json({ scheduler: { enabled: true, dir: "/tmp", timeout: "30m", max_queue: 1, runs_active: 0, retain_sessions: 1 }, jobs: [] });
+    }
+    if (path.startsWith("/coddy/sessions?")) return json({ sessions: [] });
+    // The page's own server (localFetch falls back to this fetch in a test).
+    if (path === "/coddy/info") {
+      return json({ object: "coddy.info", version: "1.2.3", hostname: "pasha-lt" });
+    }
+    // A node is not a relay.
+    return json({}, 404);
+  },
+);
 
 beforeEach(() => {
   resetSettingsConfigForTests();
@@ -144,6 +151,7 @@ beforeEach(() => {
   nodeFetch.mockClear();
   switched.mockClear();
   vi.stubGlobal("fetch", nodeFetch);
+  installRemoteFetchShim();
   history.replaceState(null, "", "/");
 });
 
@@ -153,12 +161,18 @@ afterEach(() => {
   history.replaceState(null, "", "/");
   localStorage.clear();
   document.cookie = "coddy_sessions_origin=; Path=/; Max-Age=0; SameSite=Lax";
+  delete (window as Window & { __coddyFetchShimmed?: boolean })
+    .__coddyFetchShimmed;
 });
 
-function sessionRequests(): URL[] {
+function sessionRequests(): Array<{ url: URL; authorization: string }> {
   return nodeFetch.mock.calls
-    .map(([input]) => new URL(String(input), "http://node.test"))
-    .filter((url) => url.pathname === "/coddy/sessions");
+    .map(([input, init]) => ({
+      url: new URL(String(input), "http://node.test"),
+      authorization:
+        new Headers(init?.headers ?? undefined).get("Authorization") ?? "",
+    }))
+    .filter(({ url }) => url.pathname.endsWith("/coddy/sessions"));
 }
 
 async function openHistoryEnvironmentFilter(): Promise<void> {
@@ -179,7 +193,13 @@ test("History origin filters the active swarm node without switching environment
 
   await waitFor(() =>
     expect(
-      sessionRequests().some((url) => url.searchParams.get("origin") === "local"),
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          url.searchParams.get("origin") === "local" &&
+          authorization === "Bearer client",
+      ),
     ).toBe(true),
   );
   await openHistoryEnvironmentFilter();
@@ -195,34 +215,38 @@ test("History origin filters the active swarm node without switching environment
   expect(switched).not.toHaveBeenCalled();
   await waitFor(() =>
     expect(
-      sessionRequests().some((url) => url.searchParams.get("origin") === "gateway"),
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          url.searchParams.get("origin") === "gateway" &&
+          authorization === "Bearer client",
+      ),
     ).toBe(true),
   );
   expect(document.cookie).toContain("coddy_sessions_origin=gateway");
   expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
-});
-
-test("History All filters the active swarm node without switching environments", async () => {
-  document.cookie = "coddy_sessions_origin=local; Path=/; SameSite=Lax";
-  const activeRemote = localStorage.getItem("coddy_env");
-
-  render(
-    <ConfirmProvider>
-      <App />
-    </ConfirmProvider>,
-  );
-  await openHistoryEnvironmentFilter();
 
   nodeFetch.mockClear();
   switched.mockClear();
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  fireEvent.click(screen.getByTestId("sessions-filter-section-environment"));
   fireEvent.click(screen.getByTestId("sessions-filter-env-all"));
 
   expect(switched).not.toHaveBeenCalled();
   await waitFor(() =>
     expect(
-      sessionRequests().some((url) => !url.searchParams.has("origin")),
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          !url.searchParams.has("origin") &&
+          authorization === "Bearer client",
+      ),
     ).toBe(true),
   );
+  expect(document.cookie).not.toContain("coddy_sessions_origin=gateway");
+  expect(switched).not.toHaveBeenCalled();
   expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
 });
 
