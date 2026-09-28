@@ -209,7 +209,7 @@ function cameraValues(): number[] {
 
 function firePointer(
   target: Element,
-  type: "pointerdown" | "pointermove" | "pointerup",
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
   init: { pointerId: number; clientX: number; clientY: number },
 ): void {
   const event = new Event(type, { bubbles: true, cancelable: true });
@@ -354,6 +354,46 @@ describe("SwarmView", () => {
     fireEvent.click(mapNode("nas02"));
 
     expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
+  });
+
+  it("drops the camera transition throughout a pinch gesture", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+
+    expect(viewport).toHaveClass("is-panning");
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      ".swarm-graph-viewport.is-panning .swarm-graph-camera",
+    );
+
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(viewport).toHaveClass("is-panning");
+    firePointer(viewport, "pointercancel", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+    expect(viewport).not.toHaveClass("is-panning");
   });
 
   it("keeps the manual camera across an unchanged topology poll", async () => {

@@ -215,7 +215,7 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     const pair = pointerPair();
     if (!pair) return;
     panRef.current = null;
-    setIsPanning(false);
+    setIsPanning(true);
     consumedGestureClickRef.current = true;
     pinchRef.current = {
       span: span(pair[0], pair[1]),
@@ -287,12 +287,12 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     }
     if (pointersRef.current.size < 2) pinchRef.current = null;
     if (panRef.current?.id === event.pointerId) panRef.current = null;
-    setIsPanning(false);
     const rest = [...pointersRef.current.entries()];
     if (rest.length === 1) {
       const [id, point] = rest[0]!;
       panRef.current = { id, start: point, last: point };
     }
+    setIsPanning(pinchRef.current !== null || panRef.current !== null);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
