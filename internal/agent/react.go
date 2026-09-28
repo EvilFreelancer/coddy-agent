@@ -2178,7 +2178,7 @@ func (a *Agent) applySkillSettings(ctx context.Context, name string, sk *skills.
 	if ap == nil {
 		return
 	}
-	ch := session.SettingsChange{Source: "skill:" + name}
+	ch := session.SettingsChange{Source: session.SettingsSourceSkill + name}
 	if m := sk.Model; m != "" && a.state.TurnSetting(session.SettingModel) == "" {
 		ch.Model = &m
 	}
@@ -2309,7 +2309,7 @@ func (a *Agent) switchModel(ctx context.Context, req tooling.ModelSwitch) (strin
 	if ap == nil {
 		return "", fmt.Errorf("switch_model is not available in this session")
 	}
-	ch := session.SettingsChange{Source: "model"}
+	ch := session.SettingsChange{Source: session.SettingsSourceModel}
 	if req.Model != "" {
 		ch.Model = &req.Model
 	}

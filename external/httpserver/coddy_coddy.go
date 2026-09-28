@@ -1452,7 +1452,9 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 			out["settings"] = snap
 		}
 	}
-	if u := page.UILog(msgs, st.GetUILog()); len(u) > 0 {
+	// A session saved before only the agent's own settings changes were
+	// noted keeps the notices of the operator's: they are not shown.
+	if u := page.UILog(msgs, session.VisibleUILog(msgs, st.GetUILog())); len(u) > 0 {
 		rows := make([]map[string]interface{}, 0, len(u))
 		for _, e := range u {
 			rows = append(rows, map[string]interface{}{
