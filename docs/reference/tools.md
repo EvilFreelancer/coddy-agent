@@ -37,7 +37,8 @@ The `background_*` tools are registered only while `tools.background` is enabled
 
 | Tool | Purpose | Arguments (short) | Permission | Modes |
 |---|---|---|---|---|
-| `run_command` | Run a shell command in the workspace through the host shell; `background: true` returns a task id and wakes the agent on completion by default where available. A foreground command that outlives its timeout is handed to the pool and also wakes on completion by default; `notify_on_finish: false` disables either wake | `command`, `permission_rationale`, `timeout_seconds`, `background`, `notify_on_finish`, `expected_seconds` | command | agent, plan |
+| `run_command` | Run a shell command in the workspace through the host shell; optional `cwd` changes the directory for this command only. `background: true` returns a task id and wakes the agent on completion by default where available. A foreground command that outlives its timeout is handed to the pool and also wakes on completion by default; `notify_on_finish: false` disables either wake | `command`, `cwd`, `permission_rationale`, `timeout_seconds`, `background`, `notify_on_finish`, `expected_seconds` | command | agent, plan |
+| `worktree_create` | Fetch origin, create or reuse a [feature worktree](../features/worktrees.md) from its default branch, and move the session into it | `branch` | always | agent |
 | `background_list` | List the session's background tasks with status, elapsed time and estimate | none | none | agent, plan |
 | `background_output` | Return the captured stdout and stderr of a task | `task_id`, `tail_lines` | none | agent, plan |
 | `background_wait` | Wait for a task to finish, bounded by a default and a maximum | `task_id`, `timeout_seconds` | none | agent, plan |

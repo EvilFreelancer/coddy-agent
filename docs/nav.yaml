@@ -88,6 +88,9 @@ groups:
       - path: features/sessions.md
         title: Sessions
         summary: Session bundles on disk, resuming, history rewind on message edit, todo lists, the sessions CLI.
+      - path: features/worktrees.md
+        title: Git worktrees
+        summary: Fresh feature branches from origin, session moves, the web composer and project grouping.
       - path: features/rules.md
         title: Rules and instructions
         summary: Rules from the .coddy, .agents, .cursor, .claude and .codex folders, AGENTS.md and DESIGN.md of a folder the agent enters, your own pair and rules in the agent home, instruction files, dialects by extension, activation.

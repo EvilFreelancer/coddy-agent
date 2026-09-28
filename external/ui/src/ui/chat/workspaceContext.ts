@@ -15,6 +15,7 @@ export type WorkspaceContext = {
   /** Interpreter run_command goes through on the server host; absent on older servers. */
   shell?: string;
   repo_root?: string;
+  base_branch?: string;
   branch?: string;
   branches?: string[];
   worktrees?: WorkspaceWorktree[];
@@ -77,7 +78,10 @@ export function folderChipLabel(ctx: WorkspaceContext | null): string {
   if (!ctx) {
     return "workspace";
   }
-  const name = (ctx.name || "").trim() || pathBasename(ctx.path);
+  const name =
+    ctx.is_worktree && ctx.repo_root
+      ? pathBasename(ctx.repo_root)
+      : (ctx.name || "").trim() || pathBasename(ctx.path);
   return name || "workspace";
 }
 

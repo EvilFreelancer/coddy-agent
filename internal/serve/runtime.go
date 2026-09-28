@@ -243,6 +243,9 @@ func (r *Runtime) Init(opts Options) error {
 	}
 	runner := func(ctx context.Context, st *session.State, prompt []acp.ContentBlock, snd acp.UpdateSender) (string, error) {
 		loop := agent.NewAgent(live(), st, snd, log)
+		loop.SetWorkspaceSwitcher(func(ctx context.Context, dir string) error {
+			return mgr.SetSessionWorkspaceDuringTurn(ctx, st, dir)
+		})
 		loop.SetConfigReloader(func(ctx context.Context) ([]string, error) {
 			return mgr.ReloadConfigForSession(ctx, st)
 		})

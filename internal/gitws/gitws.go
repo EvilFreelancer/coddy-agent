@@ -24,6 +24,7 @@ type Info struct {
 	Path       string     `json:"path"`
 	IsGitRepo  bool       `json:"is_git_repo"`
 	RepoRoot   string     `json:"repo_root,omitempty"`
+	BaseBranch string     `json:"base_branch,omitempty"`
 	Branch     string     `json:"branch,omitempty"`
 	Branches   []string   `json:"branches,omitempty"`
 	IsWorktree bool       `json:"is_worktree"`
@@ -111,6 +112,7 @@ func Describe(dir string) Info {
 	}
 
 	info.Worktrees = listWorktrees(info.Path)
+	info.BaseBranch = defaultBranch(info.Path)
 	if len(info.Worktrees) > 0 {
 		info.RepoRoot = info.Worktrees[0].Path
 		info.IsWorktree = !samePath(toplevel, info.RepoRoot)
@@ -118,6 +120,25 @@ func Describe(dir string) Info {
 		info.RepoRoot = toplevel
 	}
 	return info
+}
+
+// defaultBranch reads the local origin/HEAD without contacting the remote.
+func defaultBranch(dir string) string {
+	ref, err := runGit(dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(ref, "origin/")
+}
+
+// MainCheckoutRoot identifies the main checkout using git's common directory.
+// A plain directory or an unavailable git binary yields an empty string.
+func MainCheckoutRoot(dir string) string {
+	common, err := runGit(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil || filepath.Base(common) != ".git" {
+		return ""
+	}
+	return filepath.Dir(common)
 }
 
 // listWorktrees parses `git worktree list --porcelain`; the first entry is
@@ -193,6 +214,9 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 	if dirName == "" {
 		return "", false, fmt.Errorf("branch name has no usable directory name: %q", branch)
 	}
+	if _, err := runGit(repoDir, "check-ref-format", "--branch", branch); err != nil {
+		return "", false, fmt.Errorf("invalid branch name %q: %w", branch, err)
+	}
 	// The tree belongs to the main checkout even when we were handed a linked
 	// worktree. An empty listing means git could not describe the repository at
 	// all; stop here rather than guess a root and leave the worktrees folder
@@ -208,11 +232,30 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 	if mainRoot == "" {
 		return "", false, fmt.Errorf("cannot locate the main checkout of %s", repoDir)
 	}
+	if _, err := runGit(repoDir, "fetch", "origin"); err != nil {
+		return "", false, fmt.Errorf("refresh origin before creating a worktree: %w", err)
+	}
+	if _, err := runGit(repoDir, "remote", "set-head", "origin", "-a"); err != nil {
+		return "", false, fmt.Errorf("resolve origin/HEAD: %w", err)
+	}
+	base := defaultBranch(repoDir)
+	if base == "" {
+		return "", false, fmt.Errorf("origin/HEAD does not name a default branch")
+	}
+	if branch == base || branch == "origin/"+base {
+		return "", false, fmt.Errorf("worktrees require a feature branch; %q is the default branch", branch)
+	}
+	if upstream, _ := runGit(repoDir, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+branch); upstream == "origin/"+base {
+		return "", false, fmt.Errorf("branch %q tracks the default branch origin/%s", branch, base)
+	}
 	root := WorktreesRoot(mainRoot)
 
 	for _, wt := range list {
 		if wt.Branch != branch {
 			continue
+		}
+		if wt.Main {
+			return "", false, fmt.Errorf("branch %q is checked out in the main checkout; switch it away before creating a worktree", branch)
 		}
 		// One of ours that lost its ignore file - `git clean -xdf` deletes the
 		// file and keeps the worktrees - would stay visible in git status
@@ -224,6 +267,7 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 		}
 		return wt.Path, false, nil
 	}
+	fastForwardBase(repoDir, mainRoot, base, list)
 
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", false, fmt.Errorf("worktrees root: %w", err)
@@ -238,10 +282,49 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 		return "", false, err
 	}
 	path := filepath.Join(root, dirName)
-	if _, err := runGit(repoDir, "worktree", "add", "--", path, branch); err != nil {
+	args := []string{"worktree", "add"}
+	if _, err := runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		args = append(args, "--no-track", "-b", branch)
+		args = append(args, "--", path, "origin/"+base)
+	} else {
+		args = append(args, "--", path, branch)
+	}
+	if _, err := runGit(repoDir, args...); err != nil {
 		return "", false, err
 	}
 	return path, true, nil
+}
+
+// fastForwardBase advances a local default branch only when its old commit is
+// an ancestor of origin's and no checked-out copy would be changed behind its
+// worktree. A dirty main checkout is left alone; the new branch still uses the
+// fetched remote commit.
+func fastForwardBase(repoDir, mainRoot, base string, list []Worktree) {
+	old, err := runGit(repoDir, "rev-parse", "refs/heads/"+base)
+	if err != nil {
+		return
+	}
+	next, err := runGit(repoDir, "rev-parse", "refs/remotes/origin/"+base)
+	if err != nil || old == next {
+		return
+	}
+	if _, err := runGit(repoDir, "merge-base", "--is-ancestor", old, next); err != nil {
+		return
+	}
+	for _, wt := range list {
+		if wt.Branch != base {
+			continue
+		}
+		if !wt.Main {
+			return
+		}
+		if status, err := runGit(mainRoot, "status", "--porcelain"); err != nil || status != "" {
+			return
+		}
+		_, _ = runGit(mainRoot, "merge", "--ff-only", "origin/"+base)
+		return
+	}
+	_, _ = runGit(repoDir, "update-ref", "refs/heads/"+base, next, old)
 }
 
 // writeWorktreesIgnore keeps the worktrees root out of the main checkout's

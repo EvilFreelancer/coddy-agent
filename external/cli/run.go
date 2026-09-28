@@ -359,6 +359,9 @@ func startScheduler(ctx context.Context, cfg *config.Config, mgr *session.Manage
 // model catalog, footer, and header follow the file.
 func newTurnAgent(mgr *session.Manager, app *App, st *session.State, snd acp.UpdateSender, log *slog.Logger) *agent.Agent {
 	loop := agent.NewAgent(mgr.Cfg(), st, snd, log)
+	loop.SetWorkspaceSwitcher(func(ctx context.Context, dir string) error {
+		return mgr.SetSessionWorkspaceDuringTurn(ctx, st, dir)
+	})
 	// The manager owns child sessions, so a turn on this surface can spawn
 	// subagents like every other surface.
 	loop.SetSubagentRuntime(mgr)

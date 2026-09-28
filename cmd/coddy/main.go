@@ -369,6 +369,9 @@ func runACP(args []string) error {
 	ref := &serverRef{p: &srv, cfg: cfg, live: live}
 	runner := func(ctx context.Context, st *session.State, prompt []acp.ContentBlock, snd acp.UpdateSender) (string, error) {
 		loop := agent.NewAgent(live(), st, snd, log)
+		loop.SetWorkspaceSwitcher(func(ctx context.Context, dir string) error {
+			return mgr.SetSessionWorkspaceDuringTurn(ctx, st, dir)
+		})
 		loop.SetConfigReloader(func(ctx context.Context) ([]string, error) {
 			return mgr.ReloadConfigForSession(ctx, st)
 		})

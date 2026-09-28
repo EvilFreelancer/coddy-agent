@@ -19,6 +19,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
+	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/prompts"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
@@ -901,6 +902,7 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		backgroundRunning = bgtask.Default().RunningCountsBySession()
 	}
 	sessions := make([]map[string]interface{}, 0, len(slice))
+	repoRoots := make(map[string]string)
 	for _, row := range slice {
 		ent := map[string]interface{}{
 			"id": row.SessionID,
@@ -913,6 +915,14 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CWD != "" {
 			ent["cwd"] = row.CWD
+			root, seen := repoRoots[row.CWD]
+			if !seen {
+				root = gitws.MainCheckoutRoot(row.CWD)
+				repoRoots[row.CWD] = root
+			}
+			if root != "" {
+				ent["repoRoot"] = root
+			}
 		}
 		if len(row.Tags) > 0 {
 			ent["tags"] = row.Tags
