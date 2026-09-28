@@ -54,4 +54,52 @@ describe("swarm layout preference", () => {
     expect(readSwarmLayoutMode()).toBe("tree");
     expect(() => writeSwarmLayoutMode("star")).not.toThrow();
   });
+
+  it("defaults to tree when reading storage throws SecurityError", () => {
+    const storage = new MapStorage();
+    storage.getItem = () => {
+      throw new DOMException("Storage access denied", "SecurityError");
+    };
+    expect(readSwarmLayoutMode(storage)).toBe("tree");
+  });
+
+  it.each(["QuotaExceededError", "SecurityError"])(
+    "ignores %s when writing storage",
+    (name) => {
+      const storage = new MapStorage();
+      storage.setItem = () => {
+        throw new DOMException("Storage write failed", name);
+      };
+      expect(() => writeSwarmLayoutMode("star", storage)).not.toThrow();
+    },
+  );
+
+  it.each(["read", "write"])(
+    "tolerates a throwing global localStorage getter on default %s",
+    (operation) => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "localStorage",
+      );
+      try {
+        Object.defineProperty(globalThis, "localStorage", {
+          configurable: true,
+          get() {
+            throw new DOMException("Storage access denied", "SecurityError");
+          },
+        });
+        if (operation === "read") {
+          expect(readSwarmLayoutMode()).toBe("tree");
+        } else {
+          expect(() => writeSwarmLayoutMode("star")).not.toThrow();
+        }
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(globalThis, "localStorage", descriptor);
+        } else {
+          Reflect.deleteProperty(globalThis, "localStorage");
+        }
+      }
+    },
+  );
 });
