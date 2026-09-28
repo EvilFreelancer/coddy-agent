@@ -1,13 +1,4 @@
-/**
- * The graph mode's retired name stays in the union until the canvas
- * integration migrates to `"graph"`: without it the current TopologyGraph
- * comparisons would not compile. `readSwarmLayoutMode` never returns it and
- * `writeSwarmLayoutMode` normalizes it to `"graph"`.
- */
-export type SwarmLayoutMode =
-  | "tree"
-  | "graph"
-  | /** @deprecated the retired name of the graph mode */ "star";
+export type SwarmLayoutMode = "tree" | "graph";
 
 export const SWARM_LAYOUT_STORAGE_KEY = "coddy_swarm_layout";
 
@@ -31,9 +22,11 @@ export function writeSwarmLayoutMode(
 ): void {
   try {
     const resolvedStorage = storage ?? globalThis.localStorage;
+    // Anything but an explicit tree picks the graph: a caller still passing
+    // the retired "star" through an unchecked cast lands on its new name.
     resolvedStorage?.setItem(
       SWARM_LAYOUT_STORAGE_KEY,
-      mode === "star" ? "graph" : mode,
+      mode === "tree" ? "tree" : "graph",
     );
   } catch {
     // Layout preferences are optional when storage is blocked or full.

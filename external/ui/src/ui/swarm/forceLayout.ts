@@ -267,10 +267,3 @@ function clampStep(value: number): number {
 function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
-
-/**
- * @deprecated The mode is "graph" now; this alias keeps the current canvas
- * integration compiling until it migrates to layoutTopologyGraph.
- */
-export const layoutTopologyStar: typeof layoutTopologyGraph =
-  layoutTopologyGraph;

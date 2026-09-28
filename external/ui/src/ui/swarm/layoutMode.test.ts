@@ -47,8 +47,9 @@ describe("swarm layout preference", () => {
     expect(readSwarmLayoutMode(storage)).toBe(mode);
   });
 
-  it("writes graph for the legacy star mode", () => {
+  it("never persists the retired star name", () => {
     const storage = new MapStorage();
+    // @ts-expect-error the writer no longer accepts the retired star mode
     writeSwarmLayoutMode("star", storage);
     expect(storage.getItem(SWARM_LAYOUT_STORAGE_KEY)).toBe("graph");
     expect(readSwarmLayoutMode(storage)).toBe("graph");

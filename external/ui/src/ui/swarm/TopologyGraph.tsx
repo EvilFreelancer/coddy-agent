@@ -4,15 +4,17 @@ import {
   CLIENT_UUID,
   NODE_METRICS as M,
   connectorFor,
+  graphConnectorFor,
   layoutTopology,
   rootRouteEdgeIds,
   routeEdgeIds,
+  type Connector,
   type PlacedEdge,
   type PlacedNode,
   type TierRow,
   type TopologyLayout,
 } from "./layout";
-import { layoutTopologyStar } from "./forceLayout";
+import { layoutTopologyGraph } from "./forceLayout";
 import type { SwarmLayoutMode } from "./layoutMode";
 import { useGraphViewport } from "./useGraphViewport";
 import type { NodeActivity } from "./routes";
@@ -82,7 +84,7 @@ export function TopologyGraph(props: {
   const clientName = props.client?.name ?? "";
   const layout = useMemo(
     () =>
-      (props.layoutMode === "star" ? layoutTopologyStar : layoutTopology)(
+      (props.layoutMode === "graph" ? layoutTopologyGraph : layoutTopology)(
         props.topology,
         clientName ? { client: { name: clientName } } : {},
       ),
@@ -292,7 +294,7 @@ export function TopologyGraph(props: {
   const nodes = layout.nodes;
   const first = layout.tiers[0];
   const last = layout.tiers[layout.tiers.length - 1];
-  const star = props.layoutMode === "star";
+  const graph = props.layoutMode === "graph";
 
   return (
     <div className="swarm-graph-panel">
@@ -308,7 +310,7 @@ export function TopologyGraph(props: {
         {...viewport.stageProps}
       >
         <svg
-          className={`swarm-graph${star ? " swarm-graph--star" : ""}`}
+          className={`swarm-graph${graph ? " swarm-graph--graph" : ""}`}
           width="100%"
           height="100%"
           role="group"
@@ -320,7 +322,7 @@ export function TopologyGraph(props: {
             transform={viewport.transform}
             data-user-adjusted={String(viewport.userAdjusted)}
           >
-            {!star ? (
+            {!graph ? (
               <g className="swarm-graph-spine" aria-hidden="true">
                 {first && last ? (
                   <line
@@ -375,6 +377,7 @@ export function TopologyGraph(props: {
                 <Wire
                   key={e.id}
                   edge={e}
+                  connector={graph ? graphConnectorFor : connectorFor}
                   live={liveEdges.has(e.id)}
                   preview={previewEdges.has(e.id)}
                   busy={busyEdges.has(e.id)}
@@ -425,17 +428,17 @@ export function TopologyGraph(props: {
         >
           <CanvasButton
             label={t("swarm.layout.tree")}
-            pressed={!star}
+            pressed={!graph}
             onClick={() => props.onLayoutModeChange("tree")}
           >
             <TreeIcon />
           </CanvasButton>
           <CanvasButton
-            label={t("swarm.layout.star")}
-            pressed={star}
-            onClick={() => props.onLayoutModeChange("star")}
+            label={t("swarm.layout.graph")}
+            pressed={graph}
+            onClick={() => props.onLayoutModeChange("graph")}
           >
-            <StarIcon />
+            <GraphIcon />
           </CanvasButton>
         </div>
         <div
@@ -507,15 +510,14 @@ function TreeIcon() {
   );
 }
 
-function StarIcon() {
+function GraphIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 8 3 3M8 8h5M8 8l-4 5M8 8l2-5" />
-      <circle cx="8" cy="8" r="1.5" />
-      <circle cx="3" cy="3" r="1.2" />
-      <circle cx="13" cy="8" r="1.2" />
-      <circle cx="4" cy="13" r="1.2" />
-      <circle cx="10" cy="3" r="1.2" />
+      <path d="M8 3v3.5M8 6.5 4 11.5M8 6.5l4 5M4 11.5h8" />
+      <circle cx="8" cy="3" r="1.4" />
+      <circle cx="8" cy="6.5" r="1.4" />
+      <circle cx="4" cy="12.5" r="1.4" />
+      <circle cx="12" cy="12.5" r="1.4" />
     </svg>
   );
 }
@@ -551,12 +553,13 @@ function FitIcon() {
  */
 function Wire(props: {
   edge: PlacedEdge;
+  connector: (edge: PlacedEdge) => Connector;
   live: boolean;
   preview: boolean;
   busy: boolean;
 }) {
   const e = props.edge;
-  const c = connectorFor(e);
+  const c = props.connector(e);
   const dead = !e.to.online;
   const dials = e.to.transport === "tunnel";
   const cls = [

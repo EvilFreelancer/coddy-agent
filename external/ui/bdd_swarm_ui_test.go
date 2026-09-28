@@ -22,9 +22,9 @@ func TestSwarmWebUIFeature(t *testing.T) {
 				return runVitestScenario("src/ui/App.swarmNode.test.tsx",
 					"History origin filters the active swarm node without switching environments")
 			})
-			sc.Step(`^the swarm canvas starts as a tree and remembers the star layout in this browser$`, func() error {
+			sc.Step(`^the swarm canvas starts as a tree and remembers the graph layout in this browser$`, func() error {
 				return runVitestScenario("src/ui/swarm/SwarmView.test.tsx",
-					"SwarmView starts as a tree and remembers the star layout in this browser")
+					"SwarmView starts as a tree and remembers the graph layout in this browser")
 			})
 		},
 		Options: &godog.Options{

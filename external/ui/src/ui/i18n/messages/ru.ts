@@ -1919,7 +1919,7 @@ export const messagesRu: Record<string, string> = {
   "swarm.graph.enterClient": "Открыть локальную машину",
   "swarm.layout.label": "Раскладка графа",
   "swarm.layout.tree": "Древовидная раскладка",
-  "swarm.layout.star": "Звёздная раскладка",
+  "swarm.layout.graph": "Графовая раскладка",
   "swarm.viewport.zoomIn": "Увеличить",
   "swarm.viewport.zoomOut": "Уменьшить",
   "swarm.viewport.fit": "Показать граф целиком",

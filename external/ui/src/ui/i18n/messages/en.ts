@@ -1866,7 +1866,7 @@ export const messagesEn: Record<string, string> = {
   "swarm.graph.enterClient": "Open the local machine",
   "swarm.layout.label": "Graph layout",
   "swarm.layout.tree": "Tree layout",
-  "swarm.layout.star": "Star layout",
+  "swarm.layout.graph": "Graph layout",
   "swarm.viewport.zoomIn": "Zoom in",
   "swarm.viewport.zoomOut": "Zoom out",
   "swarm.viewport.fit": "Fit graph",

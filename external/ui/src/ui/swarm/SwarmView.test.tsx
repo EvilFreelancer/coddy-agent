@@ -245,28 +245,55 @@ afterEach(() => {
 });
 
 describe("SwarmView", () => {
-  it("starts as a tree and remembers the picked layout in this browser", async () => {
+  it("starts as a tree and remembers the graph layout in this browser", async () => {
     const first = render(<SwarmView />);
     await drawn();
     const tree = screen.getByRole("button", { name: "Tree layout" });
-    const star = screen.getByRole("button", { name: "Star layout" });
+    const graph = screen.getByRole("button", { name: "Graph layout" });
     expect(tree).toHaveAttribute("aria-pressed", "true");
-    expect(star).toHaveAttribute("aria-pressed", "false");
+    expect(graph).toHaveAttribute("aria-pressed", "false");
 
-    fireEvent.click(star);
-    expect(star).toHaveAttribute("aria-pressed", "true");
-    // The retired star selection is persisted under its new name, graph.
+    fireEvent.click(graph);
+    expect(graph).toHaveAttribute("aria-pressed", "true");
     expect(localStorage.getItem("coddy_swarm_layout")).toBe("graph");
     first.unmount();
 
     render(<SwarmView />);
     await drawn();
-    // The stored graph value reads back as the new mode until the canvas
-    // integration migrates, so the retired toggle is not pressed.
-    expect(screen.getByRole("button", { name: "Star layout" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(
+      screen.getByRole("button", { name: "Graph layout" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("reads a stored star preference as the graph layout", async () => {
+    localStorage.setItem("coddy_swarm_layout", "star");
+    render(<SwarmView />);
+    await drawn();
+    expect(
+      screen.getByRole("button", { name: "Graph layout" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws smooth cubic wires in the graph layout and orthogonal ones in the tree", async () => {
+    const first = render(<SwarmView />);
+    await drawn();
+    const treeEdges = [
+      ...document.querySelectorAll(".swarm-graph-edges .swarm-edge"),
+    ].map((e) => e.getAttribute("d"));
+    expect(treeEdges.length).toBeGreaterThan(0);
+    for (const d of treeEdges) {
+      expect(d, `tree wire ${d} should stay orthogonal`).not.toContain("C");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
+    const graphEdges = [
+      ...document.querySelectorAll(".swarm-graph-edges .swarm-edge"),
+    ].map((e) => e.getAttribute("d"));
+    expect(graphEdges.length).toBe(treeEdges.length);
+    for (const d of graphEdges) {
+      expect(d, `graph wire ${d} should be a cubic`).toContain("C");
+    }
+    first.unmount();
   });
 
   it("fits again when the layout mode changes", async () => {
@@ -283,8 +310,47 @@ describe("SwarmView", () => {
       expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Star layout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
     expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+  });
+
+  it("pans a fitted tree sideways and returns it centred with Fit", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    // The fit is applied on demand: press it once to land on the fitted frame.
+    fireEvent.click(screen.getByRole("button", { name: "Fit graph" }));
+    const fitted = graphCamera().getAttribute("transform");
+    expect(fitted).not.toBe("translate(0 0) scale(1)");
+    const fitValues = cameraValues();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 200,
+      clientY: 200,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 260,
+      clientY: 200,
+    });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+    // Panning moves the camera without zooming: the scale does not change.
+    const panned = cameraValues();
+    expect(graphCamera().getAttribute("transform")).not.toBe(fitted);
+    expect(panned.at(-1)).toBeCloseTo(fitValues.at(-1) ?? NaN);
+
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 260,
+      clientY: 200,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Fit graph" }));
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+    expect(graphCamera().getAttribute("transform")).toBe(fitted);
   });
 
   it("zooms around the pointer without scrolling the page", async () => {
@@ -530,7 +596,7 @@ describe("SwarmView", () => {
     expect(mapNode("middle")).toHaveClass("is-route-relay");
     expect(mapNode("other")).not.toHaveClass("is-route-relay");
 
-    fireEvent.click(screen.getByRole("button", { name: "Star layout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
     expect(mapNode("middle")).toHaveClass("is-route-relay");
     expect(mapNode("other")).not.toHaveClass("is-route-relay");
 
