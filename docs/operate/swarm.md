@@ -78,6 +78,11 @@ swarm:
 `swarm.join` is honoured by every `coddy serve` process, whether or not it runs a relay of its
 own. That symmetry is how relays chain.
 
+Set `swarm.join[].token` explicitly when possible; a credential dedicated to the parent relay is
+recommended, and an explicit value always wins. When a relay omits that token, it falls back to its
+configured `swarm.auth_token` so the parent can enter the child relay through its mount. Agents do
+not receive this fallback: an agent with no join token registers with no node credential.
+
 Names are optional. A join entry without `name` claims the host name of the machine it runs on
 (dots become dashes, since the name is a path segment), and a relay without `swarm.name` goes by
 its host name as well, in `/swarm/info`, on the map and in the routes of its sessions. Set a name
