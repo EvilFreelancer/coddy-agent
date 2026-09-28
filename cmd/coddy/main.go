@@ -382,6 +382,10 @@ func runACP(args []string) error {
 		}
 		mgr.SetPreferredSessionID(pid)
 	}
+	// The servers of the global configuration start now and stay up for every
+	// session the editor opens; they stop when the editor lets go of the agent.
+	mgr.StartGlobalMCPServers()
+	defer mgr.CloseMCP()
 	srv = acp.NewServer(mgr, log)
 	// A woken turn opens with a note an editor that renders only the standard
 	// updates can read, live and when session/load replays it.

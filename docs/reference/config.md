@@ -162,6 +162,7 @@ MCP settings that are not tied to a single server entry.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `mcp.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for the project-local <cwd>/.coddy/mcp.json, which travels with the checkout: "ask" keeps its servers cold until the operator approves that exact declaration for that workspace; "allow" starts them automatically (trusted workspaces only); "deny" never loads them. |
+| `mcp.idle_timeout_seconds` | integer or null | 300 | Seconds an MCP server that no session holds any more keeps running before Coddy stops it: a project server once the last session of its workspace let it go, a server an ACP client sent once the last session that sent it closed. A session that takes the server in the meantime finds it running. The global servers that coddy serve, the console and coddy acp start with the process are not affected, and a server switched off, no longer approved, removed or declared differently stops at once. 0 stops a server as soon as the last session lets it go. |
 
 ### `tools`
 

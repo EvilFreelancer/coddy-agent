@@ -564,9 +564,11 @@ func (s *State) AddSessionMCPClient(client *mcp.Client) {
 }
 
 // replaceConfiguredMCPClients atomically swaps hot-reloaded config clients and
-// closes the previous processes without disturbing ACP session-provided clients.
-// A session torn down while the new servers were still being dialed keeps none
-// of them, so the reload cannot orphan subprocesses.
+// gives the previous ones back without disturbing ACP session-provided clients.
+// The configured clients are leases on the manager's shared servers, so a
+// server the new set still names keeps its process: the new lease was taken
+// before the old one goes. A session torn down while the new servers were
+// still being dialed keeps none of them, so the reload cannot orphan a lease.
 func (s *State) replaceConfiguredMCPClients(clients []*mcp.Client) {
 	s.mu.Lock()
 	if s.mcpClosed {
@@ -758,8 +760,31 @@ func (s *State) configuredMCPClientDeclared(name string) (string, bool) {
 	return "", false
 }
 
-// closeConfiguredMCPClient disconnects one configured server from the session
-// and stops its process, leaving every other client connected.
+// configuredMCPClientsSnapshot returns the session's configured clients.
+func (s *State) configuredMCPClientsSnapshot() []*mcp.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]*mcp.Client(nil), s.configuredMCPClients...)
+}
+
+// endedConfiguredMCPServers names the configured servers whose connection
+// ended under the session: the server exited or dropped the connection.
+func (s *State) endedConfiguredMCPServers() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var names []string
+	for _, client := range s.configuredMCPClients {
+		if !client.Alive() {
+			names = append(names, client.Name())
+		}
+	}
+	return names
+}
+
+// closeConfiguredMCPClient disconnects one configured server from the session,
+// leaving every other client connected. The client is a lease on a shared
+// server: the server stops once no session holds it and the process does not
+// keep it.
 func (s *State) closeConfiguredMCPClient(name string) {
 	s.mu.Lock()
 	kept := make([]*mcp.Client, 0, len(s.configuredMCPClients))
@@ -1806,8 +1831,10 @@ func (s *State) Cancel() {
 	}
 }
 
-// CloseAll closes all MCP clients. The session is left marked as closed so a
-// settings reload racing this teardown does not reattach fresh servers.
+// CloseAll closes all MCP clients: the session's own ACP-supplied servers
+// stop, and its leases on the shared configured servers are given back. The
+// session is left marked as closed so a settings reload racing this teardown
+// does not reattach fresh servers.
 func (s *State) CloseAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

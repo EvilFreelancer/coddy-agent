@@ -282,6 +282,15 @@ func runServe(args []string) error {
 	log.Info("starting coddy serve", "version", version.Get(), "config", paths.ConfigPath, "workspace", paths.CWD)
 	printServeBanner(cfg, enabled, httpAddr, swarmAddr, len(httpTokens) > 0, outOfBandLogin().IsSet())
 
+	if rt.Mgr != nil {
+		// The servers of the global configuration start with the process and
+		// stay up for every session of every surface; a project server runs
+		// once per workspace while a session there holds it. All of them stop
+		// with the process.
+		rt.Mgr.StartGlobalMCPServers()
+		defer rt.Mgr.CloseMCP()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

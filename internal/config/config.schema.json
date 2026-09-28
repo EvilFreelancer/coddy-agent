@@ -457,6 +457,15 @@
             "allow",
             "deny"
           ]
+        },
+        "idle_timeout_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Seconds an MCP server that no session holds any more keeps running before Coddy stops it: a project server once the last session of its workspace let it go, a server an ACP client sent once the last session that sent it closed. A session that takes the server in the meantime finds it running. The global servers that coddy serve, the console and coddy acp start with the process are not affected, and a server switched off, no longer approved, removed or declared differently stops at once. 0 stops a server as soon as the last session lets it go.",
+          "default": 300,
+          "minimum": 0
         }
       }
     },

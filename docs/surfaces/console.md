@@ -39,6 +39,10 @@ outlast the bound while the package installs - and one that failed
 otherwise, or twice, is not dialed again until its switch in `/mcp`, a
 reload or a new session. Resuming a
 session restores its current MCP notices after the transcript is cleared.
+The servers of the global configuration start with the console, before its first
+session asks for them, and stay up for the whole run, so `/new` and `/resume` find
+them connected instead of starting them again; a project server is one process for
+the sessions of its workspace ([MCP](../features/mcp.md#shared-servers)).
 Nothing reads the workspace tree: nested `AGENTS.md` files are read on demand, from the folders
 a tool enters (`docs/features/rules.md`), so a console opened in a home
 directory (a macOS `~/Library` alone runs to hundreds of thousands of
