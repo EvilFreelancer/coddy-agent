@@ -1420,7 +1420,7 @@ func TestMaybeAutoCompactUsesProviderInputAboveEstimate(t *testing.T) {
 	ag := compactTestAgent(t, st, config.Compaction{KeepRecentTurns: &keep}, provider)
 	ag.cfg.Models[0].MaxContextTokens = 100
 	st.SetLastContextBreakdown(&session.ContextBreakdown{EstimatedTotal: 30})
-	ag.recordProviderInputTokens(85)
+	ag.recordProviderInputTokens(85, 30)
 	// The next step added just a little text; the local estimate remains well
 	// below the threshold even though the provider measured a larger prompt.
 	st.SetLastContextBreakdown(&session.ContextBreakdown{
@@ -1434,6 +1434,24 @@ func TestMaybeAutoCompactUsesProviderInputAboveEstimate(t *testing.T) {
 	}
 	if b := st.GetLastContextBreakdown(); b == nil || b.ProviderInputTokens != 0 {
 		t.Fatalf("provider baseline survived compaction: %+v", b)
+	}
+}
+
+// A response without usage keeps the anchor the last measured response set:
+// a missing reading says nothing about the context size, and dropping it
+// would send the trigger back to the local estimate alone.
+func TestProviderAnchorSurvivesResponseWithoutUsage(t *testing.T) {
+	st := seededCompactState(t, 3)
+	keep := 1
+	provider := &compactCannedProvider{t: t, summary: "s"}
+	ag := compactTestAgent(t, st, config.Compaction{KeepRecentTurns: &keep}, provider)
+	ag.cfg.Models[0].MaxContextTokens = 100
+	st.SetLastContextBreakdown(&session.ContextBreakdown{EstimatedTotal: 30})
+	ag.recordProviderInputTokens(85, 30)
+	ag.recordProviderInputTokens(0, 31)
+	b := st.GetLastContextBreakdown()
+	if b == nil || b.ProviderInputTokens != 85 || b.ProviderEstimateTokens != 30 {
+		t.Fatalf("zero-usage response dropped the provider anchor: %+v", b)
 	}
 }
 

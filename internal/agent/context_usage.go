@@ -137,11 +137,13 @@ func (a *Agent) refreshConversationContextUsage(persist bool) {
 }
 
 // recordProviderInputTokens ties a provider's last input count to the prompt
-// estimate made before its response was appended. A zero count means the
-// provider did not report usage; the estimate remains the only signal.
-func (a *Agent) recordProviderInputTokens(tokens int) {
+// estimate captured just before the request went out (estimateAtSend), so the
+// anchor always describes the same prompt the provider counted. A zero count
+// means the provider did not report usage on this response; the previous
+// anchor is kept, because a missing reading says nothing about the context
+// size - the anchor only moves on a compaction or a model change.
+func (a *Agent) recordProviderInputTokens(tokens, estimateAtSend int) {
 	if tokens <= 0 {
-		a.clearProviderInputTokens()
 		return
 	}
 	rs, ok := a.state.(rulesState)
@@ -153,7 +155,7 @@ func (a *Agent) recordProviderInputTokens(tokens int) {
 		return
 	}
 	b.ProviderInputTokens = tokens
-	b.ProviderEstimateTokens = b.EstimatedTotal
+	b.ProviderEstimateTokens = estimateAtSend
 	b.ProviderModel = a.state.EffectiveModelID(a.cfg)
 	rs.SetLastContextBreakdown(b)
 }

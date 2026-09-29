@@ -50,6 +50,8 @@ type compactHTTPFeatureState struct {
 	// listing stands in for the provider's model listing (GET /models) when a
 	// scenario needs the provider to report a context window.
 	listing     *httptest.Server
+	cfg         *config.Config
+	runner      session.AgentRunner
 	mgr         *session.Manager
 	srv         *Server
 	sessionID   string
@@ -144,6 +146,8 @@ func (s *compactHTTPFeatureState) startServerWithProvider(provider config.Provid
 		return ag.Run(ctx, prompt)
 	}
 	store := &session.FileStore{Root: sessRoot}
+	s.cfg = cfg
+	s.runner = runner
 	s.mgr = session.NewManager(cfg, noopSender{}, runner, slog.Default(), s.root, store)
 	s.srv = New(cfg, s.mgr, slog.Default(), s.root)
 	s.srv.agentProviderFactory = fakeFactory
@@ -419,6 +423,20 @@ func compactHTTPConversationText(msgs []llm.Message) string {
 		b.WriteString("\n\n")
 	}
 	return b.String()
+}
+
+// reloadSessionFromDisk restores the session the way a server does for a
+// freshly loaded page in a new process: a new manager reads the bundle from
+// disk, so the indicator is verified against what was persisted, not against
+// the state the turn left in memory.
+func (s *compactHTTPFeatureState) reloadSessionFromDisk() error {
+	store := &session.FileStore{Root: filepath.Join(s.root, "sessions")}
+	mgr := session.NewManager(s.cfg, noopSender{}, s.runner, slog.Default(), s.root, store)
+	if _, err := mgr.HandleSessionLoad(context.Background(), acp.SessionLoadParams{SessionID: s.sessionID, CWD: s.root}); err != nil {
+		return fmt.Errorf("session reload from disk: %w", err)
+	}
+	s.mgr = mgr
+	return nil
 }
 
 func (s *compactHTTPFeatureState) statsMatchCompactedContext() error {
