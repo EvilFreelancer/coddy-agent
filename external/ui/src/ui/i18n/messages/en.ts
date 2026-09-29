@@ -813,6 +813,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.error.invalidEntry": "Invalid entry.",
   "mcp.error.saveServer": "Failed to save server",
   "mcp.error.load": "Could not load the MCP servers: {message}",
+  "mcp.error.request": "MCP request failed: {message}",
   "mcp.discovery.legend": "MCP discovery",
   "mcp.discovery.projectServersLabel": "Project servers",
   "mcp.servers.legend": "MCP servers",
