@@ -7,6 +7,7 @@ import { initLocale } from "./i18n/i18n";
 import { resetSettingsConfigForTests } from "./settings/settingsConfigStore";
 import { resetConfiguredRemotesForTests } from "./env/configuredRemotes";
 import { rememberSchedulerLinked } from "./env/pageMemory";
+import { installRemoteFetchShim, setEnv } from "./env/remoteEnv";
 
 /**
  * The swarm map over a node (issue #401). Inside a node the environment is the
@@ -21,6 +22,7 @@ vi.mock("./chat/ChatScreen", () => ({
 }));
 
 const RELAY = "http://relay.test";
+const NODE_MOUNT = RELAY + "/swarm/nodes/worker-a";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -101,49 +103,52 @@ let pageRemotes: Array<Record<string, string>> = [];
 let schedulerAnswer: (() => Promise<Response>) | null = null;
 
 // The node, reached the way the environment shim would reach it.
-const nodeFetch = vi.fn(async (input: RequestInfo | URL) => {
-  const path = String(input);
-  if (path === "/coddy/events") return heldStream();
-  if (path === "/coddy/config") {
-    return json({ httpserver: { remotes: pageRemotes } });
-  }
-  if (path === "/coddy/scheduler/jobs") {
-    if (schedulerAnswer) {
-      return schedulerAnswer();
+const nodeFetch = vi.fn(
+  async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const requested = String(input);
+    const path = requested.startsWith(NODE_MOUNT)
+      ? requested.slice(NODE_MOUNT.length)
+      : requested;
+    if (path === "/coddy/events") return heldStream();
+    if (path === "/coddy/config") {
+      return json({ httpserver: { remotes: pageRemotes } });
     }
-    return json({ scheduler: { enabled: true, dir: "/tmp", timeout: "30m", max_queue: 1, runs_active: 0, retain_sessions: 1 }, jobs: [] });
-  }
-  if (path.startsWith("/coddy/sessions?")) return json({ sessions: [] });
-  // The page's own server (localFetch falls back to this fetch in a test).
-  if (path === "/coddy/info") {
-    return json({ object: "coddy.info", version: "1.2.3", hostname: "pasha-lt" });
-  }
-  // A node is not a relay.
-  return json({}, 404);
-});
+    if (path === "/coddy/scheduler/jobs") {
+      if (schedulerAnswer) {
+        return schedulerAnswer();
+      }
+      return json({ scheduler: { enabled: true, dir: "/tmp", timeout: "30m", max_queue: 1, runs_active: 0, retain_sessions: 1 }, jobs: [] });
+    }
+    if (path.startsWith("/coddy/sessions?")) return json({ sessions: [] });
+    // The page's own server (localFetch falls back to this fetch in a test).
+    if (path === "/coddy/info") {
+      return json({ object: "coddy.info", version: "1.2.3", hostname: "pasha-lt" });
+    }
+    // A node is not a relay.
+    return json({}, 404);
+  },
+);
 
 beforeEach(() => {
   resetSettingsConfigForTests();
   resetConfiguredRemotesForTests();
   initLocale("en");
   localStorage.clear();
-  localStorage.setItem(
-    "coddy_env",
-    JSON.stringify({
-      mode: "remote",
-      baseUrl: RELAY + "/swarm/nodes/worker-a",
-      token: "client",
-      name: "worker-a",
-      swarmRelay: RELAY,
-      swarmNode: "worker-a",
-    }),
-  );
+  setEnv({
+    mode: "remote",
+    baseUrl: NODE_MOUNT,
+    token: "client",
+    name: "worker-a",
+    swarmRelay: RELAY,
+    swarmNode: "worker-a",
+  });
   relayAsked.length = 0;
   pageRemotes = [];
   schedulerAnswer = null;
   nodeFetch.mockClear();
   switched.mockClear();
   vi.stubGlobal("fetch", nodeFetch);
+  installRemoteFetchShim();
   history.replaceState(null, "", "/");
 });
 
@@ -152,6 +157,178 @@ afterEach(() => {
   vi.unstubAllGlobals();
   history.replaceState(null, "", "/");
   localStorage.clear();
+  document.cookie = "coddy_sessions_origin=; Path=/; Max-Age=0; SameSite=Lax";
+  delete (window as Window & { __coddyFetchShimmed?: boolean })
+    .__coddyFetchShimmed;
+});
+
+function sessionRequests(): Array<{ url: URL; authorization: string }> {
+  return nodeFetch.mock.calls
+    .map(([input, init]) => ({
+      url: new URL(String(input), "http://node.test"),
+      authorization:
+        new Headers(init?.headers ?? undefined).get("Authorization") ?? "",
+    }))
+    .filter(({ url }) => url.pathname.endsWith("/coddy/sessions"));
+}
+
+async function openHistoryEnvironmentFilter(): Promise<void> {
+  fireEvent.click(await screen.findByTestId("nav-history"));
+  fireEvent.click(await screen.findByTestId("sessions-filter-trigger"));
+  fireEvent.click(screen.getByTestId("sessions-filter-section-environment"));
+}
+
+test("History origin filters the active swarm node without switching environments", async () => {
+  document.cookie = "coddy_sessions_origin=local; Path=/; SameSite=Lax";
+  pageRemotes = [{ name: "input-relay", url: RELAY }];
+  const activeRemote = localStorage.getItem("coddy_env");
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+
+  await waitFor(() =>
+    expect(
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          url.searchParams.get("origin") === "local" &&
+          authorization === "Bearer client",
+      ),
+    ).toBe(true),
+  );
+  await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("input-relay · Local"),
+  );
+  expect(screen.getByTestId("sessions-filter-env-local")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(screen.getByTestId(`sessions-filter-env-${RELAY}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+
+  nodeFetch.mockClear();
+  switched.mockClear();
+  fireEvent.click(screen.getByTestId("sessions-filter-env-gateway"));
+
+  expect(switched).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          url.searchParams.get("origin") === "gateway" &&
+          authorization === "Bearer client",
+      ),
+    ).toBe(true),
+  );
+  expect(document.cookie).toContain("coddy_sessions_origin=gateway");
+  expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
+
+  nodeFetch.mockClear();
+  switched.mockClear();
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  expect(screen.getByTestId("sessions-filter-section-environment")).toHaveTextContent(
+    "input-relay · Gateway",
+  );
+  fireEvent.click(screen.getByTestId("sessions-filter-section-environment"));
+  expect(screen.getByTestId(`sessions-filter-env-${RELAY}`)).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  fireEvent.click(screen.getByTestId("sessions-filter-env-all"));
+
+  expect(switched).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(
+      sessionRequests().some(
+        ({ url, authorization }) =>
+          url.origin === RELAY &&
+          url.pathname === "/swarm/nodes/worker-a/coddy/sessions" &&
+          !url.searchParams.has("origin") &&
+          authorization === "Bearer client",
+      ),
+    ).toBe(true),
+  );
+  expect(document.cookie).not.toContain("coddy_sessions_origin=gateway");
+  expect(switched).not.toHaveBeenCalled();
+  expect(localStorage.getItem("coddy_env")).toBe(activeRemote);
+});
+
+test("History environment selects the exact mounted remote over its parent", async () => {
+  document.cookie = "coddy_sessions_origin=gateway; Path=/; SameSite=Lax";
+  pageRemotes = [
+    { name: "office", url: RELAY },
+    { name: "worker-a", url: NODE_MOUNT },
+  ];
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("worker-a · Gateway"),
+  );
+
+  const exact = screen.getByTestId(`sessions-filter-env-${NODE_MOUNT}`);
+  const parent = screen.getByTestId(`sessions-filter-env-${RELAY}`);
+  expect(exact).toHaveAttribute("aria-current", "true");
+  expect(parent).not.toHaveAttribute("aria-current");
+  expect(
+    exact.closest(".sessions-filter-submenu")?.querySelectorAll(
+      '[aria-current="true"]',
+    ),
+  ).toHaveLength(1);
+});
+
+test("History environment selects the deepest nested remote regardless of order", async () => {
+  setEnv({
+    mode: "remote",
+    baseUrl: NODE_MOUNT + "/swarm/nodes/nested",
+    token: "client",
+    name: "nested",
+    swarmRelay: RELAY,
+    swarmNode: "worker-a/nested",
+  });
+  pageRemotes = [
+    { name: "worker-a", url: NODE_MOUNT },
+    { name: "office", url: RELAY },
+  ];
+
+  render(
+    <ConfirmProvider>
+      <App />
+    </ConfirmProvider>,
+  );
+  await openHistoryEnvironmentFilter();
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("sessions-filter-section-environment"),
+    ).toHaveTextContent("worker-a"),
+  );
+
+  const deepest = screen.getByTestId(`sessions-filter-env-${NODE_MOUNT}`);
+  const parent = screen.getByTestId(`sessions-filter-env-${RELAY}`);
+  expect(deepest).toHaveAttribute("aria-current", "true");
+  expect(parent).not.toHaveAttribute("aria-current");
+  expect(
+    deepest.closest(".sessions-filter-submenu")?.querySelectorAll(
+      '[aria-current="true"]',
+    ),
+  ).toHaveLength(1);
 });
 
 test("the swarm map opens over a node without leaving it", async () => {

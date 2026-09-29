@@ -331,7 +331,8 @@ Session title
 - **Mode**, **Model** and **Reasoning** follow a change made anywhere - a typed command, the permission dialog, the model's **`switch_model`**, a console or an editor on the same session. Every **`POST /v1/responses`** carries **`metadata.settingsVersion`**, the version the tab last applied; the server ignores the tab's **`model`** / **`reasoning`** / mode when a newer snapshot has been published since, so a stale tab cannot undo a change it has not seen.
 - The **permission chip** (**`data-testid="composer-permission"`**) is the last selector of the row, after **Model** and **Reasoning**: **Ask first**, **Accept edits** or **Bypass**, the last in red with a glow, its tooltip naming the configuration's mode the session returns to after a restart. Its menu calls **`PATCH`** **`permissionMode`**. On a new chat the pick is held and sent as a **`/permissions <mode>`** line ahead of the first message.
 - The **overrides line** (**`data-testid="composer-overrides"`**) lists what is changed for the next turns (**`stub/qwen3.8-demo, 2 turns left`**, **`plan this turn`**), with the full list in its tooltip; it shrinks with an ellipsis on narrow shells rather than pushing the send button off the bar.
-- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript, where each change is one **SYSTEM** notice row.
+- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript. The change shows on the selectors and the overrides line, and the transcript gets no row for it.
+- A **SYSTEM** notice row is left only by a change the agent made itself: its **`switch_model`** call, a skill's frontmatter (`Model: stub/qwen3.8-27b for this session`). What the user picks - a selector, a command, the permission dialog, the model and the mode a console or **`coddy -p`** started the session with - is on the selectors already; the rows a session saved by an earlier version holds for such changes are not shown.
 
 ### Settings: reasoning levels for a logical model
 
@@ -1215,7 +1216,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a relay the swarm map **is** the home screen: no composer, no `ChatScreen`,
   no History entry and no Scheduler entry, because a relay holds no sessions of
   its own. Its header carries the environment selector, which normally lives in
-  the composer.
+  the composer; the selector remains there in the map's empty and error states
+  as well, so an unavailable relay does not remove the way to change environments.
 - **Clicking a node on the map switches to it** and leaves the map open over
   it, the node now ringed; what to do there is the next click. There is no list
   of nodes under the map and no filter chips: from a node, every ordinary screen
@@ -1227,7 +1229,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
   as it was.
 - The map rings the node the app is on (on the relay itself, the relay's card)
   and draws the route to it from the attached relay as one connected accent path; everything off that route
-  recedes. Hovering another node previews where a click would take you, and its
+  recedes. Every relay on that route has an outline, and the current relay has
+  the stronger current-node outline. Hovering another node previews where a click would take you, and its
   tooltip names what the drawing shows: what the node is, whether it dials out,
   what it is doing. The map writes words under a node only for trouble
   (*offline*, *no route*) and counts a relay's links on its card; wires carry
@@ -1245,6 +1248,21 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a phone (below 1200 px) the screen opens under the top bar and above the
   dimmed backdrop, so taps reach the map, the search and the nodes; tapping the
   top bar's own entries still leaves it.
+- **Tree** is the default canvas layout. **Graph** is a deterministic rooted
+  top-down graph for rings and cross-links, rooted at the relay or, when drawn,
+  at the local computer that starts the connection. It follows route depth
+  softly rather than with rigid hop rows, and uses smooth links. Selecting Tree
+  or Graph is browser-only state in localStorage key `coddy_swarm_layout`; a
+  saved legacy `star` value migrates to Graph, and an absent, blocked or invalid
+  value selects Tree. No server configuration changes.
+- The canvas starts fitted. Its Tree/Graph selector and **Zoom out**, **Fit
+  graph**, and **Zoom in** controls are usable with 40px targets on the stacked
+  shell. Wheel zoom follows the pointer, drag pans in both axes even when fitted,
+  two-finger pinch zooms, and drag/pinch gestures do not open nodes. When
+  focused, **`+`** / **`=`**, **`-`** and **`0`** zoom in, zoom out and fit. Fit,
+  a relay change, or a layout change resets the camera; polling refits only an
+  untouched camera and otherwise preserves the operator's pan and zoom within
+  changed bounds.
 - Built with `-tags "swarm ui"` the relay serves this SPA at its own address;
   without the `ui` tag its root explains how to rebuild.
 - The environment selector in the map header opens **downward**, because on a

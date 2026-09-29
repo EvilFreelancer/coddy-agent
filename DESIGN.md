@@ -649,7 +649,7 @@ Current block types:
   - Assistant prose for a turn, split into **one or more** bubbles (a new bubble opens whenever text resumes after a `tool_call` / `thinking` — see **Ordering rules** below). Each is reconciled from **`GET /coddy/sessions/{id}/messages`** when streaming ends or after a refetch. After **Stop** mid-stream, that **`GET`** can lag the partial row already on screen; **`mergeTranscriptPreferLocalSuffix`** (see **Multi-session streaming and Stop** above) preserves visible text until the server catches up.
 
 - `system_notice`
-  - A UI-only row from the session's `uiLog` (never sent to the model), rendered by **`SystemNoticeMessage`** with the uppercase **SYSTEM** label, a monospace `pre-wrap` body, the copy control and the timestamp. The action row (**`.msg-system-foot`**) sits below the bordered card and is inset by the card's horizontal padding (**`14px`**), so its copy control starts at the same x as the one under an assistant row; covered by **`systemNoticeFootCss.test.ts`**. Two levels: **`error`** (a failed request or turn; red family, `role="alert"`, and a **refresh** control on the last row that re-runs the turn) and **`notice`** (information the operator should see once, such as a project hooks file held until approved; blue family via **`.msg-system-notice`** / **`.msg-system-stack-notice`** in both dark and light themes, `role="status"`, **no refresh control** even on the last row). Rows of any other level are dropped by the client rather than mis-rendered. A row sits at the end of the turn it is stamped with: the server stamps the number of user-role messages the history held, compaction summaries and background wakes included, and the client counts the same rows (**`chat/uiLogNotices.ts`**), so an error of a compacted session does not disappear when the saved transcript replaces the live turn; a row stamped past the end of the history is shown after the last message.
+  - A UI-only row from the session's `uiLog` (never sent to the model), rendered by **`SystemNoticeMessage`** with the uppercase **SYSTEM** label, a monospace `pre-wrap` body, the copy control and the timestamp. The action row (**`.msg-system-foot`**) sits below the bordered card and is inset by the card's horizontal padding (**`14px`**), so its copy control starts at the same x as the one under an assistant row; covered by **`systemNoticeFootCss.test.ts`**. Two levels: **`error`** (a failed request or turn; red family, `role="alert"`, and a **refresh** control on the last row that re-runs the turn) and **`notice`** (information the operator should see once, such as a project hooks file held until approved, or a settings change the agent made itself with **`switch_model`** or a skill's frontmatter - a change the user made is on the composer's selectors and leaves no row; blue family via **`.msg-system-notice`** / **`.msg-system-stack-notice`** in both dark and light themes, `role="status"`, **no refresh control** even on the last row). Rows of any other level are dropped by the client rather than mis-rendered. A row sits at the end of the turn it is stamped with: the server stamps the number of user-role messages the history held, compaction summaries and background wakes included, and the client counts the same rows (**`chat/uiLogNotices.ts`**), so an error of a compacted session does not disappear when the saved transcript replaces the live turn; a row stamped past the end of the history is shown after the last message.
 
 Ordering rules:
 
@@ -1118,15 +1118,32 @@ is the screen: there is no list of nodes under it, because everything the list d
   dock as wide as the documentation reader's**) and **`docsReaderCss.test.ts`**.
 - **Dock on a phone.** Below **1200px** the shell's backdrop rises to **`z-index: 60`** and **`#/swarm`** opens it, so **`.swarm-dock-cluster`** takes **70** there, like the settings drawer and the documentation reader, and starts under the top bar the rail becomes (**`top: calc(var(--coddy-mobile-top-inset) + 6px)`**, the side insets clearing the safe area). Under the backdrop every tap on the map, the search box or a node landed on the backdrop and closed the screen. Pinned by **`SwarmView.test.tsx`** (**takes taps on a phone**) and **`features/swarm_web_ui.feature`**.
 - **Header.** Title (relay name) and a subtitle counting relays, agents and offline nodes, then
-  **`.swarm-header-actions`** holding the **`headerSlot`** - **`App.tsx`** passes
-  **`<EnvironmentChip/>`** there at the relay root, because the composer that normally carries it
-  is not on screen. There the chip is the last thing on the right, so its menu, which hangs from
-  the chip's left edge, is kept inside the window with a **12px** margin (its **300px** width is
-  known from the stylesheet); hung from the chip alone it ran past the window at 1280 px and hid
-  the entries a token is added with. Pinned by **`EnvironmentChip.test.tsx`** and
-  **`features/web_ui_menus.feature`**.
-- **The graph box scrolls itself to the current node**, so a narrow shell opens on the branch you
-  are on rather than on an empty gutter.
+  **`.swarm-header-actions`** holding the **`headerSlot`**. **`App.tsx`** passes
+  **`<EnvironmentChip/>`** there on every Swarm screen, including its empty and error states: the
+  selector must remain available when the composer is absent or a relay needs a token. The chip is
+  the last thing on the right, so its menu, which hangs from the chip's left edge, is kept inside
+  the window with a **12px** margin (its **300px** width is known from the stylesheet); hung from
+  the chip alone it ran past the window at 1280 px and hid the entries a token is added with.
+  Pinned by **`EnvironmentChip.test.tsx`** and **`features/web_ui_menus.feature`**.
+- **Canvas layout and persistence.** The graph opens in **Tree layout**: the rooted, tiered view
+  with its hop spine. **Graph layout** is a deterministic rooted graph for reading rings and
+  cross-links. It trends down by shortest-route depth without placing every hop on a rigid row, and
+  draws its links as smooth curves. Its fixed, UUID-ordered solver makes the same topology land in
+  the same places on every poll rather than jittering as the relay enumerates it. The relay is the
+  pinned root, or the local computer is the root when that connection-start node is present. The
+  choice is browser state only, stored in localStorage as **`coddy_swarm_layout`**; a saved legacy
+  `star` value migrates to Graph, and an absent, blocked or invalid value means Tree. It never
+  changes server configuration or another browser's choice.
+- **Canvas camera.** The graph is fitted into its viewport on first open and whenever the relay or
+  layout changes. The **Tree** and **Graph** controls select the layout; **Zoom out**, **Fit graph**
+  and **Zoom in** control the camera. Pointer-wheel zoom is centred on the pointer, dragging pans
+  across both axes even in the fitted view, and a two-finger pinch zooms around the pinch midpoint;
+  a drag or pinch never also enters a node. When the canvas has focus, **`+`** / **`=`** zoom in,
+  **`-`** zooms out and **`0`** fits. Zoom never goes below the fitted view or above three times
+  that scale, and panning remains clamped so the graph cannot vanish completely. The controls are
+  **40px** touch targets on the stacked shell. A polling update fits an untouched graph to its new
+  bounds, but preserves a manually panned or zoomed camera (clamping it only if the bounds moved);
+  Fit explicitly resets that manual view.
 - **Search, not filter.** The box goes to the relay, which fans out, so a query reaches machines
   this browser cannot dial. With a query, matching sessions appear as rows under the map, each
   naming its node and route, and a row opens that session on that node. With no query there are
@@ -1146,10 +1163,13 @@ is the screen: there is no list of nodes under it, because everything the list d
   the left gutter - a dashed upright with a tick, a hop caption and a node count per tier. Every
   state is said twice, never in colour alone: the route in use is solid, heavier and in the
   accent, a way round a ring is grey and dashed, a link into an offline node is coarsely dashed and
-  dimmed, and a node that dials out carries a badge as well as a dotted wire. Because
-  **`role="img"`** collapses the subtree, the SVG is described by a visually hidden paragraph
-  naming each tier, its nodes, where the app is and what is running. The SVG keeps its intrinsic
-  size and scrolls inside **`.swarm-graph-scroll`** rather than scaling its labels below
+  dimmed, and a node that dials out carries a badge as well as a dotted wire. Every relay on the
+  active route is outlined, while the current relay has the stronger current-node ring. The SVG is a
+  **`role="group"`** labelled by the map's name - not **`role="img"`**, which would collapse the
+  subtree and hide the interactive per-node controls it carries - and a visually hidden paragraph
+  added through **`aria-describedby`** names each tier, its nodes, where the app is and what is
+  running. The SVG keeps its intrinsic
+  size and scrolls inside **`.swarm-graph-viewport`** rather than scaling its labels below
   legibility on a phone, and the legend below it wraps instead of setting a minimum width.
 - **Words on the map are for what the drawing cannot say.** Under a node there is a line of words
   only for trouble - *offline*, *no route* - and on a relay's card, how many links it carries

@@ -123,11 +123,38 @@ describe("probeRemote", () => {
     });
   });
 
-  it("asks the public route without a token, so it needs no preflight", async () => {
+  it("asks the public route bare only when there is no token to send", async () => {
     respond = relay("client");
-    await probeRemote("http://relay:12346", "client");
+    await probeRemote("http://relay:12346", "");
     const info = seen.find((s) => s.url.endsWith("/swarm/info"));
     expect(bearerOf(info?.init)).toBe("");
+  });
+
+  it("asks the public route with the token, which a node mount requires", async () => {
+    // A relay entered through its parent's mount sits behind the parent's
+    // client token: /swarm/info is public on a bare relay, but the mount
+    // refuses a request that carries no credential at all.
+    respond = (url, init) => {
+      if (init?.mode === "no-cors") {
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith("/swarm/info")) {
+        return bearerOf(init) === "Bearer parent"
+          ? json(200, { swarm: true, name: "inner" })
+          : json(401, { error: { message: "unauthorized" } });
+      }
+      if (url.endsWith("/swarm/nodes")) {
+        return bearerOf(init) === "Bearer parent"
+          ? json(200, { nodes: [] })
+          : json(401, { error: { message: "unauthorized" } });
+      }
+      return new Response("404 page not found\n", { status: 404 });
+    };
+    await expect(
+      probeRemote("http://relay:12346/swarm/nodes/inner", "parent"),
+    ).resolves.toEqual({ reach: "up", relay: true });
+    const info = seen.find((s) => s.url.endsWith("/swarm/info"));
+    expect(bearerOf(info?.init)).toBe("Bearer parent");
   });
 
   // A browser that the remote's CORS leaves out gets no answer at all, which is

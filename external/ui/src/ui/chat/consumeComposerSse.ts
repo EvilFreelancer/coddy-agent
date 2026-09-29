@@ -111,7 +111,7 @@ export type ConsumeComposerSseParams = {
   onTurnProgress?: (progress: TurnProgress) => void;
   /** Coddy extension. The input was only settings commands: no turn ran and
    *  nothing of the exchange is in the history (`coddy_meta` carries
-   *  `settings_only`); the transcript's log keeps the notice. */
+   *  `settings_only`); the selectors show the change. */
   onSettingsOnly?: () => void;
 };
 

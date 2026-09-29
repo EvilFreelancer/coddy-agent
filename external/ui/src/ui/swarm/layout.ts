@@ -49,33 +49,24 @@ export type TopologyLayout = {
  * moves its router mark with it instead of leaving it off-centre.
  */
 export const NODE_METRICS = {
-  relayWidth: 168,
-  relayHeight: 56,
-  relayRadius: 18,
+  /** A relay is a disc too, only a touch bigger than an agent's. */
+  relayRadius: 32,
   agentRadius: 26,
   /** The accent-filled tile that carries the router mark on a relay. */
-  tile: 36,
-  tileRadius: 11,
-  /** Gap between the card edge and the tile. */
-  tileInset: 12,
-  /** Gap between the tile and the text column beside it. */
-  textGap: 12,
+  tile: 28,
+  tileRadius: 9,
   statusRadius: 5.5,
-  statusInset: 15,
   badgeRadius: 8.5,
-  /** Centre of an agent's name chip, below the disc. */
+  /** Centre of a name chip, below the disc it names. */
   chipDrop: 45,
+  relayChipDrop: 51,
   chipHeight: 20,
   /** Baseline of the meta line under a name. */
   agentMetaDrop: 62,
+  relayMetaDrop: 68,
   /** Baseline of the work line, which hangs below each shape's furniture. */
   agentActivityDrop: 76,
-  relayActivityDrop: 44,
-  /** Offset of a relay's two text rows from the card's centre line. */
-  relayNameDrop: -3,
-  relayMetaDrop: 13,
-  /** Baseline of a relay's name when no line goes under it. */
-  relayNameAloneDrop: 4,
+  relayActivityDrop: 82,
 } as const;
 
 /* Tall enough that a hop's label lands clear of both the corner it turns and
@@ -171,7 +162,8 @@ export function layoutTopology(
   }
   // A single column still has to hold a whole relay card, so the widest shape
   // is part of the width rather than something that hangs over the edge.
-  const contentWidth = (widest - 1) * NODE_SPACING + NODE_METRICS.relayWidth;
+  const contentWidth =
+    (widest - 1) * NODE_SPACING + 2 * NODE_METRICS.relayRadius + 48;
   const width = GUTTER + contentWidth + MARGIN_RIGHT;
 
   // A route names the node it reaches, so a route minus its last hop names the
@@ -249,8 +241,10 @@ export function layoutTopology(
 
   // Outside every card, so a link that skips a row never crosses one.
   const laneX =
-    Math.max(...[...placed.values()].map((n) => n.x + halfWidth(n)), GUTTER) +
-    LANE_GAP;
+    Math.max(
+      ...[...placed.values()].map((n) => n.x + nodeHalfWidth(n)),
+      GUTTER,
+    ) + LANE_GAP;
 
   const edges: PlacedEdge[] = [];
   if (client && root) {
@@ -384,8 +378,8 @@ function bypassLink(
   laneX: number,
 ): Connector {
   const dir = laneX >= from.x ? 1 : -1;
-  const x0 = from.x + dir * (halfWidth(from) + EXIT_GAP);
-  const x1 = to.x + dir * (halfWidth(to) + ARRIVE_GAP);
+  const x0 = from.x + dir * (nodeHalfWidth(from) + EXIT_GAP);
+  const x1 = to.x + dir * (nodeHalfWidth(to) + ARRIVE_GAP);
   const vdir = to.y > from.y ? 1 : -1;
   const r = Math.min(
     CORNER,
@@ -409,8 +403,8 @@ function bypassLink(
 
 function peerLink(from: PlacedNode, to: PlacedNode): Connector {
   const dir = to.x >= from.x ? 1 : -1;
-  const x0 = from.x + dir * (halfWidth(from) + EXIT_GAP);
-  const x1 = to.x - dir * (halfWidth(to) + ARRIVE_GAP);
+  const x0 = from.x + dir * (nodeHalfWidth(from) + EXIT_GAP);
+  const x1 = to.x - dir * (nodeHalfWidth(to) + ARRIVE_GAP);
   const span = Math.max(dir * (x1 - x0), 0);
   if (span < PEER_MIN_SPAN) {
     // The two shapes all but meet. A bow across nothing is a spike, and anchors
@@ -452,9 +446,9 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
   const below =
     from.kind === "client" && vdir > 0
       ? NODE_METRICS.chipDrop + NODE_METRICS.chipHeight / 2
-      : halfHeight(from);
+      : nodeHalfHeight(from);
   const y0 = from.y + vdir * (below + EXIT_GAP);
-  const y1 = to.y - vdir * (halfHeight(to) + ARRIVE_GAP);
+  const y1 = to.y - vdir * (nodeHalfHeight(to) + ARRIVE_GAP);
   // Halfway between the two rows, not between the two shapes: siblings of
   // different sizes then still turn on one rail instead of on four of them.
   const railY = (from.y + to.y) / 2;
@@ -466,18 +460,24 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
       peer: false,
     };
   }
-  const hdir = to.x > from.x ? 1 : -1;
+  // A fan-out leaves at several points of the parent's lower half, the exit
+  // riding the bottom edge toward the child, rather than one centre stub
+  // every sibling shares.
+  const spread = nodeHalfWidth(from) * 0.8;
+  const exitX =
+    from.x + Math.max(-spread, Math.min(spread, to.x - from.x));
+  const hdir = to.x > exitX ? 1 : -1;
   const r = Math.min(
     CORNER,
-    Math.abs(to.x - from.x) / 2,
+    Math.abs(to.x - exitX) / 2,
     Math.abs(railY - y0),
     Math.abs(y1 - railY),
   );
   return {
     d:
-      `M${round(from.x)} ${round(y0)}` +
-      ` L${round(from.x)} ${round(railY - vdir * r)}` +
-      ` Q${round(from.x)} ${round(railY)} ${round(from.x + hdir * r)} ${round(railY)}` +
+      `M${round(exitX)} ${round(y0)}` +
+      ` L${round(exitX)} ${round(railY - vdir * r)}` +
+      ` Q${round(exitX)} ${round(railY)} ${round(exitX + hdir * r)} ${round(railY)}` +
       ` L${round(to.x - hdir * r)} ${round(railY)}` +
       ` Q${round(to.x)} ${round(railY)} ${round(to.x)} ${round(railY + vdir * r)}` +
       ` L${round(to.x)} ${round(y1)}`,
@@ -487,16 +487,58 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
   };
 }
 
-function halfWidth(n: PlacedNode): number {
-  return n.kind === "relay"
-    ? NODE_METRICS.relayWidth / 2
-    : NODE_METRICS.agentRadius;
+/**
+ * The smooth wire the graph mode draws between two nodes.
+ *
+ * A downward edge leaves the source's bottom and arrives at the target's top,
+ * a cubic whose control points pull on the vertical, so every wire flows top
+ * to bottom like the graph itself. An edge that stays level or climbs back
+ * (a ring's way round) leaves a side and bows out sideways, finite at every
+ * bend. An alternate edge keeps the same anchors but sways its control points
+ * off the direct line, so two links between the same shapes never paint over
+ * each other. Pure, like connectorFor; the tree keeps its orthogonal wires.
+ */
+export function graphConnectorFor(edge: PlacedEdge): Connector {
+  const { from, to } = edge;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  // A wire leaves wherever on the source's rim faces its target and arrives
+  // wherever on the target's rim faces back - so a fan reads as a fan, not a
+  // bundle of hooks under every shape.
+  const r0 = nodeHalfWidth(from) + EXIT_GAP;
+  const r1 = nodeHalfWidth(to) + ARRIVE_GAP;
+  const x0 = from.x + ux * r0;
+  const y0 = from.y + uy * r0;
+  const x1 = to.x - ux * r1;
+  const y1 = to.y - uy * r1;
+  const bend = Math.min(dist * 0.35, 56);
+  // An alternate bows sideways off the direct line, so two links between the
+  // same shapes never paint over each other.
+  const bow = edge.alternate ? Math.min(dist * 0.15, 30) : 0;
+  const c1x = x0 + ux * bend - uy * bow;
+  const c1y = y0 + uy * bend + ux * bow;
+  const c2x = x1 - ux * bend - uy * bow;
+  const c2y = y1 - uy * bend + ux * bow;
+  return {
+    d:
+      `M${round(x0)} ${round(y0)}` +
+      ` C${round(c1x)} ${round(c1y)} ${round(c2x)} ${round(c2y)}` +
+      ` ${round(x1)} ${round(y1)}`,
+    labelX: round(cubicMid(x0, c1x, c2x, x1)),
+    labelY: round(cubicMid(y0, c1y, c2y, y1)),
+    peer: dy <= 1,
+  };
 }
 
-function halfHeight(n: PlacedNode): number {
-  return n.kind === "relay"
-    ? NODE_METRICS.relayHeight / 2
-    : NODE_METRICS.agentRadius;
+export function nodeHalfWidth(n: PlacedNode): number {
+  return n.kind === "relay" ? NODE_METRICS.relayRadius : NODE_METRICS.agentRadius;
+}
+
+export function nodeHalfHeight(n: PlacedNode): number {
+  return n.kind === "relay" ? NODE_METRICS.relayRadius : NODE_METRICS.agentRadius;
 }
 
 /** The point halfway along a cubic, which is where a peer label sits. */

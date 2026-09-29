@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1183,7 +1184,7 @@ func TestApplySessionSettingsPublishesTheWholeSnapshot(t *testing.T) {
 	defer remove()
 
 	model, off := "nd/qwen3.8-27b", "off"
-	snap, err := m.ApplySessionSettings(context.Background(), res.SessionID, session.SettingsChange{Model: &model, Reasoning: &off, Source: "test"})
+	snap, err := m.ApplySessionSettings(context.Background(), res.SessionID, session.SettingsChange{Model: &model, Reasoning: &off, Source: session.SettingsSourceModel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,7 +1195,7 @@ func TestApplySessionSettingsPublishesTheWholeSnapshot(t *testing.T) {
 		t.Fatalf("reasoning choices = %v, want %v", snap.ReasoningChoices, want)
 	}
 	mu.Lock()
-	if len(seen) != 1 || seen[0].Settings.Version != snap.Version || seen[0].Source != "test" ||
+	if len(seen) != 1 || seen[0].Settings.Version != snap.Version || seen[0].Source != session.SettingsSourceModel ||
 		!strings.Contains(seen[0].Notice, "Model: nd/qwen3.8-27b for this session") {
 		mu.Unlock()
 		t.Fatalf("observer saw %+v", seen)
@@ -1217,6 +1218,91 @@ func TestApplySessionSettingsPublishesTheWholeSnapshot(t *testing.T) {
 	sender.mu.Unlock()
 	if !sawOption || !sawSnapshot {
 		t.Fatalf("sender saw config option update %v, settings snapshot %v", sawOption, sawSnapshot)
+	}
+}
+
+// Only a change the agent made itself - its switch_model call, a skill's
+// frontmatter - is noted, in the transcript's log and on the published update.
+// What the operator changes - the options a console or `coddy -p` starts a
+// session with, the composer, the permission dialog, a command - is on the
+// selectors of every surface already; a command is still answered with its
+// notice.
+func TestOnlyTheAgentsOwnSettingsChangesAreNoted(t *testing.T) {
+	m := session.NewManager(settingsTestConfig(), noopSender{}, noopRunner, slog.Default(), "", nil)
+	res, err := m.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.SessionID
+	var mu sync.Mutex
+	var published []acp.SessionSettingsUpdate
+	remove := m.AddSessionSettingsObserver(func(u acp.SessionSettingsUpdate) {
+		mu.Lock()
+		published = append(published, u)
+		mu.Unlock()
+	})
+	defer remove()
+	ctx := context.Background()
+	str := func(s string) *string { return &s }
+
+	if _, err := m.HandleSessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{SessionID: id, ConfigID: "model", Value: "nd/qwen3.8-27b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.HandleSessionSetMode(ctx, acp.SessionSetModeParams{SessionID: id, ModeID: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range []session.SettingsChange{
+		{Model: str("p1/gpt-5"), Source: "web"},
+		{PermissionMode: str("bypass"), Source: "permission_dialog"},
+		{Reasoning: str("high"), Turns: 2, Source: "console"},
+	} {
+		if _, err := m.ApplySessionSettings(ctx, id, ch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	taken, err := m.TakeSettingsCommands(ctx, id, promptText("/plan"), "command")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !taken.Handled || taken.Notice != "Mode: plan for this session" {
+		t.Fatalf("the command was answered %+v, want its notice", taken)
+	}
+	st := m.SessionByID(id)
+	if log := st.GetUILog(); len(log) != 0 {
+		t.Fatalf("the operator's changes were noted in the transcript: %+v", log)
+	}
+	mu.Lock()
+	for _, u := range published {
+		if u.Notice != "" {
+			mu.Unlock()
+			t.Fatalf("an operator's change was published with the notice %q (source %s)", u.Notice, u.Source)
+		}
+	}
+	operator := len(published)
+	mu.Unlock()
+
+	if _, err := m.ApplySessionSettings(ctx, id, session.SettingsChange{Model: str("nd/qwen3.8-27b"), Source: session.SettingsSourceModel}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ApplyTurnSettings(ctx, id, session.SettingsChange{Reasoning: str("off"), Source: session.SettingsSourceSkill + "review"}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range st.GetUILog() {
+		got = append(got, e.Source+" | "+e.Level+" | "+e.Message)
+	}
+	want := []string{
+		"model | notice | Model: nd/qwen3.8-27b for this session",
+		"skill:review | notice | Reasoning: off for the rest of this turn",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the agent's changes were noted as %q, want %q", got, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(published) != operator+2 || published[operator].Notice != "Model: nd/qwen3.8-27b for this session" ||
+		published[operator+1].Notice != "Reasoning: off for the rest of this turn" {
+		t.Fatalf("the agent's changes were published as %+v", published[operator:])
 	}
 }
 
