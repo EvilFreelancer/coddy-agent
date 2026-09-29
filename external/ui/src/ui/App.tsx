@@ -475,6 +475,7 @@ export function App() {
   const [contextBreakdown, setContextBreakdown] = useState<NonNullable<
     SessionStats["contextBreakdown"]
   > | null>(null);
+  const [compactionSettings, setCompactionSettings] = useState({ enabled: true, autoEnabled: true, threshold: 80 });
   // A provider listing can arrive after /v1/models returned its fallback.
   // Keep the live window per session, scoped to its model and config version;
   // stats refreshes must not replace it with the earlier model-list value.
@@ -2668,6 +2669,15 @@ export function App() {
             ? preferred
             : undefined,
         );
+        const compaction = res.data.compaction as
+          | Record<string, unknown>
+          | undefined;
+        const threshold = Number(compaction?.threshold_percent);
+        setCompactionSettings({
+          enabled: compaction?.enable !== false,
+          autoEnabled: compaction?.auto_enable !== false,
+          threshold: threshold >= 1 && threshold <= 100 ? threshold : 80,
+        });
       }
     })();
   }, [headers, configEpoch]);
@@ -6422,6 +6432,17 @@ export function App() {
             contextPct={contextPct}
             maxContextTokens={maxContextTokens}
             contextBreakdown={contextBreakdown}
+            compactionSettings={{
+              ...compactionSettings,
+              enabled: compactionSettings.enabled && !subagentTranscript && !viewedArchived,
+            }}
+            onContextCompacted={() => {
+              const sid = sessionId.trim();
+              if (sid) {
+                void loadMessages(sid, { freshLoad: true });
+                void refreshSessionStats(sid);
+              }
+            }}
             mode={mode}
             modes={[...PROFILE_MODES]}
             {...(llmModelIds.length > 0
