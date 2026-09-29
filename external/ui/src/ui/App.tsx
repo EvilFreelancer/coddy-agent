@@ -119,20 +119,36 @@ import { EnvironmentChip } from "./chat/EnvironmentChip";
 import { probeSwarm } from "./swarm/api";
 import {
   connectLocal,
-  connectRemote,
   connectSwarmNode,
-  getRemoteToken,
+  connectSwarmRelay,
+  environmentKey,
   localFetch,
-  returnToSwarm,
   snapshotEnv,
   subscribeEnv,
+  swarmMountPath,
+  swarmRootRelay,
 } from "./env/remoteEnv";
+import {
+  configuredRemoteFor,
+  connectConfiguredRemote,
+  refreshConfiguredRemotes,
+  useConfiguredRemotes,
+} from "./env/configuredRemotes";
+import {
+  isKnownRelayHome,
+  knownPageServer,
+  rememberPageServer,
+  rememberRelayHome,
+  rememberSchedulerLinked,
+  schedulerLinkedGuess,
+} from "./env/pageMemory";
 import type { SessionsEnvironmentOption } from "./sessions/SessionsFilterMenu";
 import {
   newChatWorkspaceIsReady,
   type PendingNewChatWorkspace,
 } from "./sessions/newChatWorkspace";
 import { readNavRailCookie, writeNavRailCookie } from "./nav/navRailCookie";
+import { useRailScreenEscape } from "./nav/railEscape";
 import { readLlmModelCookie, writeLlmModelCookie } from "./chat/llmModelCookie";
 import {
   pickDefaultLlmModelForNewChat,
@@ -249,6 +265,7 @@ import {
 import type { BackgroundTask } from "./tasks/types";
 import type { SchedulerInfo, SchedulerJob } from "./scheduler/types";
 import { Settings } from "./settings/Settings";
+import { noteSettingsConfigReloaded } from "./settings/settingsConfigStore";
 import { wideRailMinWidthMediaQuery } from "./shellBreakpoint";
 
 const HDR = "X-Coddy-Session-ID";
@@ -479,7 +496,11 @@ export function App() {
       }
       setSessionContextWindows((prev) => ({
         ...prev,
-        [key]: { model: w.model, epoch: configEpochRef.current, size: w.tokens },
+        [key]: {
+          model: w.model,
+          epoch: configEpochRef.current,
+          size: w.tokens,
+        },
       }));
     },
   );
@@ -979,10 +1000,31 @@ export function App() {
         initialRoute.branch === "none") &&
         initialRoute.historyOpen),
   );
-  /** null until first probe of /coddy/scheduler/jobs; false when route returns 404 (binary without scheduler). */
-  const [schedulerHttpLinked, setSchedulerHttpLinked] = useState<
+  // The environment this app was started on. A switch to another remote
+  // starts another app (EnvScope), so an answer that lands here after one is
+  // the old environment's, and must not be kept for the new one.
+  const [appEnvKey] = useState(() => environmentKey(getEnv()));
+  const isAppEnvironment = useCallback(
+    () => environmentKey(getEnv()) === appEnvKey,
+    [appEnvKey],
+  );
+  /**
+   * null until first probe of /coddy/scheduler/jobs; false when route returns
+   * 404 (binary without scheduler). Started over by a switch between remotes
+   * (EnvScope), it begins from the last answer so the rail keeps its shape.
+   */
+  const [schedulerHttpLinked, setSchedulerHttpLinkedState] = useState<
     boolean | null
-  >(null);
+  >(() => schedulerLinkedGuess(appEnvKey));
+  const setSchedulerHttpLinked = useCallback(
+    (linked: boolean) => {
+      if (isAppEnvironment()) {
+        rememberSchedulerLinked(appEnvKey, linked);
+      }
+      setSchedulerHttpLinkedState(linked);
+    },
+    [appEnvKey, isAppEnvironment],
+  );
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [settingsRoute, setSettingsRoute] = useState(
     () => initialRoute.branch === "settings",
@@ -1008,8 +1050,16 @@ export function App() {
   // closing it goes back there rather than home.
   const docsReturnHashRef = useRef("");
   // The Swarm entry only appears when the environment answers as a relay: on a
-  // plain agent there is no swarm to show.
-  const [isSwarmEnv, setIsSwarmEnv] = useState(false);
+  // plain agent there is no swarm to show. A node reached through a relay is in
+  // one from the start, and a remote last found to be a relay starts as one
+  // (a switch in place starts the app over; pageMemory.ts).
+  const [isSwarmEnv, setIsSwarmEnv] = useState(() => {
+    const env = getEnv();
+    return (
+      env.mode === "remote" &&
+      (!!env.swarmRelay || isKnownRelayHome(env.baseUrl))
+    );
+  });
   /**
    * True while the environment is a relay itself rather than a node reached
    * through one.
@@ -1019,7 +1069,12 @@ export function App() {
    * for a room nobody can enter. What it does have is the swarm, so that is
    * what it shows.
    */
-  const [atSwarmRoot, setAtSwarmRoot] = useState(false);
+  const [atSwarmRoot, setAtSwarmRoot] = useState(() => {
+    const env = getEnv();
+    return (
+      env.mode === "remote" && !env.swarmRelay && isKnownRelayHome(env.baseUrl)
+    );
+  });
   // Active Settings section id from `#/settings/<section>` (null = default/grid).
   const [settingsSection, setSettingsSection] = useState<string | null>(() =>
     initialRoute.branch === "settings" ? initialRoute.section : null,
@@ -1043,9 +1098,13 @@ export function App() {
   const schedulerDockClusterRef = useRef<HTMLDivElement>(null);
   // The runs of the job whose runs panel is open: the background tasks of the
   // job's session, polled the way the chat's Tasks panel polls its own.
-  const [schedulerRunsTasks, setSchedulerRunsTasks] = useState<BackgroundTask[]>([]);
+  const [schedulerRunsTasks, setSchedulerRunsTasks] = useState<
+    BackgroundTask[]
+  >([]);
   const [schedulerRunsRunning, setSchedulerRunsRunning] = useState(0);
-  const [schedulerRunsError, setSchedulerRunsError] = useState<string | null>(null);
+  const [schedulerRunsError, setSchedulerRunsError] = useState<string | null>(
+    null,
+  );
   const [schedulerRunsLoading, setSchedulerRunsLoading] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(
     () => initialRoute.branch === "session" && initialRoute.tasksOpen,
@@ -1147,10 +1206,9 @@ export function App() {
   );
   // The remotes this server offers as environments, read from the local config
   // rather than the active one - the list of places to go must not travel with
-  // the place you are.
-  const [configuredRemotes, setConfiguredRemotes] = useState<
-    { name: string; url: string }[]
-  >([]);
+  // the place you are. Shared with the composer's environment chip and read
+  // again on every config reload (env/configuredRemotes.ts).
+  const configuredRemotes = useConfiguredRemotes();
   // A folder picked from a History heading, waiting for the conversation on
   // screen to be gone before it is applied (see newChatWorkspace.ts). The value
   // is a ref and the trigger a counter, so the one effect that owns "the
@@ -1179,9 +1237,11 @@ export function App() {
   // The archive flag's last write this client made, so a transcript read that
   // was issued before the PATCH settled cannot put the older flag back (see
   // loadMessages, which compares the read's issue time against this).
-  const viewedArchiveWriteRef = useRef<{ sid: string; archived: boolean; at: number } | null>(
-    null,
-  );
+  const viewedArchiveWriteRef = useRef<{
+    sid: string;
+    archived: boolean;
+    at: number;
+  } | null>(null);
   // The same, for pinning.
   const pinningRef = useRef<Set<string>>(new Set());
   const [newChatWorkspaceEpoch, setNewChatWorkspaceEpoch] = useState(0);
@@ -1213,14 +1273,16 @@ export function App() {
   const pendingPermissionModeRef = useRef("");
   const [llmModelIds, setLlmModelIds] = useState<string[]>([]);
   const [llmModel, setLlmModel] = useState("");
-  const applyContextUsage = useStableHandler((sid: string, u: ContextUsageUpdate) => {
-    setContextBreakdown((prev) => withContextUsedTokens(prev, u.used));
-    setSessionContextWindows((prev) => ({
-      ...prev,
-      [sid]: { model: llmModel, epoch: configEpoch, size: u.size },
-    }));
-    debouncedRefreshSessionStats(sid);
-  });
+  const applyContextUsage = useStableHandler(
+    (sid: string, u: ContextUsageUpdate) => {
+      setContextBreakdown((prev) => withContextUsedTokens(prev, u.used));
+      setSessionContextWindows((prev) => ({
+        ...prev,
+        [sid]: { model: llmModel, epoch: configEpoch, size: u.size },
+      }));
+      debouncedRefreshSessionStats(sid);
+    },
+  );
   const providerUsageState = useProviderUsage({
     sessionId,
     llmModel,
@@ -1595,21 +1657,28 @@ export function App() {
     [sessionId],
   );
 
-  const refreshWorkspaceContext = useCallback(async (sid: string) => {
-    try {
-      const res = await fetch("/coddy/workspace/context", {
-        headers: sid ? { [HDR]: sid } : {},
-      });
-      if (res.ok) {
-        const ctx = (await res.json()) as WorkspaceContext;
-        setWorkspaceCtx(ctx);
-        // Host fact, not a workspace one: the tool cards name the interpreter.
-        setHostShell(ctx.shell);
+  const refreshWorkspaceContext = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await fetch("/coddy/workspace/context", {
+          headers: sid ? { [HDR]: sid } : {},
+        });
+        if (res.ok) {
+          const ctx = (await res.json()) as WorkspaceContext;
+          setWorkspaceCtx(ctx);
+          // Host fact, not a workspace one: the tool cards name the interpreter.
+          // An answer from the environment the app was switched away from is
+          // not this host's.
+          if (isAppEnvironment()) {
+            setHostShell(ctx.shell);
+          }
+        }
+      } catch {
+        // ignore: chips keep the previous context
       }
-    } catch {
-      // ignore: chips keep the previous context
-    }
-  }, []);
+    },
+    [isAppEnvironment],
+  );
 
   // Load the workspace context whenever the viewed session changes; a fresh
   // home/draft view also drops stale pre-session workspace choices.
@@ -1802,15 +1871,20 @@ export function App() {
           setSchedulerOpen(false);
           setSchedulerEditor(null);
           msg = t("scheduler.apiNotAvailable");
-          const sid = sessionId.trim();
-          if (sid) {
-            setSessionHashInLocation(sid);
-          } else if (window.location.hash) {
-            history.replaceState(
-              null,
-              "",
-              `${window.location.pathname}${window.location.search}`,
-            );
+          // The answer is about the scheduler screen: the address is left
+          // alone once the reader has moved on from it, or the app from the
+          // environment it asked (a switch in place keeps the request alive).
+          if (isAppEnvironment() && parseAppHash().branch === "scheduler") {
+            const sid = sessionId.trim();
+            if (sid) {
+              setSessionHashInLocation(sid);
+            } else if (window.location.hash) {
+              history.replaceState(
+                null,
+                "",
+                `${window.location.pathname}${window.location.search}`,
+              );
+            }
           }
           setSchedulerListError(msg);
           setSchedulerJobs([]);
@@ -1836,7 +1910,7 @@ export function App() {
       setSchedulerInfo(res.data.scheduler);
       setSchedulerJobs(res.data.jobs || []);
     },
-    [sessionId, t],
+    [sessionId, t, isAppEnvironment],
   );
 
   const applyLocationHash = useCallback(() => {
@@ -1894,6 +1968,9 @@ export function App() {
     }
     if (p.branch === "history") {
       setSettingsRoute(false);
+      // The map lies over History in the stack of the rail's screens: opened
+      // under it, the drawer would be out of sight.
+      setSwarmRoute(false);
       setSessionsOpen(true);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
@@ -2000,13 +2077,26 @@ export function App() {
     }
   }, [sessionId, sessionsOpen]);
 
+  // An open job, or its runs, back onto the list: the editor's close control,
+  // and the step Escape takes before it closes the drawer.
+  const closeSchedulerEditor = useCallback(() => {
+    setSchedulerEditor(null);
+    setSchedulerListHash();
+  }, []);
+
   const closeAllShellDrawers = useCallback(() => {
     setSessionsOpen(false);
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setTasksOpen(false);
     setDocsRoute(null);
-    if (parseAppHash().branch === "settings" || parseAppHash().branch === "docs") {
+    // The chat's address that follows does not take the swarm screen down by
+    // itself (applyLocationHash leaves it on a session), so it goes here.
+    setSwarmRoute(false);
+    if (
+      parseAppHash().branch === "settings" ||
+      parseAppHash().branch === "docs"
+    ) {
       const sid = sessionId.trim();
       if (sid) {
         setSessionHashInLocation(sid);
@@ -2031,7 +2121,11 @@ export function App() {
   useEffect(() => {
     // Back to the chat from History: the caret returns to the composer, except
     // on a phone or a tablet, where it would open the keyboard (composerFocus.ts).
-    if (prevSessionsOpenRef.current && !sessionsOpen && composerAutoFocusAllowed()) {
+    if (
+      prevSessionsOpenRef.current &&
+      !sessionsOpen &&
+      composerAutoFocusAllowed()
+    ) {
       requestAnimationFrame(() => {
         document.getElementById("composer")?.focus();
       });
@@ -2064,10 +2158,16 @@ export function App() {
   }, [applyLocationHash]);
 
   useEffect(() => {
-    const onHash = () => applyLocationHash();
+    // A switch to another remote writes the new environment's route while
+    // this app may still be listening; the route is the next app's to apply.
+    const onHash = () => {
+      if (isAppEnvironment()) {
+        applyLocationHash();
+      }
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [applyLocationHash]);
+  }, [applyLocationHash, isAppEnvironment]);
 
   useEffect(() => {
     void (async () => {
@@ -2147,7 +2247,11 @@ export function App() {
       taskId: schedulerRunsLinkedTaskId,
       seq: tasksFocusSeqRef.current,
     });
-    setSchedulerEditor({ mode: "runs", jobId: schedulerRunsJobId, taskId: null });
+    setSchedulerEditor({
+      mode: "runs",
+      jobId: schedulerRunsJobId,
+      taskId: null,
+    });
     setSchedulerJobRunsHash(schedulerRunsJobId);
   }, [schedulerRunsJobId, schedulerRunsLinkedTaskId]);
   /** The job session the runs live under; empty until the job ran once. */
@@ -2334,7 +2438,9 @@ export function App() {
     // preference rather than as the answer, and without the cookie.
     const openRow = modelInfos.find((m) => m.id === nextModel);
     const choices =
-      nextModel === openSessionSelection.model ? openSessionSelection.choices : [];
+      nextModel === openSessionSelection.model
+        ? openSessionSelection.choices
+        : [];
     setSessionReasoningChoices({
       sid: openSessionSelection.sid,
       model: nextModel,
@@ -2418,31 +2524,6 @@ export function App() {
     sessionsLoadingMoreRef.current = sessionsLoadingMore;
   }, [sessionsLoadingMore]);
 
-  useEffect(() => {
-    if (!sessionsOpen && !schedulerOpen) {
-      return;
-    }
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key !== "Escape") {
-        return;
-      }
-      if (schedulerEditor) {
-        setSchedulerEditor(null);
-        setSchedulerListHash();
-        return;
-      }
-      if (schedulerOpen) {
-        closeSchedulerDrawer();
-        return;
-      }
-      if (sessionsOpen) {
-        setSessionsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sessionsOpen, schedulerOpen, schedulerEditor, closeSchedulerDrawer]);
-
   // Forgets the archive moves and removals that no listing still out, or yet
   // to be issued, can be affected by (archiveMoves.ts).
   const pruneArchiveLists = useCallback(() => {
@@ -2502,9 +2583,12 @@ export function App() {
       sessionsListOpenRef.current.add(seq);
       let res: { ok: boolean; status: number; data?: SessionsPage };
       try {
-        res = await fetchJSON<SessionsPage>(`/coddy/sessions?${ps.toString()}`, {
-          headers,
-        });
+        res = await fetchJSON<SessionsPage>(
+          `/coddy/sessions?${ps.toString()}`,
+          {
+            headers,
+          },
+        );
       } catch {
         // A request that never got an answer; without this the loading flag
         // below stayed up and History never asked for the page again.
@@ -2580,8 +2664,14 @@ export function App() {
         setToolsPermissionPolicy(policy);
         const agent = res.data.agent as { queue_mode?: QueueMode } | undefined;
         const preferred = agent?.queue_mode;
-        setQueueMode(preferred === "steer" || preferred === "after_turn" ? preferred : undefined);
-        const compaction = res.data.compaction as Record<string, unknown> | undefined;
+        setQueueMode(
+          preferred === "steer" || preferred === "after_turn"
+            ? preferred
+            : undefined,
+        );
+        const compaction = res.data.compaction as
+          | Record<string, unknown>
+          | undefined;
         const threshold = Number(compaction?.threshold_percent);
         setCompactionSettings({
           enabled: compaction?.enable !== false,
@@ -2695,7 +2785,13 @@ export function App() {
       void turnActivity.refresh(key);
     },
     providerUsage: providerUsageState.applyPushed,
-    configReloaded: () => setConfigEpoch((e) => e + 1),
+    // The configuration swapped: every config-derived list reads again, and
+    // so does the copy of the config the Settings drawer keeps.
+    configReloaded: () => {
+      setConfigEpoch((e) => e + 1);
+      noteSettingsConfigReloaded();
+      void refreshConfiguredRemotes();
+    },
     // A session is shared: this is what someone else queued, in another
     // browser or from a console attached over --remote.
     messageQueue: (sid: string, queue: QueuedMessageEvent) =>
@@ -2729,6 +2825,9 @@ export function App() {
       void loadMessages(key, { freshLoad: true });
     },
     ready: () => {
+      // A config_reloaded may have been missed while the stream was down: the
+      // Settings copy is read again if the drawer ever held one.
+      noteSettingsConfigReloaded();
       // Recovery can miss the idle edge. Retire pending acknowledgements too,
       // so an old Stop cannot re-establish the fence after this reconnect.
       stoppedTurnBySidRef.current.clear();
@@ -2742,12 +2841,14 @@ export function App() {
     const ctl = new AbortController();
     // One connection for every tab of this environment where the browser allows
     // it: a browser keeps six HTTP/1.1 connections per host for all of its tabs.
-    // Changing the environment reloads the page, so the one read here holds.
+    // The environment read here holds for this app: a switch to another one,
+    // or a token rotated under this one, starts another app (EnvScope).
     const env = getEnv();
     void subscribeSharedServerEvents({
       env,
       onRefused: (status) => {
-        if (status === 401 && env.mode === "local") notifyLocalApiUnauthorized();
+        if (status === 401 && env.mode === "local")
+          notifyLocalApiUnauthorized();
       },
       onTurnStarted: (sid) => serverEventHandlersRef.current.turnStarted(sid),
       onTurnEnded: (sid) => serverEventHandlersRef.current.turnEnded(sid),
@@ -3219,7 +3320,8 @@ export function App() {
         settled = true;
       }
     } finally {
-      if (olderLoadInFlightRef.current === sid) olderLoadInFlightRef.current = "";
+      if (olderLoadInFlightRef.current === sid)
+        olderLoadInFlightRef.current = "";
       if (!settled) {
         setOlderTranscriptLoad((cur) => (cur === "loading" ? "idle" : cur));
       }
@@ -4387,8 +4489,7 @@ export function App() {
                   reader.onerror = () => {
                     unreadable ??= {
                       name: f.name,
-                      reason:
-                        errorDetail(reader.error) || "NotReadableError",
+                      reason: errorDetail(reader.error) || "NotReadableError",
                     };
                     resolve(null);
                   };
@@ -4536,11 +4637,8 @@ export function App() {
               getEnv(),
               await res
                 .json()
-                .then(
-                  (b: { error?: { message?: unknown } }) =>
-                    typeof b?.error?.message === "string"
-                      ? b.error.message
-                      : "",
+                .then((b: { error?: { message?: unknown } }) =>
+                  typeof b?.error?.message === "string" ? b.error.message : "",
                 )
                 .catch(() => ""),
             );
@@ -4606,8 +4704,8 @@ export function App() {
       if (!ownsPost() || abortCtl.signal.aborted) return;
       assistantStreamId = lastAssistantId;
       // Only settings commands: the exchange drawn for it is not part of the
-      // conversation. The transcript's log holds the notice, which the reload
-      // below renders in the place a reload of the page would.
+      // conversation, and the change is on the selectors. The reload below
+      // shows the transcript as the server holds it.
       if (settingsOnly) {
         applyStreamItems((prev) =>
           prev.filter(
@@ -4959,7 +5057,9 @@ export function App() {
         cookie: viewed ? null : readReasoningCookie(),
         sessionLevel: prev,
         sessionChoices:
-          viewed && known.sid === viewed && known.model === llmModel ? known.choices : [],
+          viewed && known.sid === viewed && known.model === llmModel
+            ? known.choices
+            : [],
         modelDefault: row.reasoningDefault ?? null,
       }),
     );
@@ -5159,7 +5259,11 @@ export function App() {
       setSchedulerRunsError(res.message);
       return;
     }
-    setSchedulerEditor({ mode: "runs", jobId: schedulerRunsJobId, taskId: null });
+    setSchedulerEditor({
+      mode: "runs",
+      jobId: schedulerRunsJobId,
+      taskId: null,
+    });
     setSchedulerJobRunsHash(schedulerRunsJobId);
     void refreshSchedulerRuns({ silent: true });
     void refreshSchedulerJobs({ silent: true });
@@ -5245,57 +5349,200 @@ export function App() {
     }
     const ac = new AbortController();
     void probeSwarm(ac.signal).then((info) => {
+      if (env.mode === "remote") {
+        rememberRelayHome(env.baseUrl, !!info);
+      }
       setIsSwarmEnv(!!info);
       setAtSwarmRoot(!!info);
     });
     return () => ac.abort();
   }, []);
 
+  // What serves this page: an agent, or a relay serving its own page. The
+  // documentation is read from it (docs/api.ts), so on a relay's own page the
+  // reader is left out of the rail; and only an agent is a machine of its own
+  // the swarm map draws above the relay as where the connection starts
+  // (issue #401). Null until it answers.
+  // It never changes while the page is open, so it is asked once and kept
+  // (pageMemory.ts): an app started over by a switch in place knows it at once.
+  const [localServer, setLocalServer] = useState<"agent" | "relay" | null>(
+    () => knownPageServer()?.kind ?? null,
+  );
+  // The host name of the machine the page runs on (GET /coddy/info of the
+  // page's own server), which is how the swarm map names it.
+  const [localHost, setLocalHost] = useState(
+    () => knownPageServer()?.host ?? "",
+  );
+  useEffect(() => {
+    if (knownPageServer()) {
+      return undefined;
+    }
+    let alive = true;
+    const readJSON = (path: string) =>
+      localFetch(path)
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null) as Promise<Record<string, unknown> | null>;
+    void (async () => {
+      const info = await readJSON("/swarm/info");
+      const kind = info?.swarm === true ? "relay" : "agent";
+      // Only an agent is a machine of its own on the map; the map says
+      // "Local" when it does not say its name.
+      const about = kind === "agent" ? await readJSON("/coddy/info") : null;
+      const host =
+        typeof about?.hostname === "string" ? about.hostname.trim() : "";
+      rememberPageServer({ kind, host });
+      if (alive) {
+        setLocalServer(kind);
+        setLocalHost(host);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const localDocs = localServer !== "relay";
+  // The machine the page runs on, for the swarm map: drawn only while the app
+  // is on a remote environment the page reached from it, and named by its host
+  // name (Local when the system reports none).
+  const swarmClient = useMemo(() => {
+    if (localServer !== "agent" || getEnv().mode !== "remote") {
+      return undefined;
+    }
+    return { name: localHost || t("composer.env.local") };
+  }, [localServer, localHost, t]);
+
   // Entering a node points the whole app at that node's mount, so every screen
   // that already existed works against it with a relay in the middle.
-  const openSwarmNode = useCallback((nodePath: string[], hash?: string) => {
-    const env = getEnv();
-    // Served by the relay from its own root, the environment is plain
-    // same-origin: the relay is then this page's origin. Without that fallback
-    // the one entry point this screen exists for silently did nothing.
-    const relay =
-      env.mode === "remote"
-        ? (env.swarmRelay ?? env.baseUrl)
-        : window.location.origin;
-    if (!relay) {
-      return;
-    }
-    connectSwarmNode(
-      relay,
-      nodePath,
-      env.mode === "remote" ? env.token : "",
-      hash,
-    );
-  }, []);
+  // `hash` is a session to open; `landing` is where a switch to another node
+  // lands without one - the map, kept open over the node, for a node clicked
+  // on it.
+  const openSwarmNode = useCallback(
+    (nodePath: string[], hash?: string, landing?: string) => {
+      const env = getEnv();
+      // The node the app is already on: nothing to switch, and no reload. A
+      // session of it a search row picked opens in place; without one the map
+      // closes onto the node. (The map itself leaves this node alone.)
+      if (
+        env.mode === "remote" &&
+        env.swarmRelay &&
+        env.swarmNode === nodePath.join("/")
+      ) {
+        setSwarmRoute(false);
+        if (hash) {
+          window.location.hash = hash;
+          return;
+        }
+        const sid = viewedSessionIdRef.current.trim();
+        if (sid) {
+          setSessionHashInLocation(sid);
+        } else {
+          window.location.hash = "#/";
+        }
+        return;
+      }
+      // Served by the relay from its own root, the environment is plain
+      // same-origin: the relay is then this page's origin. Without that fallback
+      // the one entry point this screen exists for silently did nothing.
+      const relay =
+        env.mode === "remote"
+          ? swarmRootRelay(env)
+          : window.location.origin;
+      if (!relay) {
+        return;
+      }
+      connectSwarmNode(
+        relay,
+        nodePath,
+        env.mode === "remote" ? env.token : "",
+        hash ?? landing,
+      );
+    },
+    [],
+  );
+
+  // A relay on the map opens as a relay: the one the map is drawn for is
+  // connected to itself, a relay chained under it opens through its mount -
+  // staying on the same map, which is always drawn by the outermost relay.
+  const openSwarmRelay = useCallback(
+    (relayPath: string[], name: string) => {
+      const env = getEnv();
+      // Already on the relay this path names - the map's root for a home or
+      // a local env, a chained relay for its own mount env: nothing to
+      // connect to, and a reload would only blink the page. A node env never
+      // matches: leaving it for a relay is a switch.
+      const onRelayPath =
+        env.mode === "remote"
+          ? env.swarmRelay
+            ? null
+            : swarmMountPath(env.baseUrl)
+          : swarmMountPath(window.location.origin);
+      if (onRelayPath && onRelayPath.join("/") === relayPath.join("/")) {
+        return;
+      }
+      const relay =
+        env.mode === "remote"
+          ? swarmRootRelay(env)
+          : window.location.origin;
+      if (!relay) {
+        return;
+      }
+      // The chip names the relay the way the environment menu does: by its
+      // entry in httpserver.remotes, else by the name it goes by on the map.
+      const label =
+        relayPath.length === 0
+          ? configuredRemoteFor(relay, configuredRemotes)?.name || name
+          : name;
+      connectSwarmRelay(
+        relay,
+        relayPath,
+        env.mode === "remote" ? env.token : "",
+        label,
+      );
+    },
+    [configuredRemotes],
+  );
 
   /**
-   * Where the app has been in this swarm, as a route.
-   *
-   * Inside a node it is that node; back on the relay it is whatever
-   * `returnToSwarm` remembered. The map marks it and draws the path to it, so
-   * the screen can say where we are rather than only what exists.
+   * Where the app is in this swarm, as a route: inside a node, that node. The
+   * map marks it and draws the path to it, so the screen can say where we are
+   * rather than only what exists.
    */
   const swarmCurrentNode = useMemo(() => {
     const env = getEnv();
     if (env.mode !== "remote") {
       return [] as string[];
     }
-    const route = env.swarmNode || env.swarmFrom || "";
-    return route.split("/").filter(Boolean);
+    const path = (env.swarmNode || "").split("/").filter(Boolean);
+    // A chained relay's env carries no swarmNode, but its mount URL spells
+    // the same path - the map marks where the app stands on the whole swarm.
+    return path.length ? path : swarmMountPath(env.baseUrl);
+  }, []);
+
+  /**
+   * The relay the map reads when the app is inside one of its nodes. The
+   * environment is the node's mount, which the relay's own routes are not
+   * under, so the map asks the relay directly - with the same client token the
+   * mount takes - and opening it leaves the node, its History and its
+   * Scheduler where they are (issue #401). Undefined on the relay itself,
+   * where the environment shim already reaches it.
+   */
+  const swarmRelayTarget = useMemo(() => {
+    const env = getEnv();
+    if (env.mode !== "remote") {
+      return undefined;
+    }
+    // The map is drawn by the outermost relay of the chain the environment
+    // hangs off: entering a node or a chained relay keeps the whole swarm in
+    // view and only moves the mark of where the app stands (env.swarmRelay
+    // for a node, the mount in its own baseUrl for a chained relay).
+    const relay =
+      env.swarmRelay || swarmMountPath(env.baseUrl).length
+        ? swarmRootRelay(env)
+        : "";
+    return relay ? { baseUrl: relay, token: env.token } : undefined;
   }, []);
 
   const openSwarmFromNav = useCallback(() => {
-    const env = getEnv();
-    // Inside a node, going to the swarm means going back out to its relay.
-    if (env.mode === "remote" && env.swarmRelay) {
-      returnToSwarm();
-      return;
-    }
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setTasksOpen(false);
@@ -5305,26 +5552,30 @@ export function App() {
   }, []);
 
   /** Opens the reader over whatever is on screen, remembering it for the close. */
-  const openDocsAt = useCallback((slug: string | null, anchor: string | null) => {
-    if (parseAppHash().branch !== "docs") {
-      docsReturnHashRef.current = window.location.hash;
-    }
-    setSchedulerOpen(false);
-    setSchedulerEditor(null);
-    setTasksOpen(false);
-    setSessionsOpen(false);
-    setSettingsRoute(false);
-    window.location.hash = appNavHrefDocs(slug, anchor);
-  }, []);
+  const openDocsAt = useCallback(
+    (slug: string | null, anchor: string | null) => {
+      if (parseAppHash().branch !== "docs") {
+        docsReturnHashRef.current = window.location.hash;
+      }
+      setSchedulerOpen(false);
+      setSchedulerEditor(null);
+      setTasksOpen(false);
+      setSessionsOpen(false);
+      setSettingsRoute(false);
+      window.location.hash = appNavHrefDocs(slug, anchor);
+    },
+    [],
+  );
 
   const openDocsFromNav = useCallback(() => {
     openDocsAt(lastDocsSlugRef.current, null);
   }, [openDocsAt]);
 
   // A search /docs <words> brings into the reader; cleared when the reader closes.
-  const [docsSearchSeed, setDocsSearchSeed] = useState<{ query: string; nonce: number } | null>(
-    null,
-  );
+  const [docsSearchSeed, setDocsSearchSeed] = useState<{
+    query: string;
+    nonce: number;
+  } | null>(null);
 
   /**
    * `/docs [page or words]` in the composer, as in the console: the command
@@ -5409,7 +5660,9 @@ export function App() {
     setSettingsHash();
   }, []);
 
-  const onCloseSettings = useCallback(() => {
+  // Back to the chat on screen, or to the start screen when there is none:
+  // what closing Settings does.
+  const closeToChat = useCallback(() => {
     const sid = sessionId.trim();
     if (sid) {
       setSessionHashInLocation(sid);
@@ -5418,11 +5671,19 @@ export function App() {
     }
   }, [sessionId, clearSessionRoute]);
 
+  // The swarm screen over a chat has no close control of its own: Escape
+  // takes it down as the backdrop does, back to the chat.
+  const onCloseSwarm = useCallback(() => {
+    setSwarmRoute(false);
+    closeToChat();
+  }, [closeToChat]);
+
   const onOpenHistoryFromNav = useCallback(() => {
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setTasksOpen(false);
     setSettingsRoute(false);
+    setSwarmRoute(false);
     setSessionsOpen(true);
     setHistoryHash();
   }, []);
@@ -5462,40 +5723,6 @@ export function App() {
     });
   }, [schedulerJobs, schedulerFilterQ]);
 
-  // Read the environments this server offers once: the list lives in the local
-  // config, so it is fetched off the origin rather than through the shim.
-  useEffect(() => {
-    let alive = true;
-    localFetch("/coddy/config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((cfg) => {
-        if (!alive || !cfg) {
-          return;
-        }
-        const list = (cfg as Record<string, unknown>)?.httpserver as
-          | Record<string, unknown>
-          | undefined;
-        const raw = list?.remotes;
-        if (!Array.isArray(raw)) {
-          return;
-        }
-        setConfiguredRemotes(
-          raw
-            .map((item) => {
-              const o = (item ?? {}) as Record<string, unknown>;
-              return { name: String(o.name ?? ""), url: String(o.url ?? "") };
-            })
-            .filter((r) => r.url.trim() !== ""),
-        );
-      })
-      .catch(() => {
-        /* configured remotes are optional */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
   const activeEnv = useSyncExternalStore(
     subscribeEnv,
     snapshotEnv,
@@ -5511,48 +5738,46 @@ export function App() {
    */
   const sessionEnvironments = useMemo<SessionsEnvironmentOption[]>(() => {
     const onRemote = activeEnv.mode === "remote";
-    // Narrowing by origin is a filter on the server being read; it must not
-    // reach for connectLocal, which reloads the page and would throw the choice
-    // away before it was used. Only coming *back* from a remote is a switch,
-    // and that reload resets the filter along with everything else.
+    const activeConfiguredRemote = onRemote
+      ? configuredRemoteFor(activeEnv.baseUrl, configuredRemotes)
+      : undefined;
+    // The first three rows filter whichever server is active. Configured
+    // remote rows below switch the server the whole app reads instead.
     const narrowTo = (origin: SessionOriginFilter) => () => {
-      if (onRemote) {
-        connectLocal();
-        return;
-      }
       setSessionsOrigin(origin);
       writeSessionPref(SESSION_PREF_COOKIES.origin, origin);
     };
     const rows: SessionsEnvironmentOption[] = [
       {
+        kind: "origin",
         key: "all",
         label: t("sessions.filter.env.all"),
-        active: !onRemote && sessionsOrigin === "",
+        active: sessionsOrigin === "",
         onPick: narrowTo(""),
       },
       {
+        kind: "origin",
         key: "local",
         label: t("sessions.filter.env.local"),
-        active: !onRemote && sessionsOrigin === "local",
+        active: sessionsOrigin === "local",
         onPick: narrowTo("local"),
       },
       {
+        kind: "origin",
         key: "gateway",
         label: t("sessions.filter.env.gateway"),
-        active: !onRemote && sessionsOrigin === "gateway",
+        active: sessionsOrigin === "gateway",
         onPick: narrowTo("gateway"),
       },
     ];
     for (const remote of configuredRemotes) {
       rows.push({
+        kind: "switch",
         key: remote.url,
         label: remote.name.trim() || remote.url,
-        active:
-          onRemote && activeEnv.baseUrl === remote.url.replace(/\/+$/, ""),
-        // connectRemote reloads the page, so nothing of this session's state
-        // reaches the other server - the origin filter included.
-        onPick: () =>
-          connectRemote(remote.url, getRemoteToken(remote.url), remote.name),
+        active: remote === activeConfiguredRemote,
+        // A configured remote is an environment switch, not an origin filter.
+        onPick: () => connectConfiguredRemote(remote),
       });
     }
     return rows;
@@ -5628,6 +5853,21 @@ export function App() {
     onLoadMore: () => void loadSessionsList(false),
   };
 
+  // Every screen of the rail, whether it is on screen and what Escape does to
+  // it: the step its close control takes (nav/railEscape.ts).
+  useRailScreenEscape({
+    history: { open: sessionsOpen, close: sessionPanelShared.onClose },
+    scheduler: {
+      open: schedulerOpen && schedulerHttpLinked === true,
+      // An open job or its runs first, back onto the list; the drawer next.
+      close: schedulerEditor ? closeSchedulerEditor : closeSchedulerDrawer,
+    },
+    // On a relay the swarm is the home screen, with nothing under it.
+    swarm: { open: swarmRoute && !atSwarmRoot, close: onCloseSwarm },
+    docs: { open: docsRoute !== null, close: onCloseDocs },
+    settings: { open: settingsRoute, close: closeToChat },
+  });
+
   const toggleRailWidth = () => {
     setRailLabelsWide((prev) => {
       const next = !prev;
@@ -5662,89 +5902,112 @@ export function App() {
   const handleQueueModeChange = useStableHandler((mode: QueueMode) => {
     setQueueMode(mode);
     void (async () => {
-      const current = await fetchJSON<Record<string, unknown>>("/coddy/config", { headers });
+      const current = await fetchJSON<Record<string, unknown>>(
+        "/coddy/config",
+        { headers },
+      );
       if (!current.ok || !current.data) return;
       const agent = (current.data.agent ?? {}) as Record<string, unknown>;
       const res = await fetch("/coddy/config", {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...current.data, agent: { ...agent, queue_mode: mode } }),
+        body: JSON.stringify({
+          ...current.data,
+          agent: { ...agent, queue_mode: mode },
+        }),
       });
       if (res.ok) setConfigEpoch((e) => e + 1);
     })();
   });
 
-  const handleQueueMessage = useStableHandler((text: string, mode: QueueMode, files: File[] = []) => {
-    const sid = sessionId.trim();
-    const generation = turnActivity.generation(sid);
-    const queueEpoch = queueOrderRef.current.capture(sid).epoch;
-    const body = text.trim();
-    if (!sid || (!body && files.length === 0)) return;
-    setDraft("");
-    void (async () => {
-      type QueueAnswer = {
-        messages?: QueuedMessage[];
-        version?: number;
-        error?: { code?: string; message?: string };
-      };
-      let payload: QueueAnswer | null = null;
-      let status = 0;
-      try {
-        const inlineFiles = await Promise.all(files.map((file) => new Promise<{ name: string; data_url: string }>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve({ name: file.name, data_url: reader.result as string });
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        })));
-        const res = await fetch(
-          `/coddy/sessions/${encodeURIComponent(sid)}/queue`,
+  const handleQueueMessage = useStableHandler(
+    (text: string, mode: QueueMode, files: File[] = []) => {
+      const sid = sessionId.trim();
+      const generation = turnActivity.generation(sid);
+      const queueEpoch = queueOrderRef.current.capture(sid).epoch;
+      const body = text.trim();
+      if (!sid || (!body && files.length === 0)) return;
+      setDraft("");
+      void (async () => {
+        type QueueAnswer = {
+          messages?: QueuedMessage[];
+          version?: number;
+          error?: { code?: string; message?: string };
+        };
+        let payload: QueueAnswer | null = null;
+        let status = 0;
+        try {
+          const inlineFiles = await Promise.all(
+            files.map(
+              (file) =>
+                new Promise<{ name: string; data_url: string }>(
+                  (resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () =>
+                      resolve({
+                        name: file.name,
+                        data_url: reader.result as string,
+                      });
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(file);
+                  },
+                ),
+            ),
+          );
+          const res = await fetch(
+            `/coddy/sessions/${encodeURIComponent(sid)}/queue`,
+            {
+              method: "POST",
+              headers: { [HDR]: sid, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: body,
+                mode,
+                inline_files: inlineFiles,
+              }),
+            },
+          );
+          status = res.status;
+          payload = (await res.json().catch(() => null)) as QueueAnswer | null;
+        } catch {
+          // Network failure: treated as a refusal below.
+        }
+        if (status === 201 && Array.isArray(payload?.messages)) {
+          applyQueue(sid, payload.messages, payload.version ?? 0, queueEpoch);
+          return;
+        }
+        if (
+          payload?.error?.code === "no_active_turn" &&
+          queueOrderRef.current.capture(sid).epoch === queueEpoch &&
+          turnActivity.generation(sid) === generation &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
+          // The turn ended between the keystroke and the request. Send it as an
+          // ordinary prompt; if the admission has not been released yet and that
+          // is refused too, the text comes back to the composer rather than
+          // being lost between the two answers.
+          void streamResponses(body, { files, restoreOnRefusal: true });
+          return;
+        }
+        if (viewedSessionIdRef.current.trim() === sid) {
+          setDraft((current) => current || body);
+          setComposerFiles((current) => [...files, ...current]);
+        }
+        applyStreamItemsForSession(sid, (prev) => [
+          ...prev,
           {
-            method: "POST",
-            headers: { [HDR]: sid, "Content-Type": "application/json" },
-            body: JSON.stringify({ text: body, mode, inline_files: inlineFiles }),
+            id: newId("s"),
+            type: "system_notice",
+            level: "error" as const,
+            message:
+              payload?.error?.code === "queue_full"
+                ? t("composer.queueFull")
+                : t("composer.queueFailed"),
+            createdAtUtc: new Date().toISOString(),
           },
-        );
-        status = res.status;
-        payload = (await res.json().catch(() => null)) as QueueAnswer | null;
-      } catch {
-        // Network failure: treated as a refusal below.
-      }
-      if (status === 201 && Array.isArray(payload?.messages)) {
-        applyQueue(sid, payload.messages, payload.version ?? 0, queueEpoch);
-        return;
-      }
-      if (
-        payload?.error?.code === "no_active_turn" &&
-        queueOrderRef.current.capture(sid).epoch === queueEpoch &&
-        turnActivity.generation(sid) === generation &&
-        viewedSessionIdRef.current.trim() === sid
-      ) {
-        // The turn ended between the keystroke and the request. Send it as an
-        // ordinary prompt; if the admission has not been released yet and that
-        // is refused too, the text comes back to the composer rather than
-        // being lost between the two answers.
-        void streamResponses(body, { files, restoreOnRefusal: true });
-        return;
-      }
-      if (viewedSessionIdRef.current.trim() === sid) {
-        setDraft((current) => current || body);
-        setComposerFiles((current) => [...files, ...current]);
-      }
-      applyStreamItemsForSession(sid, (prev) => [
-        ...prev,
-        {
-          id: newId("s"),
-          type: "system_notice",
-          level: "error" as const,
-          message:
-            payload?.error?.code === "queue_full"
-              ? t("composer.queueFull")
-              : t("composer.queueFailed"),
-          createdAtUtc: new Date().toISOString(),
-        },
-      ]);
-    })();
-  });
+        ]);
+      })();
+    },
+  );
 
   /**
    * Take one queued follow-up back. The list is updated at once so the card
@@ -5781,7 +6044,11 @@ export function App() {
         // edited, ahead of anything typed since. A 404 means the agent read it first,
         // and it is already in the conversation.
         const text = data?.message?.text ?? taken?.text ?? "";
-        if (res.ok && text.trim() && viewedSessionIdRef.current.trim() === sid) {
+        if (
+          res.ok &&
+          text.trim() &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
           setDraft((current) =>
             current.trim() ? `${text}\n\n${current}` : text,
           );
@@ -5791,7 +6058,11 @@ export function App() {
         const files = (data?.message?.inline_files ?? [])
           .map((f) => fileFromDataUrl(f.data_url ?? "", f.name ?? ""))
           .filter((f): f is File => f !== null);
-        if (res.ok && files.length > 0 && viewedSessionIdRef.current.trim() === sid) {
+        if (
+          res.ok &&
+          files.length > 0 &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
           setComposerFiles((current) => [...files, ...current]);
         }
       } catch {
@@ -5804,33 +6075,35 @@ export function App() {
    * its answer. The answer carries the whole queue; a message the agent read a
    * moment ago answers 404 and the next `message_queue` frame settles the list.
    */
-  const handleSetQueuedMode = useStableHandler((id: string, mode: QueueMode) => {
-    const sid = sessionId.trim();
-    const messageID = id.trim();
-    if (!sid || !messageID) return;
-    const queueEpoch = queueOrderRef.current.capture(sid).epoch;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/coddy/sessions/${encodeURIComponent(sid)}/queue/${encodeURIComponent(messageID)}`,
-          {
-            method: "PATCH",
-            headers: { [HDR]: sid, "Content-Type": "application/json" },
-            body: JSON.stringify({ mode }),
-          },
-        );
-        const data = (await res.json().catch(() => null)) as {
-          messages?: QueuedMessage[];
-          version?: number;
-        } | null;
-        if (res.ok && Array.isArray(data?.messages)) {
-          applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
+  const handleSetQueuedMode = useStableHandler(
+    (id: string, mode: QueueMode) => {
+      const sid = sessionId.trim();
+      const messageID = id.trim();
+      if (!sid || !messageID) return;
+      const queueEpoch = queueOrderRef.current.capture(sid).epoch;
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/coddy/sessions/${encodeURIComponent(sid)}/queue/${encodeURIComponent(messageID)}`,
+            {
+              method: "PATCH",
+              headers: { [HDR]: sid, "Content-Type": "application/json" },
+              body: JSON.stringify({ mode }),
+            },
+          );
+          const data = (await res.json().catch(() => null)) as {
+            messages?: QueuedMessage[];
+            version?: number;
+          } | null;
+          if (res.ok && Array.isArray(data?.messages)) {
+            applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
+          }
+        } catch {
+          // The next message_queue frame corrects the list.
         }
-      } catch {
-        // The next message_queue frame corrects the list.
-      }
-    })();
-  });
+      })();
+    },
+  );
   const handleRetryLast = useStableHandler(
     () => void streamResponses(lastUserText),
   );
@@ -5875,7 +6148,9 @@ export function App() {
     >
       <EnvHealthBanner />
       <NavRail
-        onNewChat={goHome}
+        // A relay has no chat to start: its home is the map, and the brand
+        // leads there as it leads an agent's page to a new chat.
+        onNewChat={atSwarmRoot ? openSwarmFromNav : goHome}
         onOpenHistory={onOpenHistoryFromNav}
         historyOpen={sessionsOpen}
         showHistory={!atSwarmRoot}
@@ -5884,8 +6159,10 @@ export function App() {
         schedulerOpen={schedulerOpen}
         showSwarm={isSwarmEnv}
         onOpenSwarm={openSwarmFromNav}
-        swarmOpen={swarmRoute}
-        onOpenDocs={openDocsFromNav}
+        // On a relay the map is the home screen, so its entry stays lit while
+        // the map is what is on screen, whichever address shows it.
+        swarmOpen={swarmRoute || (atSwarmRoot && !settingsRoute && !docsRoute)}
+        {...(localDocs ? { onOpenDocs: openDocsFromNav } : {})}
         docsOpen={docsRoute !== null}
         settingsOpen={settingsRoute}
         onOpenSettings={openSettingsFromNav}
@@ -5935,7 +6212,8 @@ export function App() {
             <SchedulerJobsDrawer
               open={schedulerOpen}
               selectedJobId={
-                schedulerEditor?.mode === "edit" || schedulerEditor?.mode === "runs"
+                schedulerEditor?.mode === "edit" ||
+                schedulerEditor?.mode === "runs"
                   ? schedulerEditor.jobId
                   : null
               }
@@ -5964,7 +6242,9 @@ export function App() {
               <BackgroundTasksPanel
                 open
                 className="scheduler-runs-dock"
-                title={t("scheduler.runsTitle", { jobId: schedulerEditor.jobId })}
+                title={t("scheduler.runsTitle", {
+                  jobId: schedulerEditor.jobId,
+                })}
                 emptyText={t("scheduler.runsEmpty")}
                 focus={schedulerRunsFocus}
                 onFocusHonoured={(seq) =>
@@ -5999,10 +6279,7 @@ export function App() {
               availableModels={llmModelIds}
               defaultModel={llmModel}
               currentCwd={currentSessionCwd}
-              onClose={() => {
-                setSchedulerEditor(null);
-                setSchedulerListHash();
-              }}
+              onClose={closeSchedulerEditor}
               onSaved={(createdId) => {
                 void refreshSchedulerJobs({ silent: true });
                 if (createdId) {
@@ -6021,12 +6298,22 @@ export function App() {
         {swarmRoute || (atSwarmRoot && !settingsRoute && !docsRoute) ? (
           <div className="swarm-dock-cluster">
             <SwarmView
-              onOpenNode={(nodePath: string[]) => openSwarmNode(nodePath)}
+              onOpenNode={(nodePath: string[]) =>
+                openSwarmNode(nodePath, undefined, "#/swarm")
+              }
+              onOpenRelay={openSwarmRelay}
+              {...(swarmRelayTarget ? { relay: swarmRelayTarget } : {})}
+              {...(swarmClient
+                ? { client: swarmClient, onOpenLocal: connectLocal }
+                : {})}
               onOpenSession={(s) => openSwarmNode(s.node_path, `#/s/${s.id}`)}
               {...(swarmCurrentNode.length > 0
                 ? { currentNode: swarmCurrentNode }
                 : {})}
-              {...(atSwarmRoot ? { headerSlot: <EnvironmentChip /> } : {})}
+              {...(atSwarmRoot && swarmCurrentNode.length === 0
+                ? { rootCurrent: true }
+                : {})}
+              {...(atSwarmRoot ? {} : { onClose: onCloseSwarm })}
             />
           </div>
         ) : null}
@@ -6045,8 +6332,11 @@ export function App() {
         {settingsRoute ? (
           <div className="settings-dock-cluster">
             <Settings
-              onClose={onCloseSettings}
-              onConfigSaved={() => setConfigEpoch((e) => e + 1)}
+              onClose={closeToChat}
+              onConfigSaved={() => {
+                setConfigEpoch((e) => e + 1);
+                void refreshConfiguredRemotes();
+              }}
               initialSection={settingsSection}
               initialItem={settingsItem}
               activeSessionId={sidebarActiveId}
@@ -6060,6 +6350,8 @@ export function App() {
                   prev.map((s) => (s.id === id ? { ...s, tags } : s)),
                 )
               }
+              // On a relay the drawer edits the relay's own deployment.
+              relay={atSwarmRoot}
             />
           </div>
         ) : null}

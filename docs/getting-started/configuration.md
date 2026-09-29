@@ -9,7 +9,7 @@ This page is the narrative guide. Two companion artifacts cover the full key lis
 # yaml-language-server: $schema=https://coddy.dev/config.schema.json
 ```
 
-**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), `coddy mcp add`, a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, and the order the keys are already in. A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
+**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), `coddy mcp add`, a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, the order the keys are already in and the way you wrote every value they do not change (see [Environment variable references](#environment-variable-references)). A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way, and a provider or a model entry keeps only the fields it named. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
 
 ```json
 "yaml.schemas": { "https://coddy.dev/config.schema.json": ["**/.coddy/config.yaml"] }
@@ -148,6 +148,7 @@ Agent name, title, and build version are not configurable here. They are fixed i
 # used as the key (credential helper, like git/docker helpers or AWS credential_process). It lets a provider fetch
 # short-lived or login-issued keys without storing a static secret. On failure resolution falls back to NAME_API_KEY.
 # Resolution order: literal api_key -> api_key_command stdout -> NAME_API_KEY env.
+# A codex row reads none of the three and runs no helper: it signs in with ChatGPT (coddy providers login).
 providers:
   - name: "openai"
     type: "openai"
@@ -306,7 +307,7 @@ memory:
   dir: "" # long-term memory root; empty = $CODDY_HOME/memory. Supports ${CODDY_HOME} and ~ when set.
   wait_seconds: 20      # how long a turn waits for the report before its first model call; 0 never waits
   timeout_seconds: 300  # hard limit of one memory run
-  keep_runs: 20         # finished memory runs kept per session in the Tasks drawer; 0 keeps all
+  keep_runs: 20         # finished memory runs kept per session in the Tasks panel; 0 keeps all
   recall_max_turns: 6   # the child's round cap is the larger of the two
   persist_max_turns: 12
   copilot_max_tokens: 4096
@@ -479,7 +480,7 @@ httpserver:
     session_ttl_hours: 720                   # 0 = the browser drops the cookie on close (the server still expires its record after 30 days)
 ```
 
-A hash written into this file by hand needs every `$` doubled (`$$argon2id$$v=19$$...`), because a `$NAME` is expanded as an environment reference when the file loads. The command does that for you; `coddy -t` names the problem when it finds a hash that no longer parses. A `${VAR}` reference in `user` or `password_hash` works like every other value here, which also means a save from the settings screen writes the expanded value back into the file - keep a credential out of the document entirely with `CODDY_HTTP_USER` / `CODDY_HTTP_PASSWORD` instead.
+A hash written into this file by hand needs every `$` doubled (`$$argon2id$$v=19$$...`), because a `$NAME` is expanded as an environment reference when the file loads. The command does that for you; `coddy -t` names the problem when it finds a hash that no longer parses. A `${VAR}` reference in `user` or `password_hash` works like every other value here and survives a save from the settings screen as a reference; to keep a credential out of the document entirely, use `CODDY_HTTP_USER` / `CODDY_HTTP_PASSWORD` instead.
 
 The account can also come from the environment alone - `CODDY_HTTP_USER` and `CODDY_HTTP_PASSWORD`, see the `.env` section below - which is the route for a container or a systemd unit. The form is for browsers; `coddy --remote`, `coddy acp --remote`, a swarm relay and every script still present the bearer token. Full behaviour: [HTTP API](../reference/http-api.md#web-ui-sign-in-optional), [Remote mode](../operate/remote.md#the-sign-in-form).
 
@@ -623,10 +624,19 @@ corrupting the secret. The Settings UI does this automatically for the `proxy` f
 write `$$` by hand.
 
 **A save keeps the references.** The loaded configuration holds what a reference resolved to, so the
-Settings UI works with the secret itself. When it saves, a value written as `${VAR}` in the file is
-written back as `${VAR}` as long as it still resolves to the value being saved; only a value you
+Settings UI works with the secret itself and with absolute paths. When it saves, a value written as
+`${VAR}`, `${CODDY_HOME}/...` or `~/...` in the file is written back that way as long as it still
+loads as the value being saved - in a single value (`memory.dir`) and in a list entry
+(`skills.dirs`, `subagents.dirs`, `hooks.files`, `instructions.files`) alike; only a value you
 changed on the screen replaces the reference. A key kept in the environment or in `~/.coddy/.env`
-therefore never lands in `config.yaml` because of an unrelated save.
+therefore never lands in `config.yaml` because of an unrelated save, and a save of an untouched form
+writes every value back the way the file spelled it. The same holds for what the process changes
+after reading the file: a command-line flag, the relay listen address `coddy serve` fills in or a
+pairing token from the environment is not written into `config.yaml` unless you change that value on
+the screen, and a value another save changed after you opened the form is not put back by yours.
+When the file on disk does not load at the moment of the save (a broken hand edit, a deleted file),
+the save writes the configuration the server runs, as it always did. Indentation and blank lines are
+not kept: a save writes the file indented by two spaces, without blank lines between sections.
 
 Two placeholders are not environment variables:
 
@@ -642,7 +652,7 @@ Provider **`type`** values match **`internal/llm.NewProvider`**: **`openai`**, *
 YAML split:
 
 - **`providers`**: **`name`** (unique), **`type`**, **`api_key`**, optional **`api_base`** (base URL override for the provider SDK: an OpenAI-compatible endpoint or Ollama host without **`/v1`** for **`type: openai`**, or an Anthropic-compatible gateway/relay for **`type: anthropic`**; for **`type: neuraldeep`** it selects the deployment, **`https://api.neuraldeep.ru/v1`** or **`https://api.neuraldeep.tech/v1`**, and any other value falls back to the first), optional **`proxy`** (the route of every request of the row: **`inherit`** by default, **`none`** for a direct connection, or an **`http://`**, **`https://`**, **`socks5://`** or **`socks5h://`** proxy URL; see [Provider proxy](#provider-proxy)), optional **`usage_limits_panel`** (boolean, default **`true`**; **`false`** hides the account usage panel of this row on every surface and stops the usage reads behind it, meaningful for **`type: neuraldeep`**, **`type: codex`** and **`type: devin`** today).
-- **`models`**: **`model`** (string **`provider_name/api_model_id`**, session selector and **`agent.model`** value; first segment names **`providers[].name`**, remainder is the API model id), **`max_tokens`**, **`temperature`**, optional **`max_context_tokens`** (the model's context window: what the web UI context ring, the console context percentage and automatic compaction measure against; 0 reads it from the provider's model listing when the provider reports one, else 128000 - see [Context compaction](../features/compaction.md#the-context-window)), optional **`multimodal`** (boolean, default **`false`**; when **`true`** signals that the model accepts image/file inputs — the UI exposes a file attachment button in the composer for this model only), optional **`reasoning_levels`** (string list; overrides the reasoning levels offered for this model — when omitted they are auto-detected from the API model id: **`gpt-5*`** and **`gpt-6*`** → **`minimal,low,medium,high`**, OpenAI **`o`**-series, **`gpt-oss*`**, **`qwen3*`** (qwen3, qwen3.5, qwen3.6, qwen3.8, ...) and Claude extended-thinking models → **`low,medium,high`**; an explicit empty list hides the composer reasoning selector), optional **`reasoning_default`** (the level pre-selected for new chats; must be one of the resolved levels). Reasoning levels map to OpenAI **`reasoning_effort`** and Anthropic extended-thinking **`budget_tokens`**; for **`qwen3*`** models on OpenAI-compatible providers the request also carries **`chat_template_kwargs`** **`{"enable_thinking": true}`** so the chat-template thinking switch stays on. The Codex backend rejects **`max_output_tokens`**, so **`max_tokens`** is not sent for **`codex`** providers; it also rejects the **`minimal`** tier its **`gpt-5*`** and **`gpt-6*`** ids would normally imply, so codex-backed models offer **`none`** in its place (in the composer selector and in **`GET /v1/models`**). Reasoning turns request summaries (**`summary: auto`**) so thinking streams, and encrypted reasoning (**`include: reasoning.encrypted_content`**) so the chain of thought is replayed across tool calls the way the Codex CLI does it. See [config-reference.md](../reference/config.md) for token lifetime and the startup credential report.
+- **`models`**: **`model`** (string **`provider_name/api_model_id`**, session selector and **`agent.model`** value; first segment names **`providers[].name`**, remainder is the API model id), **`max_tokens`**, **`temperature`**, optional **`max_context_tokens`** (the model's context window: what the web UI context ring, the console context percentage and automatic compaction measure against; 0 reads it from the provider's model listing when the provider reports one, else 128000 - see [Context compaction](../features/compaction.md#the-context-window)), optional **`multimodal`** (boolean, default **`false`**; when **`true`** signals that the model accepts image/file inputs — the UI exposes a file attachment button in the composer for this model only, and [`read`](../reference/tools.md#files) shows such a model the picture in an image file instead of refusing it, see [Images](../features/images.md)), optional **`reasoning_levels`** (string list; overrides the reasoning levels offered for this model — when omitted they are auto-detected from the API model id: **`gpt-5*`** and **`gpt-6*`** → **`minimal,low,medium,high`**, OpenAI **`o`**-series, **`gpt-oss*`**, **`qwen3*`** (qwen3, qwen3.5, qwen3.6, qwen3.8, ...) and Claude extended-thinking models → **`low,medium,high`**; an explicit empty list hides the composer reasoning selector), optional **`reasoning_default`** (the level pre-selected for new chats; must be one of the resolved levels). Reasoning levels map to OpenAI **`reasoning_effort`** and Anthropic extended-thinking **`budget_tokens`**; for **`qwen3*`** models on OpenAI-compatible providers the request also carries **`chat_template_kwargs`** **`{"enable_thinking": true}`** so the chat-template thinking switch stays on. The Codex backend rejects **`max_output_tokens`**, so **`max_tokens`** is not sent for **`codex`** providers; it also rejects the **`minimal`** tier its **`gpt-5*`** and **`gpt-6*`** ids would normally imply, so codex-backed models offer **`none`** in its place (in the composer selector and in **`GET /v1/models`**). Reasoning turns request summaries (**`summary: auto`**) so thinking streams, and encrypted reasoning (**`include: reasoning.encrypted_content`**) so the chain of thought is replayed across tool calls the way the Codex CLI does it. See [config-reference.md](../reference/config.md) for token lifetime and the startup credential report.
 
 ### Provider proxy
 
@@ -713,7 +723,7 @@ models:
   - model: "nd-tech/qwen3.6-35b-a3b"
 ```
 
-Each row signs in separately: the Sign In button on its row in Settings, or **`coddy providers login <name>`** in a terminal. A row config.yaml does not list yet is created by its login when **`--type`** names the type (**`coddy providers login codex-work --type codex`**). The login lands under **`$CODDY_HOME/providers/<name>/`**, a model of the row is **`<name>/<model id>`**, and the row's **`<NAME>_API_KEY`** variable (**`CODEX_WORK_API_KEY`**, **`ND_TECH_API_KEY`**) belongs to that row only.
+Each row signs in separately: the Sign In button on its row in Settings, or **`coddy providers login <name>`** in a terminal. A row config.yaml does not list yet is created by its login when **`--type`** names the type (**`coddy providers login codex-work --type codex`**). The login lands under **`$CODDY_HOME/providers/<name>/`**, a model of the row is **`<name>/<model id>`**, and the row's **`<NAME>_API_KEY`** variable (**`ND_TECH_API_KEY`**) belongs to that row only; a codex row reads no key variable at all.
 
 The Codex CLI login (**`~/.codex/auth.json`**, **`CODEX_HOME`**) and the Devin CLI login are one account each, so each stands in for one row without a login of its own: the only row of its type, or, when there are several, the row named **`codex`** (**`devin`**). Every other row signs in itself instead of quietly running on that account - adding a second codex row to a setup whose only row, **`chatgpt`**, ran on the Codex CLI login leaves **`chatgpt`** unsigned too, until it signs in or is renamed **`codex`**. The startup log, **`coddy --dry-run`**, **`coddy providers list`** and the Settings row name such a row and the row the CLI login serves, and **`--devin-cli`** refuses a row the Devin CLI login does not serve.
 

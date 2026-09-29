@@ -14,6 +14,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -321,7 +322,7 @@ func TestOpenAPISpecPathsAndVersion(t *testing.T) {
 	if !ok {
 		t.Fatal("missing paths map")
 	}
-	for _, must := range []string{"/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/responses/{id}", "/coddy/sessions", "/coddy/describe", "/coddy/enhance-prompt", "/coddy/slash-commands", "/coddy/workspace/files", "/coddy/workspace/context", "/coddy/workspace/folders", "/coddy/config/schema", "/coddy/config", "/coddy/config/validate", "/coddy/config/reasoning-levels", "/coddy/providers/{name}/models", "/coddy/providers/{name}/codex-auth", "/coddy/providers/{name}/codex-auth/device", "/coddy/providers/{name}/codex-auth/device/{loginID}", "/coddy/sessions/{id}/messages", "/coddy/sessions/{id}/assets/{name}/thumbnail", "/coddy/sessions/{id}/composer-stream", "/coddy/events", "/coddy/sessions/{id}/question", "/coddy/sessions/{id}/permission", "/coddy/sessions/{id}/cancel", "/coddy/sessions/{id}/workspace", "/coddy/sessions/{id}/rewind", "/coddy/sessions/{id}/queue", "/coddy/sessions/{id}/queue/{message_id}", "/coddy/subagents", "/coddy/subagents/{name}/trust", "/coddy/subagents/{name}/untrust", "/coddy/auth/me", "/coddy/auth/login", "/coddy/auth/logout", "/coddy/docs", "/coddy/docs/page", "/coddy/docs/search"} {
+	for _, must := range []string{"/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/responses/{id}", "/coddy/sessions", "/coddy/describe", "/coddy/enhance-prompt", "/coddy/slash-commands", "/coddy/workspace/files", "/coddy/workspace/context", "/coddy/workspace/folders", "/coddy/config/schema", "/coddy/config", "/coddy/config/validate", "/coddy/config/reasoning-levels", "/coddy/providers/{name}/models", "/coddy/providers/{name}/codex-auth", "/coddy/providers/{name}/codex-auth/device", "/coddy/providers/{name}/codex-auth/device/{loginID}", "/coddy/sessions/{id}/messages", "/coddy/sessions/{id}/assets/{name}/thumbnail", "/coddy/sessions/{id}/composer-stream", "/coddy/events", "/coddy/sessions/{id}/question", "/coddy/sessions/{id}/permission", "/coddy/sessions/{id}/cancel", "/coddy/sessions/{id}/workspace", "/coddy/sessions/{id}/rewind", "/coddy/sessions/{id}/queue", "/coddy/sessions/{id}/queue/{message_id}", "/coddy/subagents", "/coddy/subagents/{name}/trust", "/coddy/subagents/{name}/untrust", "/coddy/auth/me", "/coddy/auth/login", "/coddy/auth/logout", "/coddy/docs", "/coddy/docs/page", "/coddy/docs/search", "/coddy/info"} {
 		if _, ok := paths[must]; !ok {
 			t.Fatalf("paths missing key %s", must)
 		}
@@ -1338,6 +1339,55 @@ func TestCoddyMessagesIncludesUILogAfterAgentError(t *testing.T) {
 	}
 	if !strings.Contains(body.UILog[0].Message, "forced LLM failure") {
 		t.Fatalf("message %q", body.UILog[0].Message)
+	}
+}
+
+// A session saved before only the agent's own settings changes were noted
+// holds a notice of every change: the model and the mode `coddy -p` started it
+// with, a command. A reload of its transcript shows none of them and keeps
+// every other row.
+func TestCoddyMessagesHideTheOperatorsSettingsNotices(t *testing.T) {
+	mgr, srv, _ := testHTTPServerPersist(t)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	sid := "sess_legacy_notices_1"
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/responses", strings.NewReader(`{"model":"agent","input":"review this","stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := ioReadAllClose(res.Body); res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/responses: %d %s", res.StatusCode, b)
+	}
+	st := mgr.SessionByID(sid)
+	st.AppendUILogNotice(1, "Model: openai/gpt-4o for this session")
+	st.AppendUILogNotice(1, "Mode: agent for this session")
+	st.AppendUILogNotice(1, "Hook (Stop): the checks passed")
+
+	ms, err := http.Get(ts.URL + "/coddy/sessions/" + sid + "/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mb, err := ioReadAllClose(ms.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		UILog []struct {
+			Message string `json:"message"`
+		} `json:"uiLog"`
+	}
+	if err := json.Unmarshal(mb, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.UILog) != 1 || body.UILog[0].Message != "Hook (Stop): the checks passed" {
+		t.Fatalf("uiLog = %s, want only the hook's row", mb)
 	}
 }
 
@@ -2885,6 +2935,29 @@ func TestHTTPAuthHotReloadEnableRotateDisable(t *testing.T) {
 	srv.ReplaceConfig(cfgWithAuth(""))
 	if got := authGET(t, ts.URL+"/v1/models", ""); got != http.StatusOK {
 		t.Fatalf("after disable: %d want 200", got)
+	}
+}
+
+// A server handed a configuration the manager has already replaced follows
+// the manager. The replacement was announced before the server subscribed and
+// nobody announces it again, so a token rotated while `coddy serve` was
+// starting the server from an older snapshot stayed unenforced until the next
+// save (issue #401).
+func TestHTTPAuthFollowsAConfigurationReplacedBeforeTheServerSubscribed(t *testing.T) {
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	handed := cfgWithAuth("old-token")
+	mgr := session.NewManager(handed, noopSender{}, runner, slog.Default(), "/tmp", nil)
+	mgr.ReplaceConfig(cfgWithAuth("new-token"))
+	srv := New(handed, mgr, slog.Default(), "/tmp")
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	if got := authGET(t, ts.URL+"/v1/models", "old-token"); got != http.StatusUnauthorized {
+		t.Fatalf("the replaced token: status %d want 401", got)
+	}
+	if got := authGET(t, ts.URL+"/v1/models", "new-token"); got != http.StatusOK {
+		t.Fatalf("the current token: status %d want 200", got)
 	}
 }
 
@@ -5006,10 +5079,20 @@ const testHomeEnv = "CODDY_TEST_HTTPSERVER_HOME"
 // that needs a home of its own still sets CODDY_HOME itself. HOME stays the
 // operator's on purpose: tests run git in temp repositories and need its
 // identity, so ~-paths such as the default ~/.agents/skills are not isolated.
+// CODEX_HOME and the Codex backend are isolated as well (see
+// TestTestsDoNotReachTheOperatorsCodexLogin).
 func TestMain(m *testing.M) {
 	if home := os.Getenv(testHomeEnv); home != "" {
-		// A helper process, or a run nested in one: the home is the parent's.
+		// A helper process, or a run nested in one: the home is the parent's,
+		// and so is the Codex backend, inherited as it is. CODEX_HOME is set
+		// again in any case, and a backend that is not a local one is replaced,
+		// so a marker left in the environment by hand does not open the way to
+		// the operator's Codex login either.
 		_ = os.Setenv("CODDY_HOME", home)
+		_ = os.Setenv("CODEX_HOME", filepath.Join(home, "codex-home"))
+		if base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL)); err != nil || !isLoopbackIP(base.Hostname()) {
+			_ = os.Setenv(llm.EnvCodexBaseURL, "http://127.0.0.1:1")
+		}
 		os.Exit(m.Run())
 	}
 	home, err := os.MkdirTemp("", "coddy-httpserver-home-")
@@ -5017,13 +5100,59 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "test home:", err)
 		os.Exit(1)
 	}
+	codexHome, err := os.MkdirTemp("", "coddy-httpserver-codex-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "test codex home:", err)
+		os.Exit(1)
+	}
+	codexBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no Codex backend in this test: point "+llm.EnvCodexBaseURL+" at a stand-in", http.StatusServiceUnavailable)
+	}))
 	_ = os.Setenv(testHomeEnv, home)
 	_ = os.Setenv("CODDY_HOME", home)
+	_ = os.Setenv("CODEX_HOME", codexHome)
+	_ = os.Setenv(llm.EnvCodexBaseURL, codexBackend.URL)
 	code := m.Run()
-	if err := os.RemoveAll(home); err != nil {
-		fmt.Fprintln(os.Stderr, "test home:", err)
+	codexBackend.Close()
+	for _, dir := range []string{home, codexHome} {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "test home:", err)
+		}
 	}
 	os.Exit(code)
+}
+
+// No test of this package may read the Codex CLI login of whoever runs the
+// tests, or send it to the real Codex backend: a codex model has its catalog
+// read for its context window whenever GET /v1/models is served or a turn
+// starts, with the CLI login standing in for the only codex row. TestMain
+// points CODEX_HOME at an empty directory under the temp dir and
+// CODDY_CODEX_BASE_URL at a local server that refuses every request; a test
+// with a Codex stand-in of its own still sets both itself.
+func TestTestsDoNotReachTheOperatorsCodexLogin(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome, err := filepath.EvalSymlinks(os.Getenv("CODEX_HOME"))
+	if err != nil || !strings.HasPrefix(codexHome, tmp+string(filepath.Separator)) {
+		t.Fatalf("CODEX_HOME = %q (%v), want a directory of the run's own under %q", os.Getenv("CODEX_HOME"), err, tmp)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err == nil {
+		t.Fatalf("CODEX_HOME %s holds a Codex CLI login", codexHome)
+	}
+	base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL))
+	if err != nil || !isLoopbackIP(base.Hostname()) {
+		t.Fatalf("%s = %q, want the local server TestMain started", llm.EnvCodexBaseURL, os.Getenv(llm.EnvCodexBaseURL))
+	}
+}
+
+// isLoopbackIP reports whether host is a loopback IP address; httptest binds
+// 127.0.0.1, or [::1] on a host without IPv4 loopback. Unlike isLoopbackHost,
+// which reads a listen address, an empty host is not one.
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // A test of this package that loads a config without naming a home (the

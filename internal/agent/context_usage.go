@@ -132,7 +132,7 @@ func (a *Agent) refreshConversationContextUsage(persist bool) {
 	if b == nil {
 		b = &session.ContextBreakdown{}
 	}
-	b.Conversation = estimateConversationTokens(a.prunedForLLM(session.MessagesForLLM(a.state.GetMessages())))
+	b.Conversation = conversationTokens(a.prunedForLLM(session.MessagesForLLM(a.state.GetMessages())), a.modelReadsImages())
 	a.setContextBreakdown(b, persist)
 }
 

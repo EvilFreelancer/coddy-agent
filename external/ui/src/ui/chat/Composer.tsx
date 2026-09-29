@@ -16,6 +16,7 @@ import { useT } from "../i18n/I18nProvider";
 import { EnvironmentChip } from "./EnvironmentChip";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { PaperclipIcon } from "../components/PaperclipIcon";
+import { useEscapeCloses } from "../components/useEscapeCloses";
 import type { WorkspaceContext } from "./workspaceContext";
 import {
   ContextBreakdownPopover,
@@ -78,6 +79,7 @@ import { parseDocsCommand } from "../docs/docsCommand";
 import {
   filterLlmModels,
   groupLlmModelsByVendor,
+  orderLlmModels,
   shouldGroupLlmModels,
   shouldShowLlmFilter,
 } from "./llmModelMenu";
@@ -753,7 +755,7 @@ export function Composer(props: {
     if (argDraft.kind === "flag") {
       return COMPACT_FLAGS.filter((f) => f.startsWith(argDraft.prefix));
     }
-    return filterLlmModels(props.llmModels ?? [], argDraft.prefix);
+    return filterLlmModels(orderLlmModels(props.llmModels ?? []), argDraft.prefix);
   }, [argDraft, props.llmModels]);
   const argOpen =
     argDraft.open &&
@@ -1853,7 +1855,12 @@ export function Composer(props: {
     })();
   };
 
-  const llmList = props.llmModels ?? [];
+  // One order for everything the menu does with the list - the rows, the
+  // groups and the row Enter picks - so what is picked is what is seen first.
+  const llmList = useMemo(
+    () => orderLlmModels(props.llmModels ?? []),
+    [props.llmModels],
+  );
   const showLlm = llmList.length > 0;
   const llmVal = (props.llmModel || "").trim();
   // Filter input appears once the backend list is long; vendor grouping kicks
@@ -1973,6 +1980,8 @@ export function Composer(props: {
     setMenuAnchorRect(null);
     setLlmQuery("");
   }
+  // Escape closes the selector menu that is open, with or without its filter.
+  useEscapeCloses(menuOpen !== null, closeMenu);
 
   function toggleMenu(
     type: "mode" | "llm" | "reasoning" | "permission",
@@ -2031,6 +2040,18 @@ export function Composer(props: {
   useEffect(() => {
     setSlashActive(0);
   }, [slashPrefix, slashOpen]);
+  // A draft emptied from outside - sent, queued, or run as a browser command -
+  // fires no change event on the textarea, so the pickers would keep the menu
+  // opened on the old draft over the empty composer. Nothing is left to
+  // complete, so they close.
+  useEffect(() => {
+    if (props.value === "" && pickerOpen) {
+      dismissSlashAtPickers();
+    }
+    // Only the draft moving matters: the pickers opening on a non-empty draft
+    // must not re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.value]);
   // Hide the Skills group when only built-in commands match, so a lone command
   // does not sit under an empty "Skills" header.
   const showSkillsSection =

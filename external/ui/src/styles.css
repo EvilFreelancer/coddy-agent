@@ -800,6 +800,14 @@ body {
   --rail-shell-track-width: calc(
     var(--rail-pill-track) + var(--rail-column-pad-end)
   );
+  /* The width of the docks that open over the chat - the documentation reader
+     and the swarm map - which share one look (issue #401). */
+  --coddy-dock-width: min(
+    1350px,
+    calc(
+      100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px
+    )
+  );
 }
 
 .shell-main {
@@ -1720,12 +1728,18 @@ a.rail-brand {
   background: color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
+.sessions-filter-item.starts-group {
+  margin-top: 5px;
+  padding-top: 11px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+}
+
 .sessions-filter-check {
   flex: 0 0 auto;
   color: var(--accent);
   font-size: 12px;
 }
-
 
 /* A heading, the control that starts a chat in it, and the row count. The end
    padding matches a session row's, so the count lands in the same column as the
@@ -1736,7 +1750,6 @@ a.rail-brand {
   gap: 2px;
   padding-right: 8px;
 }
-
 
 /* In the column the rows' own control sits in, and visible at rest: a way to
    start work in this folder is worth a glance, not a hunt with the pointer. */
@@ -3690,6 +3703,49 @@ a.rail-brand {
   color: var(--coddy-md-inline-code-fg);
 }
 
+/* The pictures a tool call showed the model (read on an image file) stand under
+   its row, open or closed, at the inset of the row's label: the preview is the
+   point, so it is not folded into the details. They hang close under the row
+   they belong to, and below them the transcript's own gap between rows is the
+   whole space, as after any other row. A card has the size and the manner of a
+   sent attachment, and a click opens the original enlarged. */
+.tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0 14px;
+}
+
+.tool-image-card {
+  display: block;
+  width: 128px;
+  height: 96px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
+  cursor: zoom-in;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.tool-image-card:hover,
+.tool-image-card:focus-visible {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 12%, var(--coddy-blend-base));
+}
+
+.tool-image-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
 .coddy-tool-call-body {
   display: flex;
   flex-direction: column;
@@ -4220,7 +4276,10 @@ a.rail-brand {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 6px 6px 12px;
+  /* 12px on the right puts the remove cross on the vertical line of the
+     improve-prompt button of the card below (the row's 12px, the same 24px
+     control): composerQueueCss.test.ts. */
+  padding: 6px 12px;
   border-radius: 12px;
   background: var(--coddy-glass-panel-bg);
   backdrop-filter: var(--coddy-glass-panel-backdrop);
@@ -4308,7 +4367,6 @@ a.rail-brand {
 .composer-run-icon--queue {
   background: color-mix(in srgb, var(--accent) 82%, var(--coddy-blend-base));
 }
-
 
 .slash-sheet-backdrop {
   position: fixed;
@@ -5018,22 +5076,17 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   gap: 6px;
 }
 
-.mode-env-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.4;
-}
-
-.mode-env-dot[data-remote="1"] {
-  background: #f59e0b; /* amber when driving a remote server */
-  opacity: 1;
-}
-
 .mode-menu--env {
   min-width: 240px;
   max-width: min(340px, calc(100vw - 24px));
+  /* The anchored menu gets the room it has as max-height (EnvironmentChip);
+     past that it scrolls rather than running off the window. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mode-menu--sheet.mode-menu--env {
+  max-height: 80vh;
 }
 
 .mode-menu--portal.mode-menu--env {
@@ -5059,6 +5112,51 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   font-size: 0.85em;
   opacity: 0.5;
   white-space: nowrap;
+}
+
+/* One remote in the menu: its row, then why it is red when it is (issue #401),
+   then the agents of a relay that let this browser in. Hints and agents start
+   under the name, past the row's padding, the dot and the gap (10 + 8 + 8). */
+.mode-env-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: -4px 0 4px;
+  padding: 0 10px 0 26px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
+}
+
+.mode-env-hint-action {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mode-env-hint-action:hover {
+  background: color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+}
+
+.mode-env-nodes {
+  display: flex;
+  flex-direction: column;
+  margin: -2px 0 4px;
+  padding-left: 16px;
+}
+
+.mode-env-item.mode-env-node {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 12.5px;
 }
 
 /* Reachability dots: green up, red down, amber while probing (local is always up). */
@@ -6531,13 +6629,25 @@ html:not([data-theme="light"]) .context-usage-note--error {
   .backdrop {
     z-index: 60;
   }
+  /* Under the top bar (80), not behind it, and over the backdrop and the
+     drawers, which start below it anyway. */
+  .env-health-banner {
+    top: var(--coddy-mobile-bar-h);
+    z-index: 75;
+  }
   .sessions.drawer,
   .scheduler-jobs.drawer,
   .settings.drawer {
     z-index: 70;
   }
   .shell {
-    --coddy-mobile-top-inset: calc(78px + env(safe-area-inset-top, 0px));
+    /* The top bar the rail becomes, and under it the environment banner when
+       one is shown: the banner publishes its height (EnvHealthBanner.tsx), so
+       everything placed by the inset starts below both. */
+    --coddy-mobile-bar-h: calc(78px + env(safe-area-inset-top, 0px));
+    --coddy-mobile-top-inset: calc(
+      var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px)
+    );
     /* Same rhythm as title row to first message (.messages-inner gap, sticky-head padding-bottom) */
     --coddy-mobile-chat-stack-gap: 12px;
     --coddy-mobile-title-sticky-top: calc(
@@ -7559,9 +7669,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 /* Settings drawer (#/settings) - same glass shell as History / Scheduler drawers.
-   The lead pane is the status band: it renders only while a load or save
-   result needs reporting, so nothing stands between the head and the tabs
-   otherwise. */
+   The lead pane is the status band: it renders only while a failed read or a
+   failed save needs saying, so nothing stands between the head and the tabs
+   otherwise. A save that went through says so on the Save button alone. */
 .settings.drawer .settings-lead-pane {
   flex-shrink: 0;
   padding: 8px 14px 10px;
@@ -7585,19 +7695,11 @@ html:not([data-theme="light"]) .context-usage-note--error {
   box-sizing: border-box;
 }
 
-.settings.drawer .settings-scroll-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 120px;
-}
-
 .settings.drawer .settings-footer-actions {
   flex-shrink: 0;
 }
 
-.settings-lead-pane .settings-error,
-.settings-lead-pane .settings-ok {
+.settings-lead-pane .settings-error {
   margin-top: 0;
 }
 
@@ -7650,6 +7752,12 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .settings-btn-primary {
   border-color: rgba(147, 51, 234, 0.55);
   background: rgba(147, 51, 234, 0.22);
+  /* Slower than the other buttons, so the green of a save eases back. */
+  transition:
+    background 360ms ease,
+    border-color 360ms ease,
+    box-shadow 360ms ease,
+    transform 80ms ease;
 }
 
 .settings-btn-primary:hover:not(:disabled) {
@@ -7716,12 +7824,6 @@ html:not([data-theme="light"]) .context-usage-note--error {
 
 .settings-error {
   color: #fecaca;
-  margin: 4px 0 0;
-  font-size: 0.88rem;
-}
-
-.settings-ok {
-  color: #bbf7d0;
   margin: 4px 0 0;
   font-size: 0.88rem;
 }
@@ -8012,6 +8114,14 @@ html:not([data-theme="light"]) .context-usage-note--error {
   flex: 0 0 auto;
 }
 
+/* A map row (tools.http_request.default_headers): the name and the value side
+   by side in the field block, the value wider; each is the list's bare input. */
+.settings-map-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px;
+}
+
 /* --- Tabbed settings layout: vertical nav + content (desktop), horizontal tab strip (mobile) --- */
 .settings-tabs-layout {
   flex: 1 1 auto;
@@ -8141,36 +8251,121 @@ html:not([data-theme="light"]) .context-usage-note--error {
   }
 }
 
-/* Save feedback: the save button pops with a green success flash. */
-.settings-btn-primary.is-saved {
-  animation: settings-save-pop 1s ease;
+/* Save feedback: a save that went through turns the Save button green for
+   SAVE_SUCCESS_MS (Settings.tsx) - no line of text, the colour is the message -
+   and the button eases back to its own colour after. The green is a state, not
+   a frame of the pop, so it holds under reduced motion too. A failed save says
+   why in the lead pane instead. */
+.settings-btn-primary.is-saved,
+.settings-btn-primary.is-saved:hover:not(:disabled) {
+  border-color: rgba(34, 197, 94, 0.85);
+  background: rgba(34, 197, 94, 0.3);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.24);
+  animation: settings-save-pop 0.45s ease;
 }
 
 @keyframes settings-save-pop {
   0% {
     transform: scale(1);
   }
-  25% {
-    transform: scale(1.16);
-    border-color: rgba(34, 197, 94, 0.85);
-    background: rgba(34, 197, 94, 0.32);
-    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
-  }
-  60% {
-    transform: scale(1);
-    border-color: rgba(34, 197, 94, 0.7);
-    background: rgba(34, 197, 94, 0.24);
-    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.22);
+  40% {
+    transform: scale(1.14);
   }
   100% {
     transform: scale(1);
   }
 }
 
+/* Skeleton of a settings tab: the first open of the page, while the schema
+   that describes the tab is on its way (SettingsSkeleton.tsx), and grey rows
+   in the section rail and the tile grid for the tabs it will bring. The bars
+   are tinted from --text, so they read on every theme. */
+.settings-skeleton-bar {
+  display: block;
+  height: 10px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 0%,
+    color-mix(in srgb, var(--text) 12%, transparent) 40%,
+    color-mix(in srgb, var(--text) 6%, transparent) 80%
+  );
+  background-size: 300% 100%;
+  animation: chat-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.settings-skeleton-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+  border-radius: 12px;
+}
+
+.settings-skeleton-legend {
+  width: 34%;
+  height: 12px;
+}
+
+.settings-skeleton-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-skeleton-label {
+  width: 28%;
+}
+
+.settings-skeleton-field:nth-child(odd) .settings-skeleton-label {
+  width: 40%;
+}
+
+.settings-skeleton-input {
+  height: 40px;
+  border-radius: 10px;
+}
+
+.settings-nav-item--placeholder {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Bars as tall as a tab's line of text, so the rail keeps its height when the
+   tabs arrive (37px a row, like .settings-nav-item). */
+.settings-nav-item--placeholder .settings-skeleton-bar {
+  width: 70%;
+  margin: 4.5px 0;
+}
+
+.settings-nav-item--placeholder:nth-child(3n) .settings-skeleton-bar {
+  width: 52%;
+}
+
+.settings-tile--placeholder {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* The title and the description line of a tile, at their line heights: a
+   grey tile is as tall as the tile that replaces it. */
+.settings-skeleton-title {
+  width: 60%;
+  margin: 3px 0;
+}
+
+.settings-skeleton-desc {
+  width: 85%;
+  height: 8px;
+  margin: 3.5px 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .settings-form-anim,
   .settings-icon-spin,
-  .settings-btn-primary.is-saved {
+  .settings-btn-primary.is-saved,
+  .settings-skeleton-bar {
     animation: none;
   }
 }
@@ -9645,7 +9840,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* No header bar above it (the call's arguments name nothing), so the body is the
    whole card and closes its own top edge. */
 .permission-preview-viewport--headless {
-  border-top: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
   border-radius: 12px;
 }
 
@@ -9884,7 +10080,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
   margin-top: 0;
 }
 
-.permission-preview-bar > .todo-tool-preview-mark + .permission-preview-location {
+.permission-preview-bar
+  > .todo-tool-preview-mark
+  + .permission-preview-location {
   font-family: inherit;
   font-size: 12px;
 }
@@ -10170,7 +10368,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .structured-tool-answer:not(:first-child) {
   padding-top: 10px;
   /* 16%: on the light theme's grey inset a lighter mix vanishes into the body. */
-  border-top: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
 }
 
 /* A request that skips the certificate check says so in the failure colour. */
@@ -11159,10 +11358,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   color: #b91c1c;
 }
 
-[data-theme="light"] .settings-ok {
-  color: #15803d;
-}
-
 [data-theme="light"] .msg-system {
   background: rgba(253, 240, 240, 0.92);
   border-color: rgba(220, 38, 38, 0.2);
@@ -11573,8 +11768,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 2px;
 }
 
-
-
 /* Tab controls hanging off the card above them, like the More / Less row: the
    body is a flex column with an 8px gap, and these cancel it. */
 .tool-bgtask-actions {
@@ -11698,8 +11891,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 .bgtask-section-action:hover {
   color: var(--text);
 }
-
-
 
 /* One card for every task - a shell command, a subagent run, the memory run of a
    turn, running or finished. Same parts in the same place: status dot, a tag that says
@@ -12099,7 +12290,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
-  width: min(1350px, calc(100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px));
+  width: var(--coddy-dock-width);
   margin-inline: auto;
   z-index: 50;
   display: flex;
@@ -12141,9 +12332,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   grid-template-areas: "title search actions";
   column-gap: 32px;
   align-items: center;
-  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px var(--docs-inline);
+  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px
+    var(--docs-inline);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
 .docs-title-block {
@@ -12320,7 +12513,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
   color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   text-align: center;
   pointer-events: none;
 }
@@ -12430,7 +12627,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 /* On this page: a thin rule on the left, the section being read on it. */
 .docs-outline ul {
   gap: 0;
-  border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-left: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
 }
 
 .docs-outline a {
@@ -12575,7 +12773,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   padding-bottom: 8px;
   font-size: 20px;
   font-weight: 600;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-article .md :where(h3) {
@@ -12791,7 +12990,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   gap: 12px;
   margin-top: 40px;
   padding-top: 18px;
-  border-top: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-pager-link {
@@ -12879,7 +13079,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
       "title actions"
       "search search";
     row-gap: 10px;
-    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px var(--docs-inline);
+    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px
+      var(--docs-inline);
   }
   .docs-header-search {
     max-width: none;
@@ -13005,6 +13206,9 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
+  /* As wide as the documentation reader, and centred the same way. */
+  width: var(--coddy-dock-width);
+  margin-inline: auto;
   z-index: 50;
   overflow: auto;
   border-radius: var(--coddy-glass-panel-radius);
@@ -13024,52 +13228,86 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
     right: max(8px, env(safe-area-inset-right, 0px));
     top: calc(var(--coddy-mobile-top-inset) + 6px);
     bottom: 8px;
+    width: auto;
+    margin-inline: 0;
   }
 }
 
+/* The map fills its dock: the dock is what sets the width (--coddy-dock-width). */
 .swarm-view {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px 24px 32px;
-  max-width: 1100px;
-  margin: 0 auto;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 14px var(--swarm-inline, 24px);
   color: var(--text);
 }
 
+/* The head follows the documentation reader's own: the title block on the
+   left, the search centred, the actions at the right edge, and a hairline
+   under it that runs to the dock's edges. The band is pulled up over the
+   view's own top padding so it starts flush with the dock's top edge
+   instead of floating as a strip inside it. */
 .swarm-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.swarm-header-actions {
-  display: flex;
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(
+      170px,
+      210px
+    );
+  grid-template-areas: "title search actions";
+  column-gap: 32px;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  margin: -14px calc(-1 * var(--swarm-inline, 24px)) 0;
+  padding: 14px var(--swarm-inline, 24px) 12px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
+.swarm-title-block {
+  grid-area: title;
+  min-width: 0;
+}
+
+/* Spelled like the head of every other panel (.sessions-head, .docs-title):
+   small capitals in a muted tint, the screen's name rather than the relay's. */
 .swarm-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  color: color-mix(in srgb, var(--text) 72%, var(--coddy-blend-base));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .swarm-subtitle {
-  margin: 4px 0 0;
-  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
-  font-size: 13px;
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.swarm-header-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* The graph, the paragraph that says it in words, and the legend. Positioned,
-   because the summary is taken out of flow and has to hang off this box. */
+   because the summary is taken out of flow and has to hang off this box. It
+   grows to fill the dock's height. */
 .swarm-graph-panel {
   position: relative;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 10px;
 
   /* Every --coddy-surface-* token is translucent on six of the seven themes.
@@ -13094,9 +13332,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   --swarm-sunken: var(--bg);
 }
 
-/* role="img" collapses the SVG, so nothing inside it is announced. This is
-   what a screen reader reads instead, and it is the only copy in the picture
-   that has to stay off the canvas. */
+/* The SVG group keeps its node controls exposed. This paragraph supplements
+   its picture-level description and is the only copy that stays off canvas. */
 .swarm-graph-summary {
   position: absolute;
   width: 1px;
@@ -13109,21 +13346,121 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   border: 0;
 }
 
-/* The graph keeps the size it was drawn at and scrolls inside this box.
-   Scaling a wide swarm down to fit takes its 11px labels below legibility. */
-.swarm-graph-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+/* The graph itself, not the page, receives every navigation gesture. It
+   grows to fill the panel the dock leaves it. */
+.swarm-graph-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: var(--coddy-glass-panel-radius, var(--radius));
   background: var(--swarm-ground);
-  padding: 10px;
+  cursor: grab;
+  /* Dragging the canvas pans it; nothing in it is text to select. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
+.swarm-graph-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.swarm-graph-viewport:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Absolutely placed rather than height:100%: a percentage on a replaced
+   element resolves against the parent's *specified* height, and the viewport
+   above gets its height from flex-grow, so the SVG would collapse to its
+   intrinsic 150px and show nothing below it. inset: 0 resolves against the
+   used height, which is definite for absolutely positioned boxes. */
 .swarm-graph {
+  position: absolute;
+  inset: 0;
   display: block;
-  margin: 0 auto;
   font-family: inherit;
+}
+
+.swarm-graph-camera {
+  transition: transform 0.12s ease-out;
+}
+
+/* A camera the code refits (mount, poll, resize) lands where it lands:
+   animating it only makes the map look like it reloads. */
+.swarm-graph-camera[data-instant="true"] {
+  transition: none;
+}
+
+.swarm-graph-viewport.is-panning .swarm-graph-camera {
+  transition: none;
+}
+
+.swarm-layout-control,
+.swarm-viewport-control {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  border-radius: 10px;
+  background: var(--coddy-glass-panel-bg);
+  backdrop-filter: var(--coddy-glass-panel-backdrop);
+  box-shadow: 0 3px 10px color-mix(in srgb, #000 20%, transparent);
+}
+
+.swarm-layout-control {
+  top: 10px;
+  left: 10px;
+}
+
+.swarm-viewport-control {
+  top: 10px;
+  right: 10px;
+}
+
+.swarm-canvas-control {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text) 78%, var(--coddy-blend-base));
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.swarm-canvas-control:hover,
+.swarm-canvas-control:focus-visible,
+.swarm-canvas-control[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--coddy-blend-base));
+}
+
+.swarm-canvas-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 1199px) {
+  .swarm-canvas-control {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* The spine: a light upright with one tick per hop, so distance is counted
@@ -13157,40 +13494,12 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   font-style: italic;
 }
 
-/* Arrowheads. Each head is painted here rather than on the path referencing
-   it, because a marker resolves its paint inside defs and never inherits. */
-.swarm-head-route {
-  fill: var(--accent);
-  stroke: none;
-}
-
-.swarm-head-idle {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-down {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-dial {
-  fill: color-mix(in srgb, var(--text) 66%, var(--coddy-blend-base));
-  stroke: none;
-}
-
 /* A wire crossing a node must not swallow a click meant for the node. */
 .swarm-graph-edges {
   pointer-events: none;
 }
 
-/* The route a request would take: solid, heavier, filled head. */
+/* The route a request would take: solid and heavier. */
 .swarm-edge {
   fill: none;
   stroke: var(--accent);
@@ -13206,8 +13515,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-dasharray: 1.5 5;
 }
 
-/* A way round a ring the relay would not take: drawn, but lighter, dashed and
-   ended with an open chevron instead of a filled head. */
+/* A way round a ring the relay would not take: drawn, but lighter and
+   dashed. */
 .swarm-edge.is-alternate {
   stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
   stroke-width: 1.6;
@@ -13542,9 +13851,13 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-width: 2;
 }
 
-.swarm-node.is-current .swarm-node-meta {
-  fill: var(--accent);
-  font-weight: 600;
+/* Every relay a live route crosses remains visible as the route's structure.
+   The root still has its filled accent tile, and the current relay keeps the
+   stronger current-node ring above this quieter transit outline. */
+.swarm-node-relay.is-route-relay:not(.is-current) .swarm-node-ring {
+  opacity: 0.78;
+  stroke-width: 2.5;
+  stroke-dasharray: none;
 }
 
 /* Off the traced path: still readable, no longer competing with it. */
@@ -13565,6 +13878,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   padding: 0 2px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px 18px;
 }
 
@@ -13584,7 +13898,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .swarm-node-ring {
+  .swarm-node-ring,
+  .swarm-graph-camera,
+  .swarm-canvas-control {
     transition: none;
   }
 
@@ -13608,21 +13924,74 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   }
 }
 
-/* The search is the only control left under the map, so it stands on its own
-   rather than inside a row of them. */
+/* The search sits with the header like the documentation reader's own: a
+   field with a "/" hint, and the results hang over the map rather than push
+   it down. */
+.swarm-search-box {
+  grid-area: search;
+  position: relative;
+}
+
 .swarm-search {
   width: 100%;
+  box-sizing: border-box;
   background: var(--coddy-surface-field);
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: 10px;
   color: var(--text);
-  padding: 8px 12px;
+  padding: 8px 36px 8px 12px;
+  font: inherit;
   font-size: 14px;
 }
 
 .swarm-search:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.swarm-search-kbd {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  padding: 1px 5px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The results hang under the field, in the menus' glass, like the
+   documentation search draws them. */
+.swarm-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--text) 5%, transparent),
+      color-mix(in srgb, var(--text) 5%, transparent)
+    ),
+    var(--bg);
+  box-shadow: var(--coddy-glass-panel-shadow);
+  scrollbar-width: thin;
+  z-index: 2;
 }
 
 .swarm-warnings {
@@ -13655,6 +14024,23 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.swarm-result-group {
+  padding: 4px 12px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+}
+
+.swarm-result-here {
+  color: var(--accent);
+}
+
+.swarm-result-offline {
+  color: color-mix(in srgb, var(--text) 45%, var(--coddy-blend-base));
 }
 
 .swarm-result-hit {
@@ -13732,7 +14118,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
 @media (max-width: 700px) {
   .swarm-view {
-    padding: 14px 12px 24px;
+    --swarm-inline: 12px;
   }
 }
 
@@ -14127,7 +14513,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   cursor: pointer;
   background: transparent;
   color: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  border: 1px dashed color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  border: 1px dashed
+    color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
   transition:
     color 140ms ease,
     border-color 140ms ease;
@@ -14243,7 +14630,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for focus rings inside the scroller. */
     padding: 3px;
     margin: -3px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14283,7 +14674,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for the 3px glow of the plan / ask / bypass chips and focus rings. */
     padding: 4px;
     margin: -4px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14338,6 +14733,18 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   .mcp-list-item-text {
     flex-basis: calc(100% - var(--mcp-row-inset));
   }
+
+  /* Settings maps (the default headers): a name and a value side by side left
+     the name 82px at 390px, User-Agent cut to "User-Ag". The value goes under
+     the name, the trash stays beside the pair, and the pairs stand further
+     apart than the two fields of one pair. */
+  .settings-map-entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-map {
+    gap: 16px;
+  }
 }
 
 /* iOS Safari zooms the page into any text field under 16px on focus and
@@ -14350,7 +14757,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     font-size: 16px;
   }
 
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="color"]
+    ):not([type="file"]),
   select,
   textarea:not(#composer) {
     font-size: max(16px, 1em);

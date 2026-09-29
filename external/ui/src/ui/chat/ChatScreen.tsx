@@ -1,4 +1,5 @@
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import { HeroFooter } from "./HeroFooter";
 import {
   useCallback,
   useEffect,
@@ -753,21 +754,7 @@ export function ChatScreen(props: {
               />
             )}
           </div>
-          <div className="hero-footer">
-            <a
-              href="https://github.com/coddy-project/coddy-agent"
-              target="_blank"
-              rel="noopener"
-            >
-              GitHub
-            </a>
-            <span className="hero-footer-sep" aria-hidden>
-              |
-            </span>
-            <a href="/docs/" target="_blank" rel="noopener">
-              API docs
-            </a>
-          </div>
+          <HeroFooter />
         </div>
       ) : (
         <div

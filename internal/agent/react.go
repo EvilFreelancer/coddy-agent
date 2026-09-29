@@ -118,6 +118,9 @@ type Agent struct {
 	// currentToolCallID is the tool call being executed, so a spawn can link
 	// its task to the transcript row.
 	currentToolCallID string
+	// callImages are the pictures the running tool call handed the model
+	// (Env.AttachImage, tool_images.go); they ride on that call's result.
+	callImages []llm.ImagePart
 
 	// hooks is the operator hook runner of the current turn, built on first
 	// use from the definition files (hooks.go). hookStopReason carries a
@@ -334,7 +337,6 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 		CWD:              a.state.GetCWD(),
 		PermissionMode:   effectivePermMode(a.state, a.cfg),
 		CommandAllowlist: a.cfg.Tools.CommandAllowlist,
-		HTTPAllowlist:    a.cfg.Tools.HTTPRequest.Allowlist,
 		SessionID:        a.state.GetID(),
 		SessionDir:       sd,
 		ArchiveActiveMarkdown: func() error {
@@ -373,7 +375,10 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 		BackgroundEnabled: a.cfg.Tools.Background.ResolvedEnabled(),
 		WebSearch:         webSearchSettings(a.cfg),
 		PreviewServer:     previewServerSettings(a.cfg),
+		AttachImage:       a.attachToolImage,
+		ImageRefusal:      a.toolImageRefusal,
 	}
+	httpRequestEnv(toolEnv, a.cfg)
 	// The model's own model switch; a subagent runs on what its parent chose.
 	if a.subagent == nil && a.settings() != nil {
 		toolEnv.SwitchModel = a.switchModel
@@ -483,6 +488,33 @@ func (a *Agent) noteStopReason(stop string, err error, maxTurns int) {
 // failing provider lane may cost before the turn ends with the provider's
 // error: the breaker opens after this many (issue #246).
 const maxProviderRecoveries = 2
+
+// maxUnattendedProviderRecoveries is the same bound for a run nobody reads
+// while it works: a subagent a parent delegated to, a scheduled job. After two
+// failed calls a person reading an interactive turn decides what to do next;
+// a child has nobody to type "continue", and when its turn ends the task
+// fails with the work it did so far (issue #389). So it waits out a longer
+// outage: with the default agent.llm_retry_base_ms the pauses run 5 s, 20 s,
+// 80 s, then 2 min twice, about six minutes in all. The run's hard timeout
+// still cuts a pause short, and each recovery takes one of its turns.
+const maxUnattendedProviderRecoveries = 5
+
+// providerRecoveryBudget is how many consecutive failed calls of its provider
+// this turn rides out. The memory child keeps the interactive budget: its
+// report only matters to the user turn that is waiting for it.
+func (a *Agent) providerRecoveryBudget() int {
+	if a.subagent != nil && a.subagent.Kind == "" {
+		return maxUnattendedProviderRecoveries
+	}
+	return maxProviderRecoveries
+}
+
+// providerRecoveryObserver is a sender that shows, as it happens, that the
+// turn lost its provider and runs the step again after a pause: a child's
+// task log says the run is reconnecting instead of going quiet for minutes.
+type providerRecoveryObserver interface {
+	ProviderRecovery(err error, delay time.Duration, attempt, budget int)
+}
 
 // providerRecoveryNudge asks the model to finish an answer a provider failure
 // cut off. It is added to the LLM-facing messages only, after the partial
@@ -889,7 +921,7 @@ func (a *Agent) runReActLoop(
 		// the transcript, and later appends stay intact. The rules a tool call
 		// brought in are joined to its result only here, so an evicted result
 		// keeps them and every request replays them byte for byte.
-		sendMessages := withTurnContext(withToolRules(a.prunedForLLM(messages)), turnCtx)
+		sendMessages := withTurnContext(withToolImages(withToolRules(a.prunedForLLM(messages)), a.modelReadsImages(), a.loadToolImage), turnCtx)
 		// The call's own clock: when it went out, when the first chunk came
 		// back and how many followed. It names the silence in the errors
 		// below and is the debug-level account of every call.
@@ -1088,24 +1120,30 @@ func (a *Agent) runReActLoop(
 				continue
 			}
 			// A failure of the provider's lane - a 5xx the resilient wrapper
-			// could not ride out, a stream cut or gone silent, text already
-			// shown or not - does not end the turn (issue #246). A limit
-			// (429) is left to the wrapper and the opt-in limit wait. The
-			// text the user watched stream in is kept, and after a pause the
-			// step runs again, asked to go on from where the answer broke off.
-			// Twice in a row at most; llm_retry_max: 0 turns it off.
-			if providerRecoveries < maxProviderRecoveries && a.cfg.Agent.EffectiveLLMRetryMax() > 0 &&
+			// could not ride out, a stream cut or gone silent, a connection
+			// the remote host closed, text already shown or not - does not
+			// end the turn (issues #246, #389). A limit (429) is left to the
+			// wrapper and the opt-in limit wait. The text the user watched
+			// stream in is kept, and after a pause the step runs again, asked
+			// to go on from where the answer broke off. Twice in a row at
+			// most in an interactive turn, longer in a run nobody reads
+			// (providerRecoveryBudget); llm_retry_max: 0 turns it off.
+			recoveryBudget := a.providerRecoveryBudget()
+			if providerRecoveries < recoveryBudget && a.cfg.Agent.EffectiveLLMRetryMax() > 0 &&
 				ctx.Err() == nil && !a.state.IsUserCancelledTurn() && turn+1 < maxTurns &&
 				llm.IsTransientProviderError(streamErr) {
 				providerRecoveries++
 				kept := a.keepInterruptedAnswer(transport.model, answerBuf.String(), reasoningBuf.String(), reasonClockStart, reasonClockEnd)
 				delay := providerRecoveryDelay(a.cfg.Agent.LLMRetryBaseMS, providerRecoveries, streamErr)
 				a.log.Warn("provider failed mid-turn; running the step again after a pause",
-					"error", streamErr, "delay", delay, "recovery", providerRecoveries, "kept_partial_answer", kept)
+					"error", streamErr, "delay", delay, "recovery", providerRecoveries, "budget", recoveryBudget, "kept_partial_answer", kept)
 				if st := sessionStatePtr(a.state); st != nil {
 					st.AppendUILogNotice(session.CountUserTurns(a.state.GetMessages()), fmt.Sprintf(
 						"The provider failed mid-turn (%v). The turn went on after a %s pause (recovery %d of %d).",
-						streamErr, humanDuration(delay), providerRecoveries, maxProviderRecoveries))
+						streamErr, humanDuration(delay), providerRecoveries, recoveryBudget))
+				}
+				if obs, ok := a.server.(providerRecoveryObserver); ok {
+					obs.ProviderRecovery(streamErr, delay, providerRecoveries, recoveryBudget)
 				}
 				timer := time.NewTimer(delay)
 				select {
@@ -1395,7 +1433,7 @@ func (a *Agent) runReActLoop(
 			// AGENTS.md it would otherwise bring back.
 			callRules := a.toolCallRules(mode, tc, toolEnv.CWD)
 			result, execErr := a.executeToolCall(ctx, tc, toolEnv, mode, a.state.GetID(), false)
-			toolResultMsg := toolResultMessage(tc, result, execErr, callRules)
+			toolResultMsg := a.callResultMessage(tc, result, execErr, callRules)
 
 			messages = append(messages, toolResultMsg)
 			a.state.AddMessage(toolResultMsg)
@@ -1426,7 +1464,7 @@ func (a *Agent) runReActLoop(
 			toolDefs = a.currentToolDefinitions(mode)
 			toolEnv.PermissionMode = effectivePermMode(a.state, a.cfg)
 			toolEnv.CommandAllowlist = append([]string(nil), a.cfg.Tools.CommandAllowlist...)
-			toolEnv.HTTPAllowlist = append([]string(nil), a.cfg.Tools.HTTPRequest.Allowlist...)
+			httpRequestEnv(toolEnv, a.cfg)
 			toolEnv.SSHConnectTimeout = a.cfg.Tools.SSHConnectTimeout
 			toolEnv.OutputLineLimits = a.cfg.Tools.OutputLimits.AsMap()
 			toolEnv.Background = a.backgroundPool(sd)
@@ -1603,6 +1641,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 	env.PermissionMode = effectivePermMode(a.state, a.cfg)
 	env.ToolCallID = strings.TrimSpace(tc.ID)
 	a.currentToolCallID = env.ToolCallID
+	a.callImages = nil
 	defer func() {
 		env.ToolCallID = ""
 		a.currentToolCallID = ""
@@ -1776,7 +1815,7 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 		if tc.Name == toolweb.ToolHTTPRequest {
 			// Raw arguments would bury the address and the files in JSON;
 			// the prompt shows the request as it would go out.
-			promptBody = permission.HTTPRequestPromptBody(tc.InputJSON, env.CWD)
+			promptBody = permission.HTTPRequestPromptBody(env, tc.InputJSON)
 		}
 		if tc.Name == "config_commit" {
 			// The commit call itself carries no arguments, so the dialog must
@@ -1946,6 +1985,13 @@ func (a *Agent) finishToolCall(sessionDir, sessionID string, tc llm.ToolCall, re
 			previewMeta["coddy"] = coddyMeta
 		}
 		coddyMeta["todoPlan"] = todoPlanSnapshot
+	}
+	if status == "completed" && execErr == nil {
+		// The pictures the call showed the model (read on an image file), for
+		// the surfaces that preview them: the web UI on the call's row, a
+		// Telegram chat as photos. After a reload they come from the result
+		// message itself, which keeps them.
+		previewMeta = session.ToolImagesMeta(previewMeta, toolImagesForSurfaces(sessionID, a.callImages))
 	}
 
 	_ = a.server.SendSessionUpdate(sessionID, acp.ToolCallStatusUpdate{
@@ -2133,7 +2179,7 @@ func (a *Agent) applySkillSettings(ctx context.Context, name string, sk *skills.
 	if ap == nil {
 		return
 	}
-	ch := session.SettingsChange{Source: "skill:" + name}
+	ch := session.SettingsChange{Source: session.SettingsSourceSkill + name}
 	if m := sk.Model; m != "" && a.state.TurnSetting(session.SettingModel) == "" {
 		ch.Model = &m
 	}
@@ -2264,7 +2310,7 @@ func (a *Agent) switchModel(ctx context.Context, req tooling.ModelSwitch) (strin
 	if ap == nil {
 		return "", fmt.Errorf("switch_model is not available in this session")
 	}
-	ch := session.SettingsChange{Source: "model"}
+	ch := session.SettingsChange{Source: session.SettingsSourceModel}
 	if req.Model != "" {
 		ch.Model = &req.Model
 	}

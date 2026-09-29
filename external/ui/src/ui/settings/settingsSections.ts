@@ -48,6 +48,7 @@ const SECTION_LABEL_KEYS = {
   scheduler: "settings.section.scheduler.label",
   logger: "settings.section.logger.label",
   gateways: "settings.section.gateways.label",
+  swarm: "settings.section.swarm.label",
 } as const;
 
 /**
@@ -74,7 +75,18 @@ const SECTION_DESC_KEYS = {
   scheduler: "settings.section.scheduler.desc",
   logger: "settings.section.logger.desc",
   gateways: "settings.section.gateways.desc",
+  swarm: "settings.section.swarm.desc",
 } as const;
+
+/**
+ * The tab label of a known section id, before any schema has been read: what
+ * the drawer can name while the tab the address asks for is still loading.
+ * Null for an id the dictionary does not know (a key a newer server added).
+ */
+export function knownSectionLabel(id: string): string | null {
+  const key = lookupSectionKey(SECTION_LABEL_KEYS, id);
+  return key ? translate(key) : null;
+}
 
 /** A section id the schema produced may be one the maps above do not know. */
 function lookupSectionKey(
@@ -111,6 +123,13 @@ export const ARRAY_LABEL_FIELDS: Record<string, string> = {
  */
 export function deriveSettingsSections(
   schema: JsonSchema | null | undefined,
+  opts: {
+    /**
+     * The page is on a swarm relay. A relay has no sessions, so the Sessions
+     * tab is left out even before (or without) a schema that says so.
+     */
+    relay?: boolean;
+  } = {},
 ): SectionDescriptor[] {
   const labelFor = (id: string, sub?: JsonSchema) => {
     const key = lookupSectionKey(SECTION_LABEL_KEYS, id);
@@ -136,8 +155,12 @@ export function deriveSettingsSections(
     schemaKey: SESSIONS_CONFIG_KEY,
   };
 
+  // A relay's form (config.RelayUISchemaMap) says it is one; the stored
+  // sessions the Sessions tab manages exist only on an agent.
+  const relay = opts.relay === true || schema?.["x-coddy-relay"] === true;
+  const head = relay ? [appearance] : [appearance, sessionsManager];
   if (!schema || schema.type !== "object" || !schema.properties) {
-    return [appearance, sessionsManager];
+    return head;
   }
 
   const props = schema.properties;
@@ -241,5 +264,5 @@ export function deriveSettingsSections(
   if (system) {
     out.push(system);
   }
-  return [appearance, sessionsManager, ...out];
+  return [...head, ...out];
 }

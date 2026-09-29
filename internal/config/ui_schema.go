@@ -229,7 +229,7 @@ func UISchemaMap() map[string]interface{} {
 		"max_context_tokens": intProp("Context window (tokens)",
 			"The model's context window: what the composer context ring and automatic compaction measure against. 0 reads it from the provider's model listing when it reports one, else 128000."),
 		"multimodal": boolProp("Multimodal",
-			"When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model."),
+			"When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model, and read shows it the picture in a PNG, JPEG, GIF or WebP file."),
 		"reasoning_levels": map[string]interface{}{
 			"type":        "array",
 			"title":       "Reasoning levels",
@@ -490,7 +490,7 @@ func UISchemaMap() map[string]interface{} {
 					[]string{"engines", "engine_timeout_seconds", "total_timeout_seconds", "max_concurrent_engines", "snippet_chars", "cache_ttl_seconds", "searxng_url", "brave_api_key"},
 					nil),
 				"http_request": objectSchema("HTTP requests",
-					"Policy of the http_request tool, the agent's curl. Under ask and accept_edits a request asks unless its destination is allowed here or was approved in the session; bypass never asks.",
+					"Policy of the http_request tool, the agent's curl: where it goes without asking and the headers every request sends. Under ask and accept_edits a request asks unless its destination is allowed here or was approved in the session; bypass never asks.",
 					map[string]interface{}{
 						"allowlist": map[string]interface{}{
 							"type":        "array",
@@ -498,8 +498,14 @@ func UISchemaMap() map[string]interface{} {
 							"description": "Destinations reached without asking: a host (api.github.com), *.example.com, an origin (http://localhost:8080) or an address prefix (https://api.example.com/v1/); \"*\" allows all. Covers uploads and an unchecked certificate; a proxy needs its own entry, and a saved response follows the write policy.",
 							"items":       map[string]interface{}{"type": "string"},
 						},
+						"default_headers": map[string]interface{}{
+							"type":                 "object",
+							"title":                "Default headers",
+							"description":          "Headers every request sends unless the call names them itself, such as a browser User-Agent for a site that turns tools away. A call's own headers win, and an empty value leaves a header out. They go to every destination, so keep credentials out unless that is the intent; Host, Content-Type, Content-Length, Transfer-Encoding, the hop-by-hop headers and Proxy-Authorization are refused, and webfetch and the model providers never send these.",
+							"additionalProperties": map[string]interface{}{"type": "string"},
+						},
 					},
-					[]string{"allowlist"},
+					[]string{"allowlist", "default_headers"},
 					nil),
 			},
 			[]string{"permission_mode", "command_allowlist", "output_limits", "background", "preview_server", "websearch", "http_request"},
@@ -604,7 +610,7 @@ func UISchemaMap() map[string]interface{} {
 				"dir":                         strProp("Memory root", "Filesystem root for memory markdown; empty uses ${CODDY_HOME}/memory."),
 				"wait_seconds":                intProp("Wait for the report (seconds)", "How long a turn waits for the memory subagent's report before its first model call; 0 never waits (default 20)."),
 				"timeout_seconds":             intProp("Run timeout (seconds)", "Hard limit of one memory run, capped by tools.background.max_timeout_seconds (default 300)."),
-				"keep_runs":                   intProp("Runs kept per session", "Finished memory runs kept in the Tasks drawer per session, task record and child transcript alike; 0 keeps all (default 20)."),
+				"keep_runs":                   intProp("Runs kept per session", "Finished memory runs kept in the Tasks panel per session, task record and child transcript alike; 0 keeps all (default 20)."),
 				"recall_max_turns":            intProp("Recall max turns", "Bounds the memory subagent's rounds together with persist_max_turns; the cap is the larger of the two."),
 				"persist_max_turns":           intProp("Persist max turns", "Bounds the memory subagent's rounds together with recall_max_turns; the cap is the larger of the two."),
 				"copilot_max_tokens":          intProp("Max tokens per call", "Completion token cap for the memory model's calls."),
@@ -786,8 +792,10 @@ func toIfaceOrder(keys []string) []interface{} {
 //
 //	httpserver - the surface the UI itself is served from; editing it there
 //	             would let the page cut its own connection.
-//	mcp        - edited in the MCP servers tab (POST /coddy/mcp/project-trust),
-//	             next to the servers the policy governs.
+//	mcp        - project_trust is edited in the MCP servers tab (POST
+//	             /coddy/mcp/project-trust), next to the servers the policy
+//	             governs; idle_timeout_seconds is set in the file and survives
+//	             every save of this form.
 //	swarm      - a relay's own deployment: bind address, credentials for a whole
 //	             fleet, and the parents this process joins. It is set in the file
 //	             or on the command line, not from a page one of its nodes serves.
@@ -795,12 +803,15 @@ func toIfaceOrder(keys []string) []interface{} {
 //	             edits the user-global file, where it rarely needs touching.
 //	ui         - toggles the SPA the page is served from; like httpserver, the
 //	             page cannot switch itself off.
+//	revision   - not a setting: it names the configuration a GET document was
+//	             read from (ConfigJSON.Revision) and travels back with the PUT.
 var uiHiddenConfigKeys = map[string]struct{}{
 	"httpserver": {},
 	"mcp":        {},
 	"swarm":      {},
 	"rules":      {},
 	"ui":         {},
+	"revision":   {},
 }
 
 // UISchemaCoversConfigJSONFields checks that UI schema properties match ConfigJSON

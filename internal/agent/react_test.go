@@ -695,7 +695,7 @@ func TestComputeContextBreakdownSubtractsParts(t *testing.T) {
 	skillsText := strings.Repeat("s", 100)
 	toolsText := strings.Repeat("t", 80)
 	rules := strings.Repeat("r", 40)
-	b := computeContextBreakdown(full, skillsText, toolsText, rules, nil, nil)
+	b := computeContextBreakdown(full, skillsText, toolsText, rules, nil, false, nil)
 	if b.SystemPrompt <= 0 {
 		t.Fatalf("system tokens: %d", b.SystemPrompt)
 	}
@@ -1462,7 +1462,7 @@ func TestContextEstimateIncludesToolArgumentsCyrillicReasoningImagesAndSchemas(t
 	defs := []llm.ToolDefinition{{Name: "write_file", InputSchema: map[string]interface{}{
 		"properties": map[string]interface{}{"content": map[string]interface{}{"description": content}},
 	}}}
-	b := computeContextBreakdown("system", "", "", "", msgs, defs)
+	b := computeContextBreakdown("system", "", "", "", msgs, true, defs)
 	if b.Conversation < 2*session.EstimateContextTokens(content)+1024 {
 		t.Fatalf("conversation estimate misses the write or reasoning: %+v", b)
 	}

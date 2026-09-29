@@ -67,10 +67,12 @@ func (a *Agent) standingPrompt(rendersRules bool) (rulesMD, instructionsMD strin
 
 // computeContextBreakdown estimates category sizes for the context UI.
 // fullSystem is the rendered system message; tools/skills/rules are subtracted for SystemPrompt.
+// readsImages says whether the pictures of the messages go out with them.
 func computeContextBreakdown(
 	fullSystem string,
 	skillsMD, toolsMD, rulesMD string,
 	messages []llm.Message,
+	readsImages bool,
 	toolDefs []llm.ToolDefinition,
 ) *session.ContextBreakdown {
 	toolsMDTok := session.EstimateContextTokens(toolsMD)
@@ -91,7 +93,7 @@ func computeContextBreakdown(
 			toolsTok += session.EstimateContextTokens(string(encoded))
 		}
 	}
-	convTok := estimateConversationTokens(messages)
+	convTok := conversationTokens(messages, readsImages)
 	fullTok := session.EstimateContextTokens(fullSystem)
 	sysTok := fullTok - toolsMDTok - rulesTok - skillsTok
 	if sysTok < 0 {
@@ -128,20 +130,6 @@ func conversationText(msgs []llm.Message) string {
 		b.WriteString("\n\n")
 	}
 	return b.String()
-}
-
-func estimateConversationTokens(msgs []llm.Message) int {
-	total := session.EstimateContextTokens(conversationText(msgs))
-	for _, m := range msgs {
-		total += session.EstimateContextTokens(m.Reasoning)
-		for _, call := range m.ToolCalls {
-			total += session.EstimateContextTokens(call.Name) + session.EstimateContextTokens(call.InputJSON)
-		}
-		// A provider receives image pixels rather than the base64 URI. Budget a
-		// conservative fixed amount per image without counting encoded bytes.
-		total += len(m.ImageParts) * 1024
-	}
-	return total
 }
 
 // FilterSkillsForContext wraps skills filter (unchanged semantics for skills only).

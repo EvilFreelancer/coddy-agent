@@ -87,7 +87,9 @@ func mcpFingerprint(srv config.MCPServerConfig) string {
 // probeMCPServer returns the cached tool list for srv, probing on fingerprint
 // change or when refresh is forced. The probe runs through the trust gate, so
 // listing servers never starts a project command the operator has not
-// approved.
+// approved, and through the session manager's server pool, so a server the
+// process runs already answers from its connection instead of being started a
+// second time.
 func (s *Server) probeMCPServer(ctx context.Context, gate *mcp.TrustGate, srv mcp.ManagedServer, refresh bool) ([]mcp.ToolInfo, string) {
 	fp := mcpFingerprint(srv.Config)
 	s.mcpProbeMu.Lock()
@@ -102,7 +104,13 @@ func (s *Server) probeMCPServer(ctx context.Context, gate *mcp.TrustGate, srv mc
 
 	probeCtx, cancel := context.WithTimeout(ctx, mcpProbeTimeout)
 	defer cancel()
-	tools, err := gate.Probe(probeCtx, srv, s.defaultCWD, s.log)
+	var tools []mcp.ToolInfo
+	var err error
+	if s.mgr != nil {
+		tools, err = s.mgr.ProbeMCPServer(probeCtx, srv, s.defaultCWD)
+	} else {
+		tools, err = gate.Probe(probeCtx, srv, s.defaultCWD, s.log)
+	}
 	entry = mcpProbeEntry{fingerprint: fp, tools: tools}
 	if err != nil {
 		entry.err = err.Error()
