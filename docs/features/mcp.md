@@ -175,6 +175,21 @@ Cursor-style JSON editor for mcp.json entries with a scope picker (global writes
 into their defining file; project switches persist in the operator's home.
 `config.yaml` entries are toggle-only here and edited in Settings.
 
+If loading or refreshing the list fails, Settings shows the error and leaves any
+previously loaded servers visible. Refresh remains available for another attempt.
+A failed switch, trust decision, deletion or save reports the error and releases
+its control so the operator can retry without reopening Settings. Overlapping
+loads are applied in order: a slower in-flight request never overwrites or
+reports over the rows a newer one already brought.
+
+![A failed MCP list load with a retryable refresh button](../assets/mcp/mcp-load-error-dark-1280.png)
+
+*A malformed list response now ends loading and shows the reason.*
+
+![A failed MCP switch with its control available again](../assets/mcp/mcp-mutation-error-dark-1280.png)
+
+*A rejected change leaves the server switch available for another attempt.*
+
 Type `/mcp` in the web composer to open this Settings section; words after the
 command are ignored, as in the console. In the console, `/mcp` opens a list of
 global and project servers with connection status and tool counts, and `off`
