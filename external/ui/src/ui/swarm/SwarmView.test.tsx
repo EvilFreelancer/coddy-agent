@@ -425,6 +425,64 @@ describe("SwarmView", () => {
     expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
   });
 
+  it("defers pointer capture until the press becomes a drag", async () => {
+    // Capturing the pointer on pointerdown retargets the click to the
+    // viewport in real browsers, so the node under it never enters. Capture
+    // may only begin once the press has crossed the drag slop.
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    const capture = vi.fn();
+    Object.defineProperty(viewport, "setPointerCapture", {
+      configurable: true,
+      value: capture,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 103,
+      clientY: 100,
+    });
+    expect(capture).not.toHaveBeenCalled();
+
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 110,
+      clientY: 100,
+    });
+    expect(capture).toHaveBeenCalledWith(1);
+  });
+
+  it("captures both pointers when a pinch begins", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    const capture = vi.fn();
+    Object.defineProperty(viewport, "setPointerCapture", {
+      configurable: true,
+      value: capture,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(capture).not.toHaveBeenCalled();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+    expect(capture).toHaveBeenCalledWith(1);
+    expect(capture).toHaveBeenCalledWith(2);
+  });
+
   it("drops the camera transition throughout a pinch gesture", async () => {
     render(<SwarmView />);
     await drawn();

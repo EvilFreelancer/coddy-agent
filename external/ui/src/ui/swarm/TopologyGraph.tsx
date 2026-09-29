@@ -440,7 +440,7 @@ export function TopologyGraph(props: {
             pressed={graph}
             onClick={() => props.onLayoutModeChange("graph")}
           >
-            <GraphIcon />
+            <StarIcon />
           </CanvasButton>
         </div>
         <div
@@ -512,14 +512,15 @@ function TreeIcon() {
   );
 }
 
-function GraphIcon() {
+function StarIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M8 3v3.5M8 6.5 4 11.5M8 6.5l4 5M4 11.5h8" />
-      <circle cx="8" cy="3" r="1.4" />
-      <circle cx="8" cy="6.5" r="1.4" />
-      <circle cx="4" cy="12.5" r="1.4" />
-      <circle cx="12" cy="12.5" r="1.4" />
+      <path d="M8 8 3 3M8 8h5M8 8l-4 5M8 8l2-5" />
+      <circle cx="8" cy="8" r="1.5" />
+      <circle cx="3" cy="3" r="1.2" />
+      <circle cx="13" cy="8" r="1.2" />
+      <circle cx="4" cy="13" r="1.2" />
+      <circle cx="10" cy="3" r="1.2" />
     </svg>
   );
 }

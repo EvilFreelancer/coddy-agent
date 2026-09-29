@@ -4,6 +4,7 @@ import {
   nodeHalfHeight,
   nodeHalfWidth,
   type LayoutOptions,
+  type PlacedEdge,
   type PlacedNode,
   type TopologyLayout,
 } from "./layout";
@@ -28,14 +29,20 @@ const LEVEL = 170;
    edges and repulsion win locally, so the pull shapes the flow without
    flattening it onto horizontal lines. */
 const DEPTH_SPRING = 0.02;
-/* Spread of the seeded x around the root axis, per level of depth. */
-const SEED_SPREAD = 240;
-const SEED_SPREAD_PER_DEPTH = 140;
+/* Nominal horizontal step between the post-order slots of the route tree.
+   Each subtree gets a contiguous band of slots, so siblings keep a stable
+   left-to-right order and route wires do not cross. */
+const X_SPACING = 220;
+/* How strongly a node drifts towards its subtree's band. A touch firmer than
+   the depth spring because a swapped sibling order is a crossing wire. */
+const X_SPRING = 0.03;
 
 type Body = {
   node: PlacedNode;
   halfWidth: number;
   halfHeight: number;
+  /** The subtree band this node orders itself into, left to right. */
+  targetX: number;
   /** The level this node's depth tends towards, deterministic jitter aside. */
   targetY: number;
   pinned: boolean;
@@ -44,6 +51,55 @@ type Body = {
   fx: number;
   fy: number;
 };
+
+/**
+ * A post-order walk over the route tree assigns every leaf a slot and every
+ * parent the middle of its children's slots, so each subtree owns a
+ * contiguous horizontal band: two wires that share no endpoint keep their
+ * order and do not cross. Nodes the route tree never reaches (offline or
+ * otherwise stranded) take trailing slots in UUID order, so the result does
+ * not depend on input order.
+ */
+function routeSlots(
+  edges: PlacedEdge[],
+  nodes: PlacedNode[],
+  rootUUID: string,
+): Map<string, number> {
+  const children = new Map<string, PlacedNode[]>();
+  for (const edge of edges) {
+    if (edge.alternate || edge.from.uuid === edge.to.uuid) continue;
+    const list = children.get(edge.from.uuid);
+    if (list) list.push(edge.to);
+    else children.set(edge.from.uuid, [edge.to]);
+  }
+  for (const list of children.values()) {
+    list.sort((a, b) => compare(a.name, b.name) || compare(a.uuid, b.uuid));
+  }
+  const slot = new Map<string, number>();
+  let next = 0;
+  const visit = (uuid: string): void => {
+    if (slot.has(uuid)) return; // already placed, or a cycle being walked
+    slot.set(uuid, -1);
+    const kids = (children.get(uuid) ?? []).filter(
+      (kid) => !slot.has(kid.uuid),
+    );
+    for (const kid of kids) visit(kid.uuid);
+    slot.set(
+      uuid,
+      kids.length === 0
+        ? next++
+        : (slot.get(kids[0]!.uuid)! + slot.get(kids[kids.length - 1]!.uuid)!) /
+            2,
+    );
+  };
+  visit(rootUUID);
+  for (const node of nodes) {
+    if (!slot.has(node.uuid) || slot.get(node.uuid) === -1) {
+      slot.set(node.uuid, next++);
+    }
+  }
+  return slot;
+}
 
 /**
  * A rooted graph layout, without timers or random state. Route depth only
@@ -60,9 +116,18 @@ export function layoutTopologyGraph(
 ): TopologyLayout {
   const tree = layoutTopology(topology, opts);
   const rootUUID = opts.client ? CLIENT_UUID : topology.root.uuid;
+  const slots = routeSlots(tree.edges, tree.nodes, rootUUID);
+  const rootSlot = slots.get(rootUUID) ?? 0;
   const bodies = tree.nodes
     .sort((a, b) => compare(a.uuid, b.uuid))
-    .map((node) => seed(node, rootUUID, opts.client ? 1 : 0));
+    .map((node) =>
+      seed(
+        node,
+        rootUUID,
+        opts.client ? 1 : 0,
+        ((slots.get(node.uuid) ?? rootSlot) - rootSlot) * X_SPACING,
+      ),
+    );
   const byUUID = new Map(bodies.map((body) => [body.node.uuid, body]));
   // layoutTopology always includes the topology root (and client when given).
   const root = byUUID.get(rootUUID)!;
@@ -74,11 +139,10 @@ export function layoutTopologyGraph(
 
   for (let step = 0; step < ITERATIONS; step += 1) {
     for (const body of bodies) {
-      // A weak pull towards the root's axis, and a softer one towards the
-      // level of this node's route depth. The depth spring shapes a downward
-      // flow; it never pins nodes to rows, so same-depth siblings keep the
-      // spacing repulsion gives them.
-      body.fx = -body.node.x * 0.002;
+      // A pull towards the band this node's subtree owns keeps the sibling
+      // order stable so route wires do not cross; the depth spring shapes a
+      // downward flow without pinning nodes to rows.
+      body.fx = (body.targetX - body.node.x) * X_SPRING;
       body.fy = (body.targetY - body.node.y) * DEPTH_SPRING;
     }
     eachPair(bodies, repel);
@@ -127,24 +191,30 @@ export function layoutTopologyGraph(
   };
 }
 
-function seed(node: PlacedNode, rootUUID: string, lift: number): Body {
+function seed(
+  node: PlacedNode,
+  rootUUID: string,
+  lift: number,
+  targetX: number,
+): Body {
   const pinned = node.uuid === rootUUID;
   const hash = hashUUID(node.uuid);
   const depth = Math.max(0, node.depth + lift);
   // Deterministic per-UUID jitter, so the placement cannot depend on input
-  // order and two siblings at one depth never start on the same level.
-  const spread =
-    (hash / 0x100000000 - 0.5) * (SEED_SPREAD + depth * SEED_SPREAD_PER_DEPTH);
+  // order and two siblings at one depth never start on the same level. The
+  // small x jitter only breaks ties between neighbours sharing a slot.
+  const jitterX = ((hash >> 16) & 15) - 8;
   const jitter = ((hash >> 8) & 63) - 32;
   const targetY = depth * LEVEL + jitter;
   return {
     node: {
       ...node,
-      x: pinned ? 0 : spread,
+      x: pinned ? 0 : targetX + jitterX,
       y: pinned ? 0 : targetY,
     },
     halfWidth: nodeHalfWidth(node),
     halfHeight: nodeHalfHeight(node),
+    targetX,
     targetY,
     pinned,
     vx: 0,

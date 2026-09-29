@@ -223,16 +223,32 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     };
   };
 
+  // Capturing a pointer retargets its click to the viewport, so the node
+  // underneath would never see it. Capture is deferred until the press has
+  // become a drag or a pinch: before that the gesture can only end as a click.
+  const capturePointer = (
+    element: HTMLDivElement,
+    pointerId: number,
+  ): void => {
+    try {
+      element.setPointerCapture(pointerId);
+    } catch {
+      // A browser can end a pointer before capture reaches it.
+    }
+  };
+
+  const captureAll = (element: HTMLDivElement): void => {
+    for (const pointerId of pointersRef.current.keys()) {
+      capturePointer(element, pointerId);
+    }
+  };
+
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     const point = pointFor(event);
     pointersRef.current.set(event.pointerId, point);
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // A browser can end a pointer before capture reaches it.
-    }
     if (pointersRef.current.size >= 2) {
+      captureAll(event.currentTarget);
       startPinch();
       event.preventDefault();
       return;
@@ -270,6 +286,9 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     const movedX = point.x - pan.start.x;
     const movedY = point.y - pan.start.y;
     if (Math.hypot(movedX, movedY) >= DRAG_SLOP_PX) {
+      // The press just became a drag: from here the pointer may leave the
+      // viewport and the click is already suppressed, so capture it.
+      capturePointer(event.currentTarget, event.pointerId);
       consumedGestureClickRef.current = true;
       setIsPanning(true);
       event.preventDefault();
@@ -281,7 +300,9 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
   const onPointerEnd = (event: PointerEvent<HTMLDivElement>) => {
     pointersRef.current.delete(event.pointerId);
     try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
     } catch {
       // Capture can be released alongside the pointer itself.
     }

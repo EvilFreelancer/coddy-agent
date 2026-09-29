@@ -62,6 +62,60 @@ function fan(count: number): SwarmTopology {
   };
 }
 
+/** A two-branch relay tree whose wires tangle when subtrees interleave. */
+function treeTopology(): SwarmTopology {
+  const branches: [string, string[]][] = [
+    ["ra", ["a1", "a2"]],
+    ["rb", ["b1", "b2"]],
+  ];
+  const nodes: SwarmTopology["nodes"] = [];
+  const edges: SwarmTopology["edges"] = [];
+  const routes: SwarmTopology["routes"] = {};
+  for (const [relay, kids] of branches) {
+    nodes.push({ uuid: relay, name: relay, kind: "relay", online: true });
+    edges.push({ from_uuid: "root", to_uuid: relay, name: relay });
+    routes[relay] = { path: [relay] };
+    for (const kid of kids) {
+      nodes.push({ uuid: kid, name: kid, kind: "agent", online: true });
+      edges.push({ from_uuid: relay, to_uuid: kid, name: kid });
+      routes[kid] = { path: [relay, kid] };
+    }
+  }
+  return { ...empty, nodes, edges, routes };
+}
+
+type Point = { x: number; y: number };
+
+function segmentsCross(a1: Point, a2: Point, b1: Point, b2: Point): boolean {
+  const side = (p: Point, q: Point, r: Point) =>
+    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const d1 = side(b1, b2, a1);
+  const d2 = side(b1, b2, a2);
+  const d3 = side(a1, a2, b1);
+  const d4 = side(a1, a2, b2);
+  return (
+    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  );
+}
+
+/** Strict crossings between route wires that share no endpoint. */
+function countRouteCrossings(layout: TopologyLayout): number {
+  const wires = layout.edges.filter((e) => !e.alternate);
+  let count = 0;
+  for (let i = 0; i < wires.length; i++) {
+    for (let j = i + 1; j < wires.length; j++) {
+      const a = wires[i]!;
+      const b = wires[j]!;
+      const shared = [a.from.uuid, a.to.uuid].some(
+        (id) => id === b.from.uuid || id === b.to.uuid,
+      );
+      if (!shared && segmentsCross(a.from, a.to, b.from, b.to)) count += 1;
+    }
+  }
+  return count;
+}
+
 function expectValid(layout: TopologyLayout, rootUUID: string): void {
   expect(Number.isFinite(layout.width)).toBe(true);
   expect(Number.isFinite(layout.height)).toBe(true);
@@ -204,6 +258,67 @@ describe("layoutTopologyGraph", () => {
       topology.nodes[0]!.name,
     );
     expectValid(layout, CLIENT_UUID);
+  });
+
+  it("keeps sibling subtrees apart so route edges do not cross", () => {
+    // Two branches ordered left-to-right: every descendant of the left branch
+    // must stay left of every descendant of the right one, or the route wires
+    // would cross.
+    const topology: SwarmTopology = {
+      ...empty,
+      nodes: [
+        { uuid: "east", name: "east", kind: "relay", online: true },
+        { uuid: "west", name: "west", kind: "relay", online: true },
+        { uuid: "east-a", name: "east-a", kind: "agent", online: true },
+        { uuid: "east-b", name: "east-b", kind: "agent", online: true },
+        { uuid: "west-a", name: "west-a", kind: "agent", online: true },
+        { uuid: "west-b", name: "west-b", kind: "agent", online: true },
+      ],
+      edges: [
+        { from_uuid: "root", to_uuid: "east", name: "east" },
+        { from_uuid: "root", to_uuid: "west", name: "west" },
+        { from_uuid: "east", to_uuid: "east-a", name: "east-a" },
+        { from_uuid: "east", to_uuid: "east-b", name: "east-b" },
+        { from_uuid: "west", to_uuid: "west-a", name: "west-a" },
+        { from_uuid: "west", to_uuid: "west-b", name: "west-b" },
+      ],
+      routes: {
+        east: { path: ["east"] },
+        west: { path: ["west"] },
+        "east-a": { path: ["east", "east-a"] },
+        "east-b": { path: ["east", "east-b"] },
+        "west-a": { path: ["west", "west-a"] },
+        "west-b": { path: ["west", "west-b"] },
+      },
+    };
+    const layout = layoutTopologyGraph(topology);
+    const x = (uuid: string) =>
+      layout.nodes.find((n) => n.uuid === uuid)!.x;
+
+    const eastX = x("east");
+    const westX = x("west");
+    expect(eastX).not.toBeCloseTo(westX, 1);
+    const [leftBranch, rightBranch] =
+      eastX < westX ? ["east", "west"] : ["west", "east"];
+    const leftX = [x(`${leftBranch}-a`), x(`${leftBranch}-b`)];
+    const rightX = [x(`${rightBranch}-a`), x(`${rightBranch}-b`)];
+    for (const lx of [x(leftBranch), ...leftX]) {
+      for (const rx of [x(rightBranch), ...rightX]) {
+        expect(lx, `${leftBranch} subtree must stay left of ${rightBranch}`).toBeLessThan(rx);
+      }
+    }
+  });
+
+  it("draws a branching tree without crossing route wires", () => {
+    // Strictly crossed segments between edges that share no endpoint read as
+    // a tangle no matter how smooth the curves are. The sibling ordering must
+    // keep the non-alternate wires apart.
+    expect(countRouteCrossings(layoutTopologyGraph(treeTopology()))).toBe(0);
+    expect(
+      countRouteCrossings(
+        layoutTopologyGraph(treeTopology(), { client: { name: "me" } }),
+      ),
+    ).toBe(0);
   });
 
   it("retains the tree filtering of dangling and self edges", () => {
