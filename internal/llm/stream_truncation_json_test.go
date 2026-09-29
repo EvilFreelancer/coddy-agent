@@ -90,6 +90,22 @@ func TestStreamDecodeTruncation(t *testing.T) {
 			}
 		}
 	}
+	// The SDK streams spell an in-band error event "received error while
+	// streaming: <payload>" with no decoder error in the chain at all: the
+	// payload that ends inside its JSON is a cut, the complete one is not,
+	// and the spelling is found inside a wrapped message.
+	if trunc := streamDecodeTruncation(errors.New(`received error while streaming: {"code":502,"message":"oops`), false, 0); trunc == nil {
+		t.Error("an in-band error event cut inside its payload: want a truncation")
+	}
+	if trunc := streamDecodeTruncation(fmt.Errorf("codex stream: %w", errors.New(`received error while streaming: {"code":502`)), false, 0); trunc == nil {
+		t.Error("the SDK spelling inside a wrapped message: want a truncation")
+	}
+	if trunc := streamDecodeTruncation(errors.New(`received error while streaming: {"code":502,"message":"oops"}`), false, 0); trunc != nil {
+		t.Error("a complete in-band error event is not a truncation")
+	}
+	if trunc := streamDecodeTruncation(errors.New(`received error while streaming: overloaded`), false, 0); trunc != nil {
+		t.Error("an in-band error spelled in plain text is not a truncation")
+	}
 	// Whitespace inside a token of a complete event: the diagnostic alone
 	// cannot tell it from a cut, the position can.
 	for name, in := range map[string]string{
@@ -186,6 +202,14 @@ func TestCodexStreamCutInsideJSONEvent(t *testing.T) {
 			text(w, "Hello")
 			sseRaw(w, "response.output_text.delta", `{"type":"response.output_text.delta",,}`)
 		}}, wantErr: true, wantRequests: 1, wantMsg: "invalid character ','"},
+		// The SDK answers an event with a top-level "error" member without
+		// decoding the frame ("received error while streaming: <payload>"): a
+		// payload that ends inside its JSON is still a cut (issue #384).
+		{name: "cut inside an in-band error event", scripts: []script{func(w io.Writer) {
+			text(w, "Hello")
+			sseRaw(w, "error", `{"error":{"code":502,"message":"oops`)
+		}}, wantErr: true, wantTruncated: true, wantRequests: 1, wantResp: true, wantContent: "Hello",
+			wantMsg: "received error while streaming:"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -340,6 +364,14 @@ func TestOpenAIStreamFrameCutOrMalformed(t *testing.T) {
 			wantMsg: "openai stream: undecodable SSE frame: <html><title>502 Bad Gateway</title></html>"},
 		{name: "transport phrase inside a frame", body: oaiHel + oaiNeedle, wantTextChunks: 1,
 			wantMsg: "undecodable SSE frame: garbage unexpected EOF here"},
+		// gjson reports a complete "error" member even when the frame was cut
+		// after it: only a payload that decodes whole is a real in-band error,
+		// otherwise the frame's own classification applies (issue #384).
+		{name: "cut inside an in-band error object", body: oaiHel + "data: {\"error\":{\"code\":502,\"message\":\"oops",
+			wantTruncated: true, wantResp: true, wantContent: "Hel", wantTextChunks: 1,
+			wantMsg: `incomplete JSON (undecodable SSE frame: {"error":{"code":502,"message":"oops)`},
+		{name: "cut after an in-band error object", body: oaiHel + "data: {\"error\":{\"code\":502,\"message\":\"oops\"},\"choices\":[",
+			wantTruncated: true, wantResp: true, wantContent: "Hel", wantTextChunks: 1},
 		// The decoder's diagnostic reads like a cut inside a string literal,
 		// but the error is not at the end of the frame: malformed, final.
 		{name: "JSON string split across two data lines", body: oaiHel + oaiSplit, wantTextChunks: 1,
@@ -444,6 +476,29 @@ func TestAnthropicStreamCutInsideJSONKeepsPartial(t *testing.T) {
 	}
 	if resp == nil || resp.Content != "Paris" || len(resp.ToolCalls) != 0 || resp.StopReason != "" {
 		t.Fatalf("resp = %+v, want partial content %q preserved with no tool call and no stop reason", resp, "Paris")
+	}
+}
+
+// TestAnthropicStreamErrorEventCutInsideJSON: the anthropic SDK answers an
+// event typed "error" with "received error while streaming: <data>" without
+// decoding it, so a data line that ends inside its JSON carries no decoder
+// error at all. The cut contract still applies: the delivered text is kept,
+// the error names the truncation.
+func TestAnthropicStreamErrorEventCutInsideJSON(t *testing.T) {
+	p, done := anthropicStreamStub(t, anthropicStreamPrefix+
+		"event: error\n"+
+		"data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Over\n\n")
+	defer done()
+
+	resp, err := p.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, func(StreamChunk) {})
+	if !IsStreamTruncated(err) || !IsTransientProviderError(err) {
+		t.Fatalf("err = %v, want a stream truncation the loop recovers from", err)
+	}
+	if isRetryableLLMError(err) {
+		t.Error("a cut after emitted deltas must not be retried")
+	}
+	if resp == nil || resp.Content != "Paris" || len(resp.ToolCalls) != 0 || resp.StopReason != "" {
+		t.Fatalf("resp = %+v, want partial content %q kept with no tool call and no stop reason", resp, "Paris")
 	}
 }
 

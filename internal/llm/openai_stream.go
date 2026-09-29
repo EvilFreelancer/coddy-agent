@@ -206,19 +206,46 @@ func (e *streamTruncatedError) Unwrap() error { return e.cause }
 // a number or an SSE data string.
 func streamDecodeTruncation(err error, emitted bool, payloadLen int) *streamTruncatedError {
 	var syn *json.SyntaxError
-	if !errors.As(err, &syn) {
+	if err == nil {
 		return nil
 	}
-	msg := syn.Error()
-	if msg != "unexpected end of JSON input" &&
-		!strings.HasPrefix(msg, "invalid character ' '") &&
-		!strings.HasPrefix(msg, `invalid character '\n'`) {
+	if !errors.As(err, &syn) {
+		// The SDK decoders answer an event carrying an "error" member without
+		// decoding the rest of the frame - openai-go extracts the member with
+		// gjson, anthropic's reports an event typed "error" - and both spell
+		// the result "received error while streaming: <payload>". When that
+		// payload itself ends inside its JSON the event was cut like any
+		// other (issue #384); a payload that decodes whole is a real in-band
+		// error and keeps the transport contract it had.
+		const sdkErrPrefix = "received error while streaming: "
+		if i := strings.LastIndex(err.Error(), sdkErrPrefix); i >= 0 {
+			var v any
+			if syn, ok := json.Unmarshal([]byte(err.Error()[i+len(sdkErrPrefix):]), &v).(*json.SyntaxError); ok && isEndOfInputDiagnostic(syn) {
+				// The decoder error is derived here, so keep both the SDK's
+				// error and it reachable for logs.
+				return &streamTruncatedError{emitted: emitted, cause: errors.Join(err, syn)}
+			}
+		}
+		return nil
+	}
+	if !isEndOfInputDiagnostic(syn) {
 		return nil
 	}
 	if payloadLen > 0 && syn.Offset != int64(payloadLen) {
 		return nil
 	}
 	return &streamTruncatedError{emitted: emitted, cause: err}
+}
+
+// isEndOfInputDiagnostic reports whether the decoder's syntax error is its
+// end-of-input one: "unexpected end of JSON input" between tokens, "invalid
+// character ' '" or "'\n'" when the end-of-input probe lands inside an
+// unfinished literal, number or string.
+func isEndOfInputDiagnostic(syn *json.SyntaxError) bool {
+	msg := syn.Error()
+	return msg == "unexpected end of JSON input" ||
+		strings.HasPrefix(msg, "invalid character ' '") ||
+		strings.HasPrefix(msg, `invalid character '\n'`)
 }
 
 // streamUndecodableError is a non-empty data frame of the OpenAI-compatible
@@ -349,7 +376,22 @@ func (p *openAIProvider) Stream(ctx context.Context, messages []Message, tools [
 		}
 		if e := gjson.GetBytes(payload, "error"); e.Exists() && e.Type != gjson.Null {
 			// Standard-shaped in-band error object (llama.cpp b9038+, gateways).
-			streamErr = newStreamServerError([]byte(e.Raw), emitted)
+			// gjson is lenient: it reports the member even when the frame was
+			// cut after it. Only a payload that decodes whole is a real error
+			// event; a cut or malformed one goes through the frame's own
+			// classification so the delivered text and the truncation contract
+			// apply to it (issue #384).
+			var whole any
+			if uerr := json.Unmarshal(payload, &whole); uerr == nil {
+				streamErr = newStreamServerError([]byte(e.Raw), emitted)
+			} else {
+				und := &streamUndecodableError{snippet: streamErrorSnippet(payload), cause: uerr}
+				if trunc := streamDecodeTruncation(und, emitted, len(payload)); trunc != nil {
+					streamErr = trunc
+				} else {
+					streamErr = und
+				}
+			}
 			break
 		}
 
