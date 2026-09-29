@@ -427,13 +427,24 @@ func compactHTTPConversationText(msgs []llm.Message) string {
 
 // reloadSessionFromDisk restores the session the way a server does for a
 // freshly loaded page in a new process: a new manager reads the bundle from
-// disk, so the indicator is verified against what was persisted, not against
-// the state the turn left in memory.
+// disk, and the check runs on the restored breakdown, not on the live state
+// the turn left in memory - the stats endpoint prefers that live value.
 func (s *compactHTTPFeatureState) reloadSessionFromDisk() error {
 	store := &session.FileStore{Root: filepath.Join(s.root, "sessions")}
 	mgr := session.NewManager(s.cfg, noopSender{}, s.runner, slog.Default(), s.root, store)
 	if _, err := mgr.HandleSessionLoad(context.Background(), acp.SessionLoadParams{SessionID: s.sessionID, CWD: s.root}); err != nil {
 		return fmt.Errorf("session reload from disk: %w", err)
+	}
+	st := mgr.SessionByID(s.sessionID)
+	if st == nil {
+		return fmt.Errorf("session %q not restored", s.sessionID)
+	}
+	b := st.GetLastContextBreakdown()
+	if b == nil {
+		return fmt.Errorf("restored session has no context breakdown")
+	}
+	if b.EstimatedTotal >= s.beforeUsed {
+		return fmt.Errorf("restored usage = %d, want less than %d", b.EstimatedTotal, s.beforeUsed)
 	}
 	s.mgr = mgr
 	return nil

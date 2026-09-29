@@ -41,14 +41,17 @@ test("context action shows the threshold, posts compaction and holds progress", 
   fireEvent.click(action);
   expect(action).toBeDisabled();
   expect(action).toHaveTextContent("Compacting");
-  expect(fetchMock).toHaveBeenCalledWith("/coddy/sessions/sess_123/compact", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Coddy-Session-ID": "sess_123",
-    },
-    body: "{}",
-  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/coddy/sessions/sess_123/compact",
+    expect.objectContaining({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Coddy-Session-ID": "sess_123",
+      },
+      body: "{}",
+    }),
+  );
   finish!(new Response("{}", { status: 200 }));
   await waitFor(() => expect(onCompacted).toHaveBeenCalledOnce());
   expect(action).not.toBeDisabled();

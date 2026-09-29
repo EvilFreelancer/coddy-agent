@@ -124,6 +124,10 @@ export function ContextBreakdownPopover(props: {
             "X-Coddy-Session-ID": sid,
           },
           body: "{}",
+          // A summarization round can legitimately take a while; the bound
+          // only keeps a dead request from pinning the button in
+          // "Compacting…" forever.
+          signal: AbortSignal.timeout(180_000),
         },
       );
       if (!res.ok) throw new Error(`compact: ${res.status}`);
