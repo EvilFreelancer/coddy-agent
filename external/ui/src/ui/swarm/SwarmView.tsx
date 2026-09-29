@@ -394,6 +394,9 @@ export function SwarmView(props: {
           layoutMode={layoutMode}
           onLayoutModeChange={setLayout}
           resetKey={graphResetKey}
+          // One camera per map and layout: relayBase is the outermost relay
+          // the map is drawn by, or this origin when the map is its own.
+          cameraKey={`${relayBase || window.location.origin}:${layoutMode}`}
           {...(props.onOpenNode || props.onOpenRelay
             ? { onEnterNode: (n) => enterNode(n.path, n.kind, n.name) }
             : {})}

@@ -235,6 +235,7 @@ async function drawn(): Promise<void> {
 beforeEach(() => {
   calls = [];
   localStorage.clear();
+  sessionStorage.clear();
   vi.stubGlobal("fetch", stubFetch());
 });
 
@@ -872,8 +873,9 @@ describe("SwarmView", () => {
     const client = document.querySelector(".swarm-node-client");
     expect(drawnWords(client)).toBe("laptop");
     expect(client?.querySelector("title")?.textContent).toContain("Local");
-    // The card's shape says it is a relay; its line says how much it carries.
-    expect(meta(mapNode("outer"))).toBe("3 links");
+    // The disc's shape says it is a relay; a healthy one carries no meta
+    // line - only trouble (no route, offline) gets one.
+    expect(meta(mapNode("outer"))).toBe("");
     expect(mapNode("outer").querySelector("title")?.textContent).toContain(
       "relay",
     );

@@ -165,7 +165,7 @@ function peer(name: string, x: number, kind: "relay" | "agent"): PlacedNode {
 }
 
 describe("connectorFor, peer links", () => {
-  const relayHalf = NODE_METRICS.relayWidth / 2;
+  const relayHalf = NODE_METRICS.relayRadius;
 
   // The span every earlier draft broke on: adjacent cards, a hand's width of
   // clear space, and a bow that has to read as a sag rather than as a V.
@@ -424,7 +424,7 @@ describe("a ring's back edge", () => {
 
     // Every point of the wire is clear of the card it would otherwise cross.
     const xs = points(c.d).map((p) => p.x);
-    const clearOf = Math.abs(r2!.x) + NODE_METRICS.relayWidth / 2;
+    const clearOf = Math.abs(r2!.x) + NODE_METRICS.relayRadius;
     expect(Math.max(...xs)).toBeGreaterThan(clearOf);
     // And the canvas grew to hold the lane rather than clipping it.
     expect(layout.width).toBeGreaterThan(Math.max(...xs));
@@ -603,7 +603,7 @@ describe("graphConnectorFor", () => {
     return out;
   }
 
-  it("draws a downward edge as a cubic leaving the source's bottom and arriving at the target's top", () => {
+  it("draws a downward edge as a cubic leaving the source's rim toward the child", () => {
     const from = relay("parent", 400, 120);
     const to = relay("child", 520, 380);
     const conn = graphConnectorFor(edge(from, to));
@@ -611,14 +611,27 @@ describe("graphConnectorFor", () => {
     const points = pathPoints(conn.d);
     const start = points[0]!;
     const end = points[points.length - 1]!;
-    // The exit rides the bottom edge toward the child: off-centre towards it,
-    // clamped inside the shape's lower half.
-    expect(start.x).toBe(
-      from.x + Math.min(to.x - from.x, nodeHalfWidth(from) * 0.8),
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dist = Math.hypot(dx, dy);
+    // The exit sits on the source's rim in the direction of the child and the
+    // entry on the target's rim facing back - whatever the direction is.
+    expect(start.x).toBeCloseTo(
+      from.x + (dx / dist) * (nodeHalfWidth(from) + 10),
+      0,
     );
-    expect(start.y).toBe(from.y + nodeHalfHeight(from) + 10);
-    expect(end.x).toBe(to.x);
-    expect(end.y).toBe(to.y - nodeHalfHeight(to) - 10);
+    expect(start.y).toBeCloseTo(
+      from.y + (dy / dist) * (nodeHalfHeight(from) + 10),
+      0,
+    );
+    expect(end.x).toBeCloseTo(
+      to.x - (dx / dist) * (nodeHalfWidth(to) + 10),
+      0,
+    );
+    expect(end.y).toBeCloseTo(
+      to.y - (dy / dist) * (nodeHalfHeight(to) + 10),
+      0,
+    );
     // The label sits at the cubic's midpoint, between the two endpoints.
     expect(conn.labelY).toBeGreaterThan(start.y);
     expect(conn.labelY).toBeLessThan(end.y);
@@ -627,17 +640,25 @@ describe("graphConnectorFor", () => {
     expect(conn.peer).toBe(false);
   });
 
-  it("fans a parent's wires out of several exit points instead of one", () => {
+  it("fans a parent's wires out of the rim point facing each child", () => {
     const from = relay("parent", 400, 120);
-    const left = graphConnectorFor(edge(from, relay("left", 120, 380)));
-    const mid = graphConnectorFor(edge(from, relay("mid", 400, 380)));
-    const right = graphConnectorFor(edge(from, relay("right", 760, 380)));
-    const exitX = (d: string) => pathPoints(d)[0]!.x;
-    // The exit follows the child's direction along the bottom edge, clamped
-    // inside the lower half; a child straight under keeps the centre.
-    expect(exitX(left.d)).toBe(from.x - nodeHalfWidth(from) * 0.8);
-    expect(exitX(mid.d)).toBe(from.x);
-    expect(exitX(right.d)).toBe(from.x + nodeHalfWidth(from) * 0.8);
+    const leftTo = relay("left", 120, 380);
+    const midTo = relay("mid", 400, 380);
+    const rightTo = relay("right", 760, 380);
+    const left = graphConnectorFor(edge(from, leftTo));
+    const mid = graphConnectorFor(edge(from, midTo));
+    const right = graphConnectorFor(edge(from, rightTo));
+    const exitX = (d: string, to: PlacedNode) => {
+      const dist = Math.hypot(to.x - from.x, to.y - from.y);
+      return from.x + ((to.x - from.x) / dist) * (nodeHalfWidth(from) + 10);
+    };
+    // Each wire leaves at the rim point looking at its child: left, centre,
+    // and right read as a fan, not one shared stub.
+    expect(pathPoints(left.d)[0]!.x).toBeCloseTo(exitX(left.d, leftTo), 1);
+    expect(pathPoints(mid.d)[0]!.x).toBeCloseTo(from.x, 1);
+    expect(pathPoints(right.d)[0]!.x).toBeCloseTo(exitX(right.d, rightTo), 1);
+    expect(pathPoints(left.d)[0]!.x).toBeLessThan(from.x);
+    expect(pathPoints(right.d)[0]!.x).toBeGreaterThan(from.x);
   });
 
   it("keeps an alternate edge a distinct cubic over the same endpoints", () => {
@@ -656,7 +677,7 @@ describe("graphConnectorFor", () => {
     expect(Number.isFinite(alternate.labelY)).toBe(true);
   });
 
-  it("loops a backward edge around the side, finite and clear of both shapes", () => {
+  it("loops a backward edge rim-to-rim, finite and clear of both shapes", () => {
     const from = relay("low", 400, 380);
     const to = relay("high", 520, 120);
     const conn = graphConnectorFor(edge(from, to));
@@ -668,12 +689,14 @@ describe("graphConnectorFor", () => {
     }
     const start = points[0]!;
     const end = points[points.length - 1]!;
-    // The wire starts and ends outside the node bounds, on the side lane.
-    expect(Math.abs(start.x - from.x)).toBeGreaterThanOrEqual(
-      nodeHalfWidth(from) + 10,
-    );
-    expect(Math.abs(end.x - to.x)).toBeGreaterThanOrEqual(
+    // The wire leaves the source's rim toward the target and reaches the
+    // target's rim facing back, outside both shapes.
+    expect(
+      Math.hypot(start.x - from.x, start.y - from.y),
+    ).toBeCloseTo(nodeHalfWidth(from) + 10, 0);
+    expect(Math.hypot(end.x - to.x, end.y - to.y)).toBeCloseTo(
       nodeHalfWidth(to) + 10,
+      0,
     );
     expect(Number.isFinite(conn.labelX)).toBe(true);
     expect(Number.isFinite(conn.labelY)).toBe(true);

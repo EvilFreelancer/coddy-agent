@@ -21,15 +21,6 @@ import type { NodeActivity } from "./routes";
 import type { SwarmTopology } from "./types";
 import { useT } from "../i18n/I18nProvider";
 
-const RELAY_HALF_W = M.relayWidth / 2;
-const RELAY_HALF_H = M.relayHeight / 2;
-/** Left edge of the accent tile, and everything the relay card hangs off it. */
-const TILE_X = -RELAY_HALF_W + M.tileInset;
-const TILE_CX = TILE_X + M.tile / 2;
-const TEXT_X = TILE_X + M.tile + M.textGap;
-/** Room the name has before it would run under the status dot. */
-const RELAY_TEXT_W = RELAY_HALF_W - M.statusInset - 4 - TEXT_X;
-
 /** Shared empties, so a graph without work does not rebuild its memos. */
 const NO_ACTIVITY: Record<string, NodeActivity> = {};
 const NO_EDGES: ReadonlySet<string> = new Set<string>();
@@ -77,6 +68,12 @@ export function TopologyGraph(props: {
   layoutMode: SwarmLayoutMode;
   onLayoutModeChange: (mode: SwarmLayoutMode) => void;
   resetKey: string;
+  /**
+   * Storage key for the camera (zoom and pan) the operator framed this map
+   * with. Entering a node remounts the whole app, and the stored camera is
+   * what keeps the map from fitting all the way back out.
+   */
+  cameraKey?: string;
 }) {
   const { t, tp } = useT();
   // SwarmView re-polls every five seconds; without this every poll rebuilds the
@@ -106,23 +103,12 @@ export function TopologyGraph(props: {
   const viewport = useGraphViewport({
     bounds,
     resetKey: props.resetKey,
+    ...(props.cameraKey ? { persistKey: props.cameraKey } : {}),
   });
 
   // Previewing a route on hover needs no data, only which node the pointer is
   // over. Focus feeds the same state so the keyboard sees what the mouse does.
   const [preview, setPreview] = useState<string>("");
-
-  // Degree, not out-degree: "2 links" should count every wire the node carries.
-  // The wire from the machine the page runs on is how this page reaches the
-  // swarm, not a link of it, so it is left out.
-  const degrees = new Map<string, number>();
-  for (const e of layout.edges) {
-    if (e.from.uuid === CLIENT_UUID) {
-      continue;
-    }
-    degrees.set(e.from.uuid, (degrees.get(e.from.uuid) ?? 0) + 1);
-    degrees.set(e.to.uuid, (degrees.get(e.to.uuid) ?? 0) + 1);
-  }
 
   const liveEdges = useMemo(
     () =>
@@ -193,11 +179,7 @@ export function TopologyGraph(props: {
     if (!n.online) {
       return t("swarm.state.offline");
     }
-    if (n.kind !== "relay") {
-      return "";
-    }
-    const links = degrees.get(n.uuid) ?? 0;
-    return links > 0 ? tp("swarm.node.links", links) : "";
+    return "";
   };
 
   // What the drawing says, in words, for the tooltip a hover shows.
@@ -674,7 +656,7 @@ function Node(props: {
     >
       <title>{title}</title>
       {n.kind === "relay" ? (
-        <RelayCard node={n} meta={props.meta} state={props.state} />
+        <RelayDisc node={n} meta={props.meta} state={props.state} />
       ) : (
         <AgentDisc
           node={n}
@@ -700,91 +682,59 @@ function Node(props: {
   );
 }
 
-/** A relay routes: a soft card with the router mark on an accent tile. */
-function RelayCard(props: {
+/** A relay routes: a disc a touch bigger than an agent's, with the router
+ *  mark on an accent tile, its name on the chip below like every node. */
+function RelayDisc(props: {
   node: PlacedNode;
   meta: string;
   state: WorkState;
 }) {
   const n = props.node;
+  const r = M.relayRadius;
+  const label = clip(n.name, 18);
+  const chip = chipWidth(label, 11, 10);
   return (
     <>
-      <rect
-        className="swarm-node-hit"
-        x={-RELAY_HALF_W - 10}
-        y={-RELAY_HALF_H - 12}
-        width={M.relayWidth + 20}
-        height={M.relayHeight + 24}
-        rx={M.relayRadius + 8}
-      />
-      <rect
-        className={haloClass(props.state)}
-        x={-RELAY_HALF_W - 9}
-        y={-RELAY_HALF_H - 9}
-        width={M.relayWidth + 18}
-        height={M.relayHeight + 18}
-        rx={M.relayRadius + 9}
-      />
-      {/* Elevation without a filter: a darker plate peeking out below the card.
-          It costs one shape and reads as a shadow on light and dark alike. */}
-      <rect
-        className="swarm-node-shadow"
-        x={-RELAY_HALF_W + 5}
-        y={-RELAY_HALF_H + 4}
-        width={M.relayWidth - 10}
-        height={M.relayHeight}
-        rx={M.relayRadius}
-      />
-      <rect
-        className="swarm-node-ring"
-        x={-RELAY_HALF_W - 6}
-        y={-RELAY_HALF_H - 6}
-        width={M.relayWidth + 12}
-        height={M.relayHeight + 12}
-        rx={M.relayRadius + 6}
-      />
-      <rect
-        className="swarm-node-body"
-        x={-RELAY_HALF_W}
-        y={-RELAY_HALF_H}
-        width={M.relayWidth}
-        height={M.relayHeight}
-        rx={M.relayRadius}
-      />
+      <circle className="swarm-node-hit" r={r + 12} />
+      <circle className={haloClass(props.state)} r={r + 9} />
+      {/* Elevation without a filter: a darker plate peeking out below, which
+          reads as a shadow on light and dark alike. */}
+      <circle className="swarm-node-shadow" cy={3} r={r - 1} />
+      <circle className="swarm-node-ring" r={r + 6} />
+      <circle className="swarm-node-body" r={r} />
       <rect
         className="swarm-node-tile"
-        x={TILE_X}
+        x={-M.tile / 2}
         y={-M.tile / 2}
         width={M.tile}
         height={M.tile}
         rx={M.tileRadius}
       />
-      <RouterMark cx={TILE_CX} />
-      <text
-        className="swarm-node-label"
-        x={TEXT_X}
-        y={props.meta ? M.relayNameDrop : M.relayNameAloneDrop}
-        textAnchor="start"
-      >
-        {clipToWidth(n.name, RELAY_TEXT_W, 12.5)}
-      </text>
+      <RouterMark cx={0} />
+      <StatusDot x={r * 0.7} y={-r * 0.7} online={n.online} />
+      {n.transport === "tunnel" ? (
+        <DialBadge x={-r * 0.7} y={r * 0.7} />
+      ) : null}
+      <g className="swarm-node-chip" transform={`translate(0,${M.relayChipDrop})`}>
+        <rect
+          x={-chip / 2}
+          y={-M.chipHeight / 2}
+          width={chip}
+          height={M.chipHeight}
+          rx={M.chipHeight / 2}
+        />
+        <text y={4} textAnchor="middle">
+          {label}
+        </text>
+      </g>
       {props.meta ? (
         <text
           className="swarm-node-meta"
-          x={TEXT_X}
           y={M.relayMetaDrop}
-          textAnchor="start"
+          textAnchor="middle"
         >
-          {clipToWidth(props.meta, RELAY_TEXT_W, 10.5)}
+          {clip(props.meta, 22)}
         </text>
-      ) : null}
-      <StatusDot
-        x={RELAY_HALF_W - M.statusInset}
-        y={-RELAY_HALF_H + M.statusInset}
-        online={n.online}
-      />
-      {n.transport === "tunnel" ? (
-        <DialBadge x={-RELAY_HALF_W + M.badgeRadius + 4} y={RELAY_HALF_H} />
       ) : null}
     </>
   );

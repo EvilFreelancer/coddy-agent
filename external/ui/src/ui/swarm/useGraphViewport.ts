@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -31,6 +32,47 @@ const INITIAL_CAMERA: GraphCamera = {
   userAdjusted: false,
 };
 
+/**
+ * The camera survives the environment switch an enter on a node triggers -
+ * that switch remounts the whole app, and without a stored camera the map
+ * comes back fitted, zoomed all the way out of the spot the operator had it.
+ * Stored per map and layout, session-wide.
+ */
+const STORED_PREFIX = "coddy_swarm_cam_";
+
+export function storedCameraFor(persistKey: string): GraphCamera | null {
+  try {
+    const raw = sessionStorage.getItem(STORED_PREFIX + persistKey);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (
+      typeof p?.x !== "number" ||
+      typeof p?.y !== "number" ||
+      typeof p?.scale !== "number" ||
+      typeof p?.fitScale !== "number"
+    ) {
+      return null;
+    }
+    return {
+      x: p.x,
+      y: p.y,
+      scale: p.scale,
+      fitScale: p.fitScale,
+      userAdjusted: p.userAdjusted === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function storeCamera(persistKey: string, camera: GraphCamera): void {
+  try {
+    sessionStorage.setItem(STORED_PREFIX + persistKey, JSON.stringify(camera));
+  } catch {
+    // Private-mode storage quotas are none of the map's business.
+  }
+}
+
 type GesturePoint = Point & { clientX: number; clientY: number };
 
 type PanGesture = {
@@ -49,12 +91,32 @@ type PinchGesture = {
  * pure in graphViewport; this hook is the DOM boundary that supplies viewport
  * sizes and browser events.
  */
-export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
+export function useGraphViewport(props: {
+  bounds: Bounds;
+  resetKey: string;
+  persistKey?: string;
+}) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const boundsRef = useRef(props.bounds);
   boundsRef.current = props.bounds;
-  const cameraRef = useRef<GraphCamera>(INITIAL_CAMERA);
-  const [camera, setCamera] = useState<GraphCamera>(INITIAL_CAMERA);
+  // A camera the operator already framed this map with stands in for the fit
+  // a fresh mount would compute: entering a node remounts the whole app, and
+  // refitting would pull the map back out of the spot the operator had it.
+  const restored = useMemo(() => {
+    if (!props.persistKey) return null;
+    const stored = storedCameraFor(props.persistKey);
+    // Only a camera the operator actually framed is worth restoring: an
+    // untouched one is indistinguishable from the fit a fresh mount
+    // computes, and restoring it would pin the map against later bounds.
+    return stored?.userAdjusted ? stored : null;
+    // A mount reads the store once; persistKey itself never changes within it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const restoredRef = useRef<GraphCamera | null>(restored);
+  const [camera, setCamera] = useState<GraphCamera>(
+    restored ?? INITIAL_CAMERA,
+  );
+  const cameraRef = useRef<GraphCamera>(restored ?? INITIAL_CAMERA);
   const [isPanning, setIsPanning] = useState(false);
   const [wheelReady, setWheelReady] = useState(false);
   const pointersRef = useRef(new Map<number, GesturePoint>());
@@ -164,10 +226,25 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
   }, [geometry, refitCamera]);
 
   // A relay or layout mode is an explicit new picture, so it always fits.
+  // The one exception is a mount that already restored the camera the
+  // operator framed this map with: refitting it would pull the map back out
+  // of that spot.
   useLayoutEffect(() => {
     cancelGestures();
+    if (restoredRef.current) {
+      restoredRef.current = null;
+      return;
+    }
     refit();
   }, [cancelGestures, refit, props.resetKey]);
+
+  // Every camera lands in the store, so a remount after an environment
+  // switch - which reloads the page - finds the spot the operator left.
+  useEffect(() => {
+    if (props.persistKey) {
+      storeCamera(props.persistKey, camera);
+    }
+  }, [camera, props.persistKey]);
 
   // Polls can change the graph's extents. An untouched camera should fit the
   // fresh picture; a manual one keeps its scale and position where possible,
