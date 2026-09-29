@@ -598,9 +598,9 @@ test.each([
     }
 
     await waitFor(() =>
-      expect(
-        document.querySelector(".mcp-servers-box .settings-error")?.textContent,
-      ).toContain("Connection lost"),
+      expect(screen.getByTestId("mcp-request-error").textContent).toContain(
+        "Connection lost",
+      ),
     );
     expect((control as HTMLButtonElement | HTMLSelectElement).disabled).toBe(
       false,
@@ -611,25 +611,23 @@ test.each([
 test("a rejected trust request releases the approval control", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockImplementation((_url: string, init?: RequestInit) =>
-        init?.method === "POST"
-          ? Promise.reject(new TypeError("Connection lost"))
-          : Promise.resolve({
-              ok: true,
-              json: async () => pendingListResponse,
-            }),
-      ),
+    vi.fn().mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? Promise.reject(new TypeError("Connection lost"))
+        : Promise.resolve({
+            ok: true,
+            json: async () => pendingListResponse,
+          }),
+    ),
   );
   render(<MCPSection />);
   const control = await screen.findByTestId("mcp-trust-audit-marker");
   fireEvent.click(control);
 
   await waitFor(() =>
-    expect(
-      document.querySelector(".mcp-servers-box .settings-error")?.textContent,
-    ).toContain("Connection lost"),
+    expect(screen.getByTestId("mcp-request-error").textContent).toContain(
+      "Connection lost",
+    ),
   );
   expect((control as HTMLButtonElement).disabled).toBe(false);
 });
@@ -660,4 +658,45 @@ test("a rejected editor save reports the error and re-enables save", async () =>
     ).toContain("Connection lost"),
   );
   expect(save.disabled).toBe(false);
+});
+
+test("a slow failed refresh cannot overwrite a newer reload", async () => {
+  let toggled = false;
+  let rejectRefresh: (err: unknown) => void = () => {};
+  const refreshRequest = new Promise<never>((_, reject) => {
+    rejectRefresh = reject;
+  });
+  const reloaded = {
+    ...listResponse,
+    items: [{ ...listResponse.items[0]!, name: "files-reloaded" }],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url) === "/coddy/mcp?refresh=1") return refreshRequest;
+      if (init?.method === "POST") {
+        toggled = true;
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => (toggled ? reloaded : listResponse),
+      });
+    }),
+  );
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+
+  fireEvent.click(screen.getByTestId("mcp-refresh"));
+  fireEvent.click(screen.getByTestId("mcp-toggle-files"));
+  await screen.findByTestId("mcp-toggle-files-reloaded");
+
+  rejectRefresh(new TypeError("Connection lost"));
+  await waitFor(() =>
+    expect(
+      (screen.getByTestId("mcp-refresh") as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(screen.queryByTestId("mcp-load-error")).toBeNull();
+  expect(screen.getByTestId("mcp-toggle-files-reloaded")).toBeTruthy();
 });

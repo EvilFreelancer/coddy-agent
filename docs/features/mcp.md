@@ -178,7 +178,9 @@ into their defining file; project switches persist in the operator's home.
 If loading or refreshing the list fails, Settings shows the error and leaves any
 previously loaded servers visible. Refresh remains available for another attempt.
 A failed switch, trust decision, deletion or save reports the error and releases
-its control so the operator can retry without reopening Settings.
+its control so the operator can retry without reopening Settings. Overlapping
+loads are applied in order: a slower in-flight request never overwrites or
+reports over the rows a newer one already brought.
 
 ![A failed MCP list load with a retryable refresh button](../assets/mcp/mcp-load-error-dark-1280.png)
 
