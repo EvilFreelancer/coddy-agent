@@ -67,12 +67,14 @@ const topology = {
   root: { uuid: "root", name: "outer", kind: "relay", online: true },
   nodes: [
     { uuid: "u-mid", name: "middle", kind: "relay", online: true },
+    { uuid: "u-other", name: "other", kind: "relay", online: true },
     { uuid: "u-nas02", name: "nas02", kind: "agent", online: true },
     { uuid: "u-hidden", name: "hidden", kind: "agent", online: true },
   ],
   edges: [
     { from_uuid: "root", to_uuid: "u-nas02", name: "nas02" },
     { from_uuid: "root", to_uuid: "u-mid", name: "middle" },
+    { from_uuid: "root", to_uuid: "u-other", name: "other" },
     { from_uuid: "u-mid", to_uuid: "u-hidden", name: "hidden" },
   ],
   routes: {
@@ -83,10 +85,41 @@ const topology = {
   warnings: [],
 };
 
+function widerTopology(): typeof topology {
+  const additions = Array.from({ length: 12 }, (_, index) => ({
+    uuid: `u-wide-${index}`,
+    name: `wide-${index}`,
+    kind: "agent",
+    online: true,
+  }));
+  return {
+    ...topology,
+    nodes: [...topology.nodes, ...additions],
+    edges: [
+      ...topology.edges,
+      ...additions.map((node) => ({
+        from_uuid: "root",
+        to_uuid: node.uuid,
+        name: node.name,
+      })),
+    ],
+    routes: {
+      ...topology.routes,
+      ...Object.fromEntries(
+        additions.map((node) => [node.uuid, { path: [node.name] }]),
+      ),
+    },
+  };
+}
+
 let calls: string[] = [];
 
 function stubFetch(
-  overrides: { warnings?: string[]; sessions?: typeof sessions } = {},
+  overrides: {
+    warnings?: string[];
+    sessions?: typeof sessions;
+    topology?: () => typeof topology;
+  } = {},
 ) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -115,7 +148,7 @@ function stubFetch(
       });
     }
     if (url.startsWith("/swarm/topology")) {
-      return body(topology);
+      return body(overrides.topology?.() ?? topology);
     }
     return { ok: false, status: 404, json: async () => ({}) } as Response;
   });
@@ -143,16 +176,66 @@ function meta(node: Element): string {
   return (node.querySelector(".swarm-node-meta")?.textContent || "").trim();
 }
 
+function graphViewport(): HTMLElement {
+  return screen.getByTestId("swarm-graph-viewport");
+}
+
+function graphCamera(): SVGGElement {
+  const camera = document.querySelector(".swarm-graph-camera");
+  expect(camera, "no graph camera drawn").toBeTruthy();
+  return camera as SVGGElement;
+}
+
+function sizeGraphViewport(): void {
+  Object.defineProperty(graphViewport(), "getBoundingClientRect", {
+    configurable: true,
+    value: () => new DOMRect(0, 0, 640, 420),
+  });
+}
+
+async function wheelReady(): Promise<void> {
+  await waitFor(() => {
+    expect(graphViewport()).toHaveAttribute("data-wheel-ready", "true");
+  });
+}
+
+function cameraValues(): number[] {
+  const values = (graphCamera().getAttribute("transform") || "").match(
+    /-?(?:\d+\.?\d*|\.\d+)/g,
+  );
+  expect(values).not.toBeNull();
+  return values!.map(Number);
+}
+
+function firePointer(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup" | "pointercancel",
+  init: { pointerId: number; clientX: number; clientY: number },
+): void {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [name, value] of Object.entries({
+    ...init,
+    pointerType: "mouse",
+    button: 0,
+  })) {
+    Object.defineProperty(event, name, { value });
+  }
+  fireEvent(target, event);
+}
+
 async function drawn(): Promise<void> {
   await waitFor(() => {
-    expect(
-      screen.getByRole("img", { name: "Swarm topology" }),
-    ).toBeInTheDocument();
+    const graph =
+      screen.queryByRole("group", { name: "Swarm topology" }) ??
+      screen.queryByRole("img", { name: "Swarm topology" });
+    expect(graph).toBeInTheDocument();
   });
 }
 
 beforeEach(() => {
   calls = [];
+  localStorage.clear();
+  sessionStorage.clear();
   vi.stubGlobal("fetch", stubFetch());
 });
 
@@ -163,6 +246,484 @@ afterEach(() => {
 });
 
 describe("SwarmView", () => {
+  it("starts as a tree and remembers the graph layout in this browser", async () => {
+    const first = render(<SwarmView />);
+    await drawn();
+    const tree = screen.getByRole("button", { name: "Tree layout" });
+    const graph = screen.getByRole("button", { name: "Graph layout" });
+    expect(tree).toHaveAttribute("aria-pressed", "true");
+    expect(graph).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(graph);
+    expect(graph).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("coddy_swarm_layout")).toBe("graph");
+    first.unmount();
+
+    render(<SwarmView />);
+    await drawn();
+    expect(
+      screen.getByRole("button", { name: "Graph layout" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("reads a stored star preference as the graph layout", async () => {
+    localStorage.setItem("coddy_swarm_layout", "star");
+    render(<SwarmView />);
+    await drawn();
+    expect(
+      screen.getByRole("button", { name: "Graph layout" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws smooth cubic wires in the graph layout and orthogonal ones in the tree", async () => {
+    const first = render(<SwarmView />);
+    await drawn();
+    const treeEdges = [
+      ...document.querySelectorAll(".swarm-graph-edges .swarm-edge"),
+    ].map((e) => e.getAttribute("d"));
+    expect(treeEdges.length).toBeGreaterThan(0);
+    for (const d of treeEdges) {
+      expect(d, `tree wire ${d} should stay orthogonal`).not.toContain("C");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
+    const graphEdges = [
+      ...document.querySelectorAll(".swarm-graph-edges .swarm-edge"),
+    ].map((e) => e.getAttribute("d"));
+    expect(graphEdges.length).toBe(treeEdges.length);
+    for (const d of graphEdges) {
+      expect(d, `graph wire ${d} should be a cubic`).toContain("C");
+    }
+    first.unmount();
+  });
+
+  it("fits again when the layout mode changes", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    fireEvent.wheel(graphViewport(), {
+      deltaY: -240,
+      clientX: 320,
+      clientY: 210,
+    });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+  });
+
+  it("pans a fitted tree sideways and returns it centred with Fit", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    // The fit is applied on demand: press it once to land on the fitted frame.
+    fireEvent.click(screen.getByRole("button", { name: "Fit graph" }));
+    const fitted = graphCamera().getAttribute("transform");
+    expect(fitted).not.toBe("translate(0 0) scale(1)");
+    const fitValues = cameraValues();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 200,
+      clientY: 200,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 260,
+      clientY: 200,
+    });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+    // Panning moves the camera without zooming: the scale does not change.
+    const panned = cameraValues();
+    expect(graphCamera().getAttribute("transform")).not.toBe(fitted);
+    expect(panned.at(-1)).toBeCloseTo(fitValues.at(-1) ?? NaN);
+
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 260,
+      clientY: 200,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Fit graph" }));
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+    expect(graphCamera().getAttribute("transform")).toBe(fitted);
+  });
+
+  it("zooms around the pointer without scrolling the page", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -240,
+      clientX: 150,
+      clientY: 110,
+    });
+    graphViewport().dispatchEvent(event);
+
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("pans after four pixels without entering the node", async () => {
+    const onOpenNode = vi.fn();
+    render(<SwarmView onOpenNode={onOpenNode} />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 105,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 105,
+      clientY: 100,
+    });
+    fireEvent.click(mapNode("nas02"));
+
+    expect(onOpenNode).not.toHaveBeenCalled();
+  });
+
+  it("keeps a click on a node when the pointer did not become a drag", async () => {
+    const onOpenNode = vi.fn();
+    render(<SwarmView onOpenNode={onOpenNode} />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 103,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 103,
+      clientY: 100,
+    });
+    fireEvent.click(mapNode("nas02"));
+
+    expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
+  });
+
+  it("defers pointer capture until the press becomes a drag", async () => {
+    // Capturing the pointer on pointerdown retargets the click to the
+    // viewport in real browsers, so the node under it never enters. Capture
+    // may only begin once the press has crossed the drag slop.
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    const capture = vi.fn();
+    Object.defineProperty(viewport, "setPointerCapture", {
+      configurable: true,
+      value: capture,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 103,
+      clientY: 100,
+    });
+    expect(capture).not.toHaveBeenCalled();
+
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 110,
+      clientY: 100,
+    });
+    expect(capture).toHaveBeenCalledWith(1);
+  });
+
+  it("captures both pointers when a pinch begins", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    const capture = vi.fn();
+    Object.defineProperty(viewport, "setPointerCapture", {
+      configurable: true,
+      value: capture,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(capture).not.toHaveBeenCalled();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+    expect(capture).toHaveBeenCalledWith(1);
+    expect(capture).toHaveBeenCalledWith(2);
+  });
+
+  it("drops the camera transition throughout a pinch gesture", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+
+    expect(viewport).toHaveClass("is-panning");
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      ".swarm-graph-viewport.is-panning .swarm-graph-camera",
+    );
+
+    firePointer(viewport, "pointerup", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(viewport).toHaveClass("is-panning");
+    firePointer(viewport, "pointercancel", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+    expect(viewport).not.toHaveClass("is-panning");
+  });
+
+  it("keeps the manual camera across an unchanged topology poll", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    fireEvent.wheel(graphViewport(), {
+      deltaY: -240,
+      clientX: 320,
+      clientY: 210,
+    });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+    const before = graphCamera().getAttribute("transform");
+
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "parser" },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("swarm-results")).toBeInTheDocument();
+    });
+    expect(graphCamera().getAttribute("transform")).toBe(before);
+  });
+
+  it("reconciles changed bounds without refitting a manual camera", async () => {
+    let activeTopology = topology;
+    vi.stubGlobal("fetch", stubFetch({ topology: () => activeTopology }));
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    await wheelReady();
+    fireEvent.wheel(graphViewport(), {
+      deltaY: -500,
+      clientX: 320,
+      clientY: 210,
+    });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+
+    activeTopology = widerTopology();
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "parser" },
+    });
+    await waitFor(() => expect(mapNode("wide-11")).toBeInTheDocument());
+
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    expect(cameraValues().every(Number.isFinite)).toBe(true);
+  });
+
+  it("fits again when changed bounds meet an untouched camera", async () => {
+    let activeTopology = topology;
+    vi.stubGlobal("fetch", stubFetch({ topology: () => activeTopology }));
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const before = graphCamera().getAttribute("transform");
+
+    activeTopology = widerTopology();
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "parser" },
+    });
+    await waitFor(() => expect(mapNode("wide-11")).toBeInTheDocument());
+
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+    expect(graphCamera().getAttribute("transform")).not.toBe(before);
+  });
+
+  it("cancels an active pinch when bounds change", async () => {
+    let activeTopology = topology;
+    vi.stubGlobal("fetch", stubFetch({ topology: () => activeTopology }));
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    firePointer(viewport, "pointerdown", {
+      pointerId: 1,
+      clientX: 100,
+      clientY: 100,
+    });
+    firePointer(viewport, "pointerdown", {
+      pointerId: 2,
+      clientX: 200,
+      clientY: 100,
+    });
+
+    activeTopology = widerTopology();
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "parser" },
+    });
+    await waitFor(() => expect(mapNode("wide-11")).toBeInTheDocument());
+    const reconciled = graphCamera().getAttribute("transform");
+    firePointer(viewport, "pointermove", {
+      pointerId: 1,
+      clientX: 40,
+      clientY: 100,
+    });
+
+    expect(graphCamera().getAttribute("transform")).toBe(reconciled);
+  });
+
+  it("offers keyboard zoom and fit controls with accessible names", async () => {
+    render(<SwarmView />);
+    await drawn();
+    sizeGraphViewport();
+    const viewport = graphViewport();
+    expect(
+      screen.getByRole("button", { name: "Zoom out" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Fit graph" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+
+    fireEvent.keyDown(viewport, { key: "+", shiftKey: true });
+    await waitFor(() => {
+      expect(graphCamera()).toHaveAttribute("data-user-adjusted", "true");
+    });
+    fireEvent.keyDown(viewport, { key: "0" });
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+    fireEvent.keyDown(viewport, { key: "+", ctrlKey: true });
+    expect(graphCamera()).toHaveAttribute("data-user-adjusted", "false");
+  });
+
+  it("outlines every relay on the active route", async () => {
+    render(<SwarmView currentNode={["middle", "hidden"]} />);
+    await drawn();
+    expect(mapNode("outer")).toHaveClass("is-route-relay");
+    expect(mapNode("middle")).toHaveClass("is-route-relay");
+    expect(mapNode("other")).not.toHaveClass("is-route-relay");
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph layout" }));
+    expect(mapNode("middle")).toHaveClass("is-route-relay");
+    expect(mapNode("other")).not.toHaveClass("is-route-relay");
+
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      ".swarm-node-relay.is-route-relay:not(.is-current) .swarm-node-ring",
+    );
+  });
+
+  it("exposes the graph and enterable SVG nodes as interactive controls", async () => {
+    render(<SwarmView onOpenNode={vi.fn()} />);
+    await drawn();
+    expect(screen.getByRole("group", { name: "Swarm topology" })).toBe(
+      document.querySelector("svg.swarm-graph"),
+    );
+    expect(screen.queryByRole("img", { name: "Swarm topology" })).toBeNull();
+    expect(
+      screen.getByRole("button", {
+        name: "Open nas02 through this relay",
+      }),
+    ).toBe(mapNode("nas02"));
+  });
+
+  it("drops camera transition while panning and sizes controls for touch", () => {
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
+      "utf8",
+    );
+    expect(css).toContain(
+      ".swarm-graph-viewport.is-panning .swarm-graph-camera",
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1199px\) \{[\s\S]*?\.swarm-canvas-control \{[\s\S]*?width: 40px;[\s\S]*?height: 40px;/,
+    );
+  });
+
+  it("uses the full Russian fit-graph label", () => {
+    const russian = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../i18n/messages/ru.ts"),
+      "utf8",
+    );
+    expect(russian).toContain('"swarm.viewport.fit": "Показать граф целиком"');
+  });
+
+  it("renders the environment selector in the Swarm error state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({ ok: false, status: 404, json: async () => ({}) }) as Response,
+      ),
+    );
+    render(
+      <SwarmView headerSlot={<button type="button">Environment</button>} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("swarm-view")).toHaveTextContent(
+        "not a swarm relay",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: "Environment" }),
+    ).toBeInTheDocument();
+  });
+
   it("draws every node the relay can reach, and nothing else", async () => {
     render(<SwarmView />);
     await drawn();
@@ -250,7 +811,9 @@ describe("SwarmView", () => {
       vi.fn(() => new Promise<Response>(() => {})),
     );
     render(<SwarmView />);
-    expect(screen.getByRole("img", { name: "Swarm topology" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "Swarm topology" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Looking…")).toBeNull();
   });
 
@@ -310,8 +873,9 @@ describe("SwarmView", () => {
     const client = document.querySelector(".swarm-node-client");
     expect(drawnWords(client)).toBe("laptop");
     expect(client?.querySelector("title")?.textContent).toContain("Local");
-    // The card's shape says it is a relay; its line says how much it carries.
-    expect(meta(mapNode("outer"))).toBe("2 links");
+    // The disc's shape says it is a relay; a healthy one carries no meta
+    // line - only trouble (no route, offline) gets one.
+    expect(meta(mapNode("outer"))).toBe("");
     expect(mapNode("outer").querySelector("title")?.textContent).toContain(
       "relay",
     );
@@ -333,7 +897,11 @@ describe("SwarmView", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.startsWith("/swarm/topology")) {
-          return { ok: true, status: 200, json: async () => tunnelled } as Response;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => tunnelled,
+          } as Response;
         }
         return stubFetch()(input);
       }),
@@ -377,7 +945,11 @@ describe("SwarmView", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.startsWith("/swarm/topology")) {
-          return { ok: true, status: 200, json: async () => renamed } as Response;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => renamed,
+          } as Response;
         }
         return stubFetch()(input);
       }),
@@ -460,12 +1032,15 @@ describe("SwarmView", () => {
     const current = document.querySelectorAll(".swarm-node.is-current");
     expect(current).toHaveLength(1);
     expect(current[0]).toBe(mapNode("outer"));
-    expect(current[0]?.querySelector("title")?.textContent).toContain("you are here");
+    expect(current[0]?.querySelector("title")?.textContent).toContain(
+      "you are here",
+    );
     const live = document.querySelectorAll(".swarm-edge.is-live");
     expect(live).toHaveLength(1);
-    expect(document.querySelector(".swarm-node-client")?.getAttribute("class")).toContain(
-      "is-on-route",
-    );
+    expect(
+      document.querySelector(".swarm-node-client")?.getAttribute("class"),
+    ).toContain("is-on-route");
+    expect(mapNode("outer")).toHaveClass("is-route-relay", "is-current");
   });
 
   it("previews the route to a node while it is hovered", async () => {
@@ -567,8 +1142,14 @@ describe("SwarmView", () => {
       join(dirname(fileURLToPath(import.meta.url)), "../../styles.css"),
       "utf8",
     );
-    const mobileBackdrop = /@media \(max-width: 1199px\) \{[^@]*?\.backdrop \{\s*z-index: (\d+)/.exec(css);
-    const mobileDock = /@media \(max-width: 1199px\) \{\s*(?:\/\*[^*]*\*\/\s*)?\.swarm-dock-cluster \{([^}]*)\}/.exec(css);
+    const mobileBackdrop =
+      /@media \(max-width: 1199px\) \{[^@]*?\.backdrop \{\s*z-index: (\d+)/.exec(
+        css,
+      );
+    const mobileDock =
+      /@media \(max-width: 1199px\) \{\s*(?:\/\*[^*]*\*\/\s*)?\.swarm-dock-cluster \{([^}]*)\}/.exec(
+        css,
+      );
     expect(mobileBackdrop).not.toBeNull();
     expect(mobileDock).not.toBeNull();
     const rule = mobileDock![1]!;
@@ -660,9 +1241,25 @@ describe("SwarmView", () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId("swarm-results-empty")).toHaveTextContent(
-        "No sessions match",
+        "Nothing matches",
       );
     });
+  });
+
+  it("finds a node by name among the sessions", async () => {
+    const onOpenNode = vi.fn();
+    render(<SwarmView onOpenNode={onOpenNode} />);
+    await drawn();
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "nas02" },
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("swarm-node-hit-nas02"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("swarm-node-hit-nas02"));
+    expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
   });
 
   it("hands a picked session to its owner", async () => {

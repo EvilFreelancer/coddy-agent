@@ -17,6 +17,7 @@ import {
   getRemoteToken,
   localFetch,
   setEnv,
+  swarmRootRelay,
 } from "./remoteEnv";
 
 export type ConfiguredRemote = {
@@ -191,7 +192,7 @@ function syncActiveToken(list: ConfiguredRemote[]): void {
   if (env.mode !== "remote") {
     return;
   }
-  const entry = configuredRemoteFor(env.swarmRelay ?? env.baseUrl, list);
+  const entry = configuredRemoteFor(swarmRootRelay(env), list);
   if (!entry?.token || entry.token === env.token) {
     return;
   }

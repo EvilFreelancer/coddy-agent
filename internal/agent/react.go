@@ -948,6 +948,16 @@ func (a *Agent) runReActLoop(
 		// brought in are joined to its result only here, so an evicted result
 		// keeps them and every request replays them byte for byte.
 		sendMessages := withTurnContext(withToolImages(withToolRules(a.prunedForLLM(messages)), a.modelReadsImages(), a.loadToolImage), turnCtx)
+		// The estimate the provider's incoming input_tokens is anchored to is
+		// taken here, while the breakdown still describes the prompt about to
+		// be sent - anything persisted or refreshed during the call must not
+		// move it.
+		estimateAtSend := 0
+		if rs, ok := a.state.(rulesState); ok {
+			if b := rs.GetLastContextBreakdown(); b != nil {
+				estimateAtSend = b.EstimatedTotal
+			}
+		}
 		// The call's own clock: when it went out, when the first chunk came
 		// back and how many followed. It names the silence in the errors
 		// below and is the debug-level account of every call.
@@ -1259,6 +1269,7 @@ func (a *Agent) runReActLoop(
 			"input_tokens", response.InputTokens,
 			"cached_input_tokens", response.CachedInputTokens,
 			"output_tokens", response.OutputTokens)
+		a.recordProviderInputTokens(response.InputTokens, estimateAtSend)
 
 		// Accumulate and broadcast token usage after each LLM call.
 		totalInputTokens += response.InputTokens
