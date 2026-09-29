@@ -1894,6 +1894,7 @@ export const messagesRu: Record<string, string> = {
   "docs.ask.selectionTitle":
     "Начать чат с цитатой выделенного текста и его разделом",
   "swarm.title": "Рой",
+  "swarm.close": "Закрыть карту роя",
   "swarm.summary.relays.one": "{count} релей",
   "swarm.summary.relays.few": "{count} релея",
   "swarm.summary.relays.many": "{count} релеев",

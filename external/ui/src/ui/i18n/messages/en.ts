@@ -1849,6 +1849,7 @@ export const messagesEn: Record<string, string> = {
   "docs.ask.selectionTitle":
     "Start a chat with the selected text quoted and its section attached",
   "swarm.title": "Swarm",
+  "swarm.close": "Close the swarm map",
   "swarm.summary.relays.one": "{count} relay",
   "swarm.summary.relays.other": "{count} relays",
   "swarm.summary.agents.one": "{count} agent",

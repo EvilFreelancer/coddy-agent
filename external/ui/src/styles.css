@@ -13206,43 +13206,63 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px 24px 32px;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 20px 24px 14px;
   color: var(--text);
 }
 
+/* The head follows the documentation reader's own: the title block on the
+   left, the search centred, the actions at the right edge. */
 .swarm-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(
+      140px,
+      210px
+    );
+  column-gap: 24px;
+  align-items: center;
+}
+
+.swarm-title-block {
+  min-width: 0;
+}
+
+/* Spelled like the head of every other panel (.sessions-head, .docs-title):
+   small capitals in a muted tint, the screen's name rather than the relay's. */
+.swarm-title {
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 72%, var(--coddy-blend-base));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.swarm-subtitle {
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .swarm-header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.swarm-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.swarm-subtitle {
-  margin: 4px 0 0;
-  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
-  font-size: 13px;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* The graph, the paragraph that says it in words, and the legend. Positioned,
-   because the summary is taken out of flow and has to hang off this box. */
+   because the summary is taken out of flow and has to hang off this box. It
+   grows to fill the dock's height. */
 .swarm-graph-panel {
   position: relative;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 10px;
 
   /* Every --coddy-surface-* token is translucent on six of the seven themes.
@@ -13281,11 +13301,12 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   border: 0;
 }
 
-/* The graph itself, not the page, receives every navigation gesture. */
+/* The graph itself, not the page, receives every navigation gesture. It
+   grows to fill the panel the dock leaves it. */
 .swarm-graph-viewport {
   position: relative;
+  flex: 1;
   min-height: 320px;
-  height: min(60vh, 560px);
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
@@ -13304,13 +13325,26 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   outline-offset: 2px;
 }
 
+/* Absolutely placed rather than height:100%: a percentage on a replaced
+   element resolves against the parent's *specified* height, and the viewport
+   above gets its height from flex-grow, so the SVG would collapse to its
+   intrinsic 150px and show nothing below it. inset: 0 resolves against the
+   used height, which is definite for absolutely positioned boxes. */
 .swarm-graph {
+  position: absolute;
+  inset: 0;
   display: block;
   font-family: inherit;
 }
 
 .swarm-graph-camera {
   transition: transform 0.12s ease-out;
+}
+
+/* A camera the code refits (mount, poll, resize) lands where it lands:
+   animating it only makes the map look like it reloads. */
+.swarm-graph-camera[data-instant="true"] {
+  transition: none;
 }
 
 .swarm-graph-viewport.is-panning .swarm-graph-camera {
@@ -13337,8 +13371,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 }
 
 .swarm-viewport-control {
+  top: 10px;
   right: 10px;
-  bottom: 10px;
 }
 
 .swarm-canvas-control {
@@ -13796,6 +13830,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   padding: 0 2px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px 18px;
 }
 
@@ -13841,21 +13876,73 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   }
 }
 
-/* The search is the only control left under the map, so it stands on its own
-   rather than inside a row of them. */
+/* The search sits with the header like the documentation reader's own: a
+   field with a "/" hint, and the results hang over the map rather than push
+   it down. */
+.swarm-search-box {
+  position: relative;
+}
+
 .swarm-search {
   width: 100%;
+  box-sizing: border-box;
   background: var(--coddy-surface-field);
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: 10px;
   color: var(--text);
-  padding: 8px 12px;
+  padding: 8px 36px 8px 12px;
+  font: inherit;
   font-size: 14px;
 }
 
 .swarm-search:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.swarm-search-kbd {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  padding: 1px 5px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The results hang under the field, in the menus' glass, like the
+   documentation search draws them. */
+.swarm-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--text) 5%, transparent),
+      color-mix(in srgb, var(--text) 5%, transparent)
+    ),
+    var(--bg);
+  box-shadow: var(--coddy-glass-panel-shadow);
+  scrollbar-width: thin;
+  z-index: 2;
 }
 
 .swarm-warnings {

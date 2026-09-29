@@ -68,10 +68,26 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     return { width: rect.width, height: rect.height };
   }, []);
 
-  const updateCamera = useCallback((next: GraphCamera) => {
+  /** Whether the last camera write was a code refit that must not animate. */
+  const [instant, setInstant] = useState(false);
+
+  const applyCamera = useCallback((next: GraphCamera, noMotion: boolean) => {
     cameraRef.current = next;
+    setInstant(noMotion);
     setCamera(next);
   }, []);
+
+  const updateCamera = useCallback(
+    (next: GraphCamera) => applyCamera(next, false),
+    [applyCamera],
+  );
+
+  // A camera the code refits (mount, poll, resize) lands where it lands:
+  // animating it only makes the map look like it reloads.
+  const refitCamera = useCallback(
+    (next: GraphCamera) => applyCamera(next, true),
+    [applyCamera],
+  );
 
   const cancelGestures = useCallback(() => {
     const viewport = viewportRef.current;
@@ -139,11 +155,19 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
 
   const boundsKey = `${props.bounds.x}:${props.bounds.y}:${props.bounds.width}:${props.bounds.height}`;
 
+  // A relay, a layout mode or a poll hands the code a new picture: it lands
+  // fitted at once. Animating that would only read as the map reloading.
+  const refit = useCallback(() => {
+    const viewport = geometry();
+    if (!viewport) return;
+    refitCamera(fitCamera(boundsRef.current, viewport, PADDING));
+  }, [geometry, refitCamera]);
+
   // A relay or layout mode is an explicit new picture, so it always fits.
   useLayoutEffect(() => {
     cancelGestures();
-    fit();
-  }, [cancelGestures, fit, props.resetKey]);
+    refit();
+  }, [cancelGestures, refit, props.resetKey]);
 
   // Polls can change the graph's extents. An untouched camera should fit the
   // fresh picture; a manual one keeps its scale and position where possible,
@@ -152,25 +176,25 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
     cancelGestures();
     const viewport = geometry();
     if (!viewport) return;
-    updateCamera(
+    refitCamera(
       cameraRef.current.userAdjusted
         ? clampCamera(cameraRef.current, boundsRef.current, viewport, PADDING)
         : fitCamera(boundsRef.current, viewport, PADDING),
     );
-  }, [boundsKey, cancelGestures, geometry, updateCamera]);
+  }, [boundsKey, cancelGestures, geometry, refitCamera]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const resize = () => {
-      if (!cameraRef.current.userAdjusted) fit();
+      if (!cameraRef.current.userAdjusted) refit();
     };
     const observer =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
     observer?.observe(viewport);
     resize();
     return () => observer?.disconnect();
-  }, [fit]);
+  }, [refit]);
 
   // A native non-passive listener is required: React may attach wheel handlers
   // passively, in which case the browser scrolls the page behind the canvas.
@@ -348,6 +372,7 @@ export function useGraphViewport(props: { bounds: Bounds; resetKey: string }) {
   return {
     viewportRef,
     transform: `translate(${camera.x} ${camera.y}) scale(${camera.scale})`,
+    instant,
     isPanning,
     fit,
     zoomIn,

@@ -323,6 +323,7 @@ export function TopologyGraph(props: {
             className="swarm-graph-camera"
             transform={viewport.transform}
             data-user-adjusted={String(viewport.userAdjusted)}
+            data-instant={String(viewport.instant)}
           >
             {!graph ? (
               <g className="swarm-graph-spine" aria-hidden="true">

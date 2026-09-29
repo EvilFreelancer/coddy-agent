@@ -6281,8 +6281,7 @@ export function App() {
               {...(swarmCurrentNode.length > 0
                 ? { currentNode: swarmCurrentNode }
                 : {})}
-              headerSlot={<EnvironmentChip />}
-              {...(atSwarmRoot ? { rootCurrent: true } : {})}
+              {...(atSwarmRoot ? { rootCurrent: true } : { onClose: onCloseSwarm })}
             />
           </div>
         ) : null}
