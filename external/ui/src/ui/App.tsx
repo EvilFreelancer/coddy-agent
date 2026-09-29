@@ -125,6 +125,8 @@ import {
   localFetch,
   snapshotEnv,
   subscribeEnv,
+  swarmMountPath,
+  swarmRootRelay,
 } from "./env/remoteEnv";
 import {
   configuredRemoteFor,
@@ -493,7 +495,11 @@ export function App() {
       }
       setSessionContextWindows((prev) => ({
         ...prev,
-        [key]: { model: w.model, epoch: configEpochRef.current, size: w.tokens },
+        [key]: {
+          model: w.model,
+          epoch: configEpochRef.current,
+          size: w.tokens,
+        },
       }));
     },
   );
@@ -1091,9 +1097,13 @@ export function App() {
   const schedulerDockClusterRef = useRef<HTMLDivElement>(null);
   // The runs of the job whose runs panel is open: the background tasks of the
   // job's session, polled the way the chat's Tasks panel polls its own.
-  const [schedulerRunsTasks, setSchedulerRunsTasks] = useState<BackgroundTask[]>([]);
+  const [schedulerRunsTasks, setSchedulerRunsTasks] = useState<
+    BackgroundTask[]
+  >([]);
   const [schedulerRunsRunning, setSchedulerRunsRunning] = useState(0);
-  const [schedulerRunsError, setSchedulerRunsError] = useState<string | null>(null);
+  const [schedulerRunsError, setSchedulerRunsError] = useState<string | null>(
+    null,
+  );
   const [schedulerRunsLoading, setSchedulerRunsLoading] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(
     () => initialRoute.branch === "session" && initialRoute.tasksOpen,
@@ -1226,9 +1236,11 @@ export function App() {
   // The archive flag's last write this client made, so a transcript read that
   // was issued before the PATCH settled cannot put the older flag back (see
   // loadMessages, which compares the read's issue time against this).
-  const viewedArchiveWriteRef = useRef<{ sid: string; archived: boolean; at: number } | null>(
-    null,
-  );
+  const viewedArchiveWriteRef = useRef<{
+    sid: string;
+    archived: boolean;
+    at: number;
+  } | null>(null);
   // The same, for pinning.
   const pinningRef = useRef<Set<string>>(new Set());
   const [newChatWorkspaceEpoch, setNewChatWorkspaceEpoch] = useState(0);
@@ -1260,14 +1272,16 @@ export function App() {
   const pendingPermissionModeRef = useRef("");
   const [llmModelIds, setLlmModelIds] = useState<string[]>([]);
   const [llmModel, setLlmModel] = useState("");
-  const applyContextUsage = useStableHandler((sid: string, u: ContextUsageUpdate) => {
-    setContextBreakdown((prev) => withContextUsedTokens(prev, u.used));
-    setSessionContextWindows((prev) => ({
-      ...prev,
-      [sid]: { model: llmModel, epoch: configEpoch, size: u.size },
-    }));
-    debouncedRefreshSessionStats(sid);
-  });
+  const applyContextUsage = useStableHandler(
+    (sid: string, u: ContextUsageUpdate) => {
+      setContextBreakdown((prev) => withContextUsedTokens(prev, u.used));
+      setSessionContextWindows((prev) => ({
+        ...prev,
+        [sid]: { model: llmModel, epoch: configEpoch, size: u.size },
+      }));
+      debouncedRefreshSessionStats(sid);
+    },
+  );
   const providerUsageState = useProviderUsage({
     sessionId,
     llmModel,
@@ -2078,7 +2092,10 @@ export function App() {
     // The chat's address that follows does not take the swarm screen down by
     // itself (applyLocationHash leaves it on a session), so it goes here.
     setSwarmRoute(false);
-    if (parseAppHash().branch === "settings" || parseAppHash().branch === "docs") {
+    if (
+      parseAppHash().branch === "settings" ||
+      parseAppHash().branch === "docs"
+    ) {
       const sid = sessionId.trim();
       if (sid) {
         setSessionHashInLocation(sid);
@@ -2103,7 +2120,11 @@ export function App() {
   useEffect(() => {
     // Back to the chat from History: the caret returns to the composer, except
     // on a phone or a tablet, where it would open the keyboard (composerFocus.ts).
-    if (prevSessionsOpenRef.current && !sessionsOpen && composerAutoFocusAllowed()) {
+    if (
+      prevSessionsOpenRef.current &&
+      !sessionsOpen &&
+      composerAutoFocusAllowed()
+    ) {
       requestAnimationFrame(() => {
         document.getElementById("composer")?.focus();
       });
@@ -2225,7 +2246,11 @@ export function App() {
       taskId: schedulerRunsLinkedTaskId,
       seq: tasksFocusSeqRef.current,
     });
-    setSchedulerEditor({ mode: "runs", jobId: schedulerRunsJobId, taskId: null });
+    setSchedulerEditor({
+      mode: "runs",
+      jobId: schedulerRunsJobId,
+      taskId: null,
+    });
     setSchedulerJobRunsHash(schedulerRunsJobId);
   }, [schedulerRunsJobId, schedulerRunsLinkedTaskId]);
   /** The job session the runs live under; empty until the job ran once. */
@@ -2412,7 +2437,9 @@ export function App() {
     // preference rather than as the answer, and without the cookie.
     const openRow = modelInfos.find((m) => m.id === nextModel);
     const choices =
-      nextModel === openSessionSelection.model ? openSessionSelection.choices : [];
+      nextModel === openSessionSelection.model
+        ? openSessionSelection.choices
+        : [];
     setSessionReasoningChoices({
       sid: openSessionSelection.sid,
       model: nextModel,
@@ -2555,9 +2582,12 @@ export function App() {
       sessionsListOpenRef.current.add(seq);
       let res: { ok: boolean; status: number; data?: SessionsPage };
       try {
-        res = await fetchJSON<SessionsPage>(`/coddy/sessions?${ps.toString()}`, {
-          headers,
-        });
+        res = await fetchJSON<SessionsPage>(
+          `/coddy/sessions?${ps.toString()}`,
+          {
+            headers,
+          },
+        );
       } catch {
         // A request that never got an answer; without this the loading flag
         // below stayed up and History never asked for the page again.
@@ -2633,7 +2663,11 @@ export function App() {
         setToolsPermissionPolicy(policy);
         const agent = res.data.agent as { queue_mode?: QueueMode } | undefined;
         const preferred = agent?.queue_mode;
-        setQueueMode(preferred === "steer" || preferred === "after_turn" ? preferred : undefined);
+        setQueueMode(
+          preferred === "steer" || preferred === "after_turn"
+            ? preferred
+            : undefined,
+        );
       }
     })();
   }, [headers, configEpoch]);
@@ -2803,7 +2837,8 @@ export function App() {
     void subscribeSharedServerEvents({
       env,
       onRefused: (status) => {
-        if (status === 401 && env.mode === "local") notifyLocalApiUnauthorized();
+        if (status === 401 && env.mode === "local")
+          notifyLocalApiUnauthorized();
       },
       onTurnStarted: (sid) => serverEventHandlersRef.current.turnStarted(sid),
       onTurnEnded: (sid) => serverEventHandlersRef.current.turnEnded(sid),
@@ -3275,7 +3310,8 @@ export function App() {
         settled = true;
       }
     } finally {
-      if (olderLoadInFlightRef.current === sid) olderLoadInFlightRef.current = "";
+      if (olderLoadInFlightRef.current === sid)
+        olderLoadInFlightRef.current = "";
       if (!settled) {
         setOlderTranscriptLoad((cur) => (cur === "loading" ? "idle" : cur));
       }
@@ -4443,8 +4479,7 @@ export function App() {
                   reader.onerror = () => {
                     unreadable ??= {
                       name: f.name,
-                      reason:
-                        errorDetail(reader.error) || "NotReadableError",
+                      reason: errorDetail(reader.error) || "NotReadableError",
                     };
                     resolve(null);
                   };
@@ -4592,11 +4627,8 @@ export function App() {
               getEnv(),
               await res
                 .json()
-                .then(
-                  (b: { error?: { message?: unknown } }) =>
-                    typeof b?.error?.message === "string"
-                      ? b.error.message
-                      : "",
+                .then((b: { error?: { message?: unknown } }) =>
+                  typeof b?.error?.message === "string" ? b.error.message : "",
                 )
                 .catch(() => ""),
             );
@@ -5015,7 +5047,9 @@ export function App() {
         cookie: viewed ? null : readReasoningCookie(),
         sessionLevel: prev,
         sessionChoices:
-          viewed && known.sid === viewed && known.model === llmModel ? known.choices : [],
+          viewed && known.sid === viewed && known.model === llmModel
+            ? known.choices
+            : [],
         modelDefault: row.reasoningDefault ?? null,
       }),
     );
@@ -5215,7 +5249,11 @@ export function App() {
       setSchedulerRunsError(res.message);
       return;
     }
-    setSchedulerEditor({ mode: "runs", jobId: schedulerRunsJobId, taskId: null });
+    setSchedulerEditor({
+      mode: "runs",
+      jobId: schedulerRunsJobId,
+      taskId: null,
+    });
     setSchedulerJobRunsHash(schedulerRunsJobId);
     void refreshSchedulerRuns({ silent: true });
     void refreshSchedulerJobs({ silent: true });
@@ -5397,7 +5435,7 @@ export function App() {
       // the one entry point this screen exists for silently did nothing.
       const relay =
         env.mode === "remote"
-          ? (env.swarmRelay ?? env.baseUrl)
+          ? swarmRootRelay(env)
           : window.location.origin;
       if (!relay) {
         return;
@@ -5413,21 +5451,27 @@ export function App() {
   );
 
   // A relay on the map opens as a relay: the one the map is drawn for is
-  // connected to itself, a relay chained under it opens on its own map.
+  // connected to itself, a relay chained under it opens through its mount -
+  // staying on the same map, which is always drawn by the outermost relay.
   const openSwarmRelay = useCallback(
     (relayPath: string[], name: string) => {
       const env = getEnv();
-      // Already on the relay the map is drawn for: nothing to connect to, and a
-      // reload would only blink the page.
-      if (
-        relayPath.length === 0 &&
-        !(env.mode === "remote" && env.swarmRelay)
-      ) {
+      // Already on the relay this path names - the map's root for a home or
+      // a local env, a chained relay for its own mount env: nothing to
+      // connect to, and a reload would only blink the page. A node env never
+      // matches: leaving it for a relay is a switch.
+      const onRelayPath =
+        env.mode === "remote"
+          ? env.swarmRelay
+            ? null
+            : swarmMountPath(env.baseUrl)
+          : swarmMountPath(window.location.origin);
+      if (onRelayPath && onRelayPath.join("/") === relayPath.join("/")) {
         return;
       }
       const relay =
         env.mode === "remote"
-          ? (env.swarmRelay ?? env.baseUrl)
+          ? swarmRootRelay(env)
           : window.location.origin;
       if (!relay) {
         return;
@@ -5458,7 +5502,10 @@ export function App() {
     if (env.mode !== "remote") {
       return [] as string[];
     }
-    return (env.swarmNode || "").split("/").filter(Boolean);
+    const path = (env.swarmNode || "").split("/").filter(Boolean);
+    // A chained relay's env carries no swarmNode, but its mount URL spells
+    // the same path - the map marks where the app stands on the whole swarm.
+    return path.length ? path : swarmMountPath(env.baseUrl);
   }, []);
 
   /**
@@ -5471,10 +5518,18 @@ export function App() {
    */
   const swarmRelayTarget = useMemo(() => {
     const env = getEnv();
-    if (env.mode !== "remote" || !env.swarmRelay) {
+    if (env.mode !== "remote") {
       return undefined;
     }
-    return { baseUrl: env.swarmRelay, token: env.token };
+    // The map is drawn by the outermost relay of the chain the environment
+    // hangs off: entering a node or a chained relay keeps the whole swarm in
+    // view and only moves the mark of where the app stands (env.swarmRelay
+    // for a node, the mount in its own baseUrl for a chained relay).
+    const relay =
+      env.swarmRelay || swarmMountPath(env.baseUrl).length
+        ? swarmRootRelay(env)
+        : "";
+    return relay ? { baseUrl: relay, token: env.token } : undefined;
   }, []);
 
   const openSwarmFromNav = useCallback(() => {
@@ -5487,26 +5542,30 @@ export function App() {
   }, []);
 
   /** Opens the reader over whatever is on screen, remembering it for the close. */
-  const openDocsAt = useCallback((slug: string | null, anchor: string | null) => {
-    if (parseAppHash().branch !== "docs") {
-      docsReturnHashRef.current = window.location.hash;
-    }
-    setSchedulerOpen(false);
-    setSchedulerEditor(null);
-    setTasksOpen(false);
-    setSessionsOpen(false);
-    setSettingsRoute(false);
-    window.location.hash = appNavHrefDocs(slug, anchor);
-  }, []);
+  const openDocsAt = useCallback(
+    (slug: string | null, anchor: string | null) => {
+      if (parseAppHash().branch !== "docs") {
+        docsReturnHashRef.current = window.location.hash;
+      }
+      setSchedulerOpen(false);
+      setSchedulerEditor(null);
+      setTasksOpen(false);
+      setSessionsOpen(false);
+      setSettingsRoute(false);
+      window.location.hash = appNavHrefDocs(slug, anchor);
+    },
+    [],
+  );
 
   const openDocsFromNav = useCallback(() => {
     openDocsAt(lastDocsSlugRef.current, null);
   }, [openDocsAt]);
 
   // A search /docs <words> brings into the reader; cleared when the reader closes.
-  const [docsSearchSeed, setDocsSearchSeed] = useState<{ query: string; nonce: number } | null>(
-    null,
-  );
+  const [docsSearchSeed, setDocsSearchSeed] = useState<{
+    query: string;
+    nonce: number;
+  } | null>(null);
 
   /**
    * `/docs [page or words]` in the composer, as in the console: the command
@@ -5669,46 +5728,45 @@ export function App() {
    */
   const sessionEnvironments = useMemo<SessionsEnvironmentOption[]>(() => {
     const onRemote = activeEnv.mode === "remote";
-    // Narrowing by origin is a filter on the server being read; it must not
-    // reach for connectLocal, which reloads the page and would throw the choice
-    // away before it was used. Only coming *back* from a remote is a switch,
-    // and that reload resets the filter along with everything else.
+    const activeConfiguredRemote = onRemote
+      ? configuredRemoteFor(activeEnv.baseUrl, configuredRemotes)
+      : undefined;
+    // The first three rows filter whichever server is active. Configured
+    // remote rows below switch the server the whole app reads instead.
     const narrowTo = (origin: SessionOriginFilter) => () => {
-      if (onRemote) {
-        connectLocal();
-        return;
-      }
       setSessionsOrigin(origin);
       writeSessionPref(SESSION_PREF_COOKIES.origin, origin);
     };
     const rows: SessionsEnvironmentOption[] = [
       {
+        kind: "origin",
         key: "all",
         label: t("sessions.filter.env.all"),
-        active: !onRemote && sessionsOrigin === "",
+        active: sessionsOrigin === "",
         onPick: narrowTo(""),
       },
       {
+        kind: "origin",
         key: "local",
         label: t("sessions.filter.env.local"),
-        active: !onRemote && sessionsOrigin === "local",
+        active: sessionsOrigin === "local",
         onPick: narrowTo("local"),
       },
       {
+        kind: "origin",
         key: "gateway",
         label: t("sessions.filter.env.gateway"),
-        active: !onRemote && sessionsOrigin === "gateway",
+        active: sessionsOrigin === "gateway",
         onPick: narrowTo("gateway"),
       },
     ];
     for (const remote of configuredRemotes) {
       rows.push({
+        kind: "switch",
         key: remote.url,
         label: remote.name.trim() || remote.url,
-        active:
-          onRemote && activeEnv.baseUrl === remote.url.replace(/\/+$/, ""),
-        // Connecting reloads the page, so nothing of this session's state
-        // reaches the other server - the origin filter included.
+        active: remote === activeConfiguredRemote,
+        // A configured remote is an environment switch, not an origin filter.
         onPick: () => connectConfiguredRemote(remote),
       });
     }
@@ -5834,89 +5892,112 @@ export function App() {
   const handleQueueModeChange = useStableHandler((mode: QueueMode) => {
     setQueueMode(mode);
     void (async () => {
-      const current = await fetchJSON<Record<string, unknown>>("/coddy/config", { headers });
+      const current = await fetchJSON<Record<string, unknown>>(
+        "/coddy/config",
+        { headers },
+      );
       if (!current.ok || !current.data) return;
       const agent = (current.data.agent ?? {}) as Record<string, unknown>;
       const res = await fetch("/coddy/config", {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ...current.data, agent: { ...agent, queue_mode: mode } }),
+        body: JSON.stringify({
+          ...current.data,
+          agent: { ...agent, queue_mode: mode },
+        }),
       });
       if (res.ok) setConfigEpoch((e) => e + 1);
     })();
   });
 
-  const handleQueueMessage = useStableHandler((text: string, mode: QueueMode, files: File[] = []) => {
-    const sid = sessionId.trim();
-    const generation = turnActivity.generation(sid);
-    const queueEpoch = queueOrderRef.current.capture(sid).epoch;
-    const body = text.trim();
-    if (!sid || (!body && files.length === 0)) return;
-    setDraft("");
-    void (async () => {
-      type QueueAnswer = {
-        messages?: QueuedMessage[];
-        version?: number;
-        error?: { code?: string; message?: string };
-      };
-      let payload: QueueAnswer | null = null;
-      let status = 0;
-      try {
-        const inlineFiles = await Promise.all(files.map((file) => new Promise<{ name: string; data_url: string }>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve({ name: file.name, data_url: reader.result as string });
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        })));
-        const res = await fetch(
-          `/coddy/sessions/${encodeURIComponent(sid)}/queue`,
+  const handleQueueMessage = useStableHandler(
+    (text: string, mode: QueueMode, files: File[] = []) => {
+      const sid = sessionId.trim();
+      const generation = turnActivity.generation(sid);
+      const queueEpoch = queueOrderRef.current.capture(sid).epoch;
+      const body = text.trim();
+      if (!sid || (!body && files.length === 0)) return;
+      setDraft("");
+      void (async () => {
+        type QueueAnswer = {
+          messages?: QueuedMessage[];
+          version?: number;
+          error?: { code?: string; message?: string };
+        };
+        let payload: QueueAnswer | null = null;
+        let status = 0;
+        try {
+          const inlineFiles = await Promise.all(
+            files.map(
+              (file) =>
+                new Promise<{ name: string; data_url: string }>(
+                  (resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () =>
+                      resolve({
+                        name: file.name,
+                        data_url: reader.result as string,
+                      });
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(file);
+                  },
+                ),
+            ),
+          );
+          const res = await fetch(
+            `/coddy/sessions/${encodeURIComponent(sid)}/queue`,
+            {
+              method: "POST",
+              headers: { [HDR]: sid, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: body,
+                mode,
+                inline_files: inlineFiles,
+              }),
+            },
+          );
+          status = res.status;
+          payload = (await res.json().catch(() => null)) as QueueAnswer | null;
+        } catch {
+          // Network failure: treated as a refusal below.
+        }
+        if (status === 201 && Array.isArray(payload?.messages)) {
+          applyQueue(sid, payload.messages, payload.version ?? 0, queueEpoch);
+          return;
+        }
+        if (
+          payload?.error?.code === "no_active_turn" &&
+          queueOrderRef.current.capture(sid).epoch === queueEpoch &&
+          turnActivity.generation(sid) === generation &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
+          // The turn ended between the keystroke and the request. Send it as an
+          // ordinary prompt; if the admission has not been released yet and that
+          // is refused too, the text comes back to the composer rather than
+          // being lost between the two answers.
+          void streamResponses(body, { files, restoreOnRefusal: true });
+          return;
+        }
+        if (viewedSessionIdRef.current.trim() === sid) {
+          setDraft((current) => current || body);
+          setComposerFiles((current) => [...files, ...current]);
+        }
+        applyStreamItemsForSession(sid, (prev) => [
+          ...prev,
           {
-            method: "POST",
-            headers: { [HDR]: sid, "Content-Type": "application/json" },
-            body: JSON.stringify({ text: body, mode, inline_files: inlineFiles }),
+            id: newId("s"),
+            type: "system_notice",
+            level: "error" as const,
+            message:
+              payload?.error?.code === "queue_full"
+                ? t("composer.queueFull")
+                : t("composer.queueFailed"),
+            createdAtUtc: new Date().toISOString(),
           },
-        );
-        status = res.status;
-        payload = (await res.json().catch(() => null)) as QueueAnswer | null;
-      } catch {
-        // Network failure: treated as a refusal below.
-      }
-      if (status === 201 && Array.isArray(payload?.messages)) {
-        applyQueue(sid, payload.messages, payload.version ?? 0, queueEpoch);
-        return;
-      }
-      if (
-        payload?.error?.code === "no_active_turn" &&
-        queueOrderRef.current.capture(sid).epoch === queueEpoch &&
-        turnActivity.generation(sid) === generation &&
-        viewedSessionIdRef.current.trim() === sid
-      ) {
-        // The turn ended between the keystroke and the request. Send it as an
-        // ordinary prompt; if the admission has not been released yet and that
-        // is refused too, the text comes back to the composer rather than
-        // being lost between the two answers.
-        void streamResponses(body, { files, restoreOnRefusal: true });
-        return;
-      }
-      if (viewedSessionIdRef.current.trim() === sid) {
-        setDraft((current) => current || body);
-        setComposerFiles((current) => [...files, ...current]);
-      }
-      applyStreamItemsForSession(sid, (prev) => [
-        ...prev,
-        {
-          id: newId("s"),
-          type: "system_notice",
-          level: "error" as const,
-          message:
-            payload?.error?.code === "queue_full"
-              ? t("composer.queueFull")
-              : t("composer.queueFailed"),
-          createdAtUtc: new Date().toISOString(),
-        },
-      ]);
-    })();
-  });
+        ]);
+      })();
+    },
+  );
 
   /**
    * Take one queued follow-up back. The list is updated at once so the card
@@ -5953,7 +6034,11 @@ export function App() {
         // edited, ahead of anything typed since. A 404 means the agent read it first,
         // and it is already in the conversation.
         const text = data?.message?.text ?? taken?.text ?? "";
-        if (res.ok && text.trim() && viewedSessionIdRef.current.trim() === sid) {
+        if (
+          res.ok &&
+          text.trim() &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
           setDraft((current) =>
             current.trim() ? `${text}\n\n${current}` : text,
           );
@@ -5963,7 +6048,11 @@ export function App() {
         const files = (data?.message?.inline_files ?? [])
           .map((f) => fileFromDataUrl(f.data_url ?? "", f.name ?? ""))
           .filter((f): f is File => f !== null);
-        if (res.ok && files.length > 0 && viewedSessionIdRef.current.trim() === sid) {
+        if (
+          res.ok &&
+          files.length > 0 &&
+          viewedSessionIdRef.current.trim() === sid
+        ) {
           setComposerFiles((current) => [...files, ...current]);
         }
       } catch {
@@ -5976,33 +6065,35 @@ export function App() {
    * its answer. The answer carries the whole queue; a message the agent read a
    * moment ago answers 404 and the next `message_queue` frame settles the list.
    */
-  const handleSetQueuedMode = useStableHandler((id: string, mode: QueueMode) => {
-    const sid = sessionId.trim();
-    const messageID = id.trim();
-    if (!sid || !messageID) return;
-    const queueEpoch = queueOrderRef.current.capture(sid).epoch;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/coddy/sessions/${encodeURIComponent(sid)}/queue/${encodeURIComponent(messageID)}`,
-          {
-            method: "PATCH",
-            headers: { [HDR]: sid, "Content-Type": "application/json" },
-            body: JSON.stringify({ mode }),
-          },
-        );
-        const data = (await res.json().catch(() => null)) as {
-          messages?: QueuedMessage[];
-          version?: number;
-        } | null;
-        if (res.ok && Array.isArray(data?.messages)) {
-          applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
+  const handleSetQueuedMode = useStableHandler(
+    (id: string, mode: QueueMode) => {
+      const sid = sessionId.trim();
+      const messageID = id.trim();
+      if (!sid || !messageID) return;
+      const queueEpoch = queueOrderRef.current.capture(sid).epoch;
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/coddy/sessions/${encodeURIComponent(sid)}/queue/${encodeURIComponent(messageID)}`,
+            {
+              method: "PATCH",
+              headers: { [HDR]: sid, "Content-Type": "application/json" },
+              body: JSON.stringify({ mode }),
+            },
+          );
+          const data = (await res.json().catch(() => null)) as {
+            messages?: QueuedMessage[];
+            version?: number;
+          } | null;
+          if (res.ok && Array.isArray(data?.messages)) {
+            applyQueue(sid, data.messages, data.version ?? 0, queueEpoch);
+          }
+        } catch {
+          // The next message_queue frame corrects the list.
         }
-      } catch {
-        // The next message_queue frame corrects the list.
-      }
-    })();
-  });
+      })();
+    },
+  );
   const handleRetryLast = useStableHandler(
     () => void streamResponses(lastUserText),
   );
@@ -6111,7 +6202,8 @@ export function App() {
             <SchedulerJobsDrawer
               open={schedulerOpen}
               selectedJobId={
-                schedulerEditor?.mode === "edit" || schedulerEditor?.mode === "runs"
+                schedulerEditor?.mode === "edit" ||
+                schedulerEditor?.mode === "runs"
                   ? schedulerEditor.jobId
                   : null
               }
@@ -6140,7 +6232,9 @@ export function App() {
               <BackgroundTasksPanel
                 open
                 className="scheduler-runs-dock"
-                title={t("scheduler.runsTitle", { jobId: schedulerEditor.jobId })}
+                title={t("scheduler.runsTitle", {
+                  jobId: schedulerEditor.jobId,
+                })}
                 emptyText={t("scheduler.runsEmpty")}
                 focus={schedulerRunsFocus}
                 onFocusHonoured={(seq) =>
@@ -6206,9 +6300,10 @@ export function App() {
               {...(swarmCurrentNode.length > 0
                 ? { currentNode: swarmCurrentNode }
                 : {})}
-              {...(atSwarmRoot
-                ? { rootCurrent: true, headerSlot: <EnvironmentChip /> }
+              {...(atSwarmRoot && swarmCurrentNode.length === 0
+                ? { rootCurrent: true }
                 : {})}
+              {...(atSwarmRoot ? {} : { onClose: onCloseSwarm })}
             />
           </div>
         ) : null}

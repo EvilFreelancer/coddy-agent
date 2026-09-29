@@ -78,6 +78,11 @@ swarm:
 `swarm.join` is honoured by every `coddy serve` process, whether or not it runs a relay of its
 own. That symmetry is how relays chain.
 
+Set `swarm.join[].token` explicitly when possible; a credential dedicated to the parent relay is
+recommended, and an explicit value always wins. When a relay omits that token, it falls back to its
+configured `swarm.auth_token` so the parent can enter the child relay through its mount. Agents do
+not receive this fallback: an agent with no join token registers with no node credential.
+
 Names are optional. A join entry without `name` claims the host name of the machine it runs on
 (dots become dashes, since the name is a path segment), and a relay without `swarm.name` goes by
 its host name as well, in `/swarm/info`, on the map and in the routes of its sessions. Set a name
@@ -230,12 +235,39 @@ the rail - on a plain agent it is not there at all.
 The Swarm screen shows the topology and a search box that goes to the relay. It opens in a dock as
 wide as the documentation reader's, and the map fills it.
 
+**Choose a layout, then explore the canvas.** The map starts in **Tree layout**, the rooted view
+that shows hop tiers. The **Graph layout** is a deterministic rooted graph for inspecting rings and
+cross-links: the relay is its root, or the local computer is the root when the map shows the machine
+that started the connection. It trends down by shortest-route depth without putting every hop on a
+rigid horizontal row, and its links are smooth curves. The choice belongs only to this browser,
+under localStorage key `coddy_swarm_layout`; it does not change the relay configuration or another
+browser. A saved legacy `star` value migrates to Graph; if the key is absent, unavailable or invalid,
+Tree remains the default.
+
+The map has Tree and Graph selectors plus **Zoom out**, **Fit graph**, and **Zoom in** controls.
+Wheel zoom centres on the pointer; drag pans in both axes even when the graph is fitted; two fingers
+pinch to zoom; and a drag or pinch does not activate a node. With the canvas focused, **`+`** or
+**`=`** zooms in, **`-`** zooms out, and **`0`** fits the entire graph. Canvas controls are 40px
+touch targets on the stacked shell. Fit resets the camera, as does changing the relay or layout;
+ordinary five-second topology polling does not discard a manual pan or zoom, though it keeps the
+camera inside changed graph bounds.
+
+![The Graph layout with the canvas controls](../assets/swarm/map-graph-canvas-dark-1280.png)
+
+*The Graph layout: soft top-down placement, smooth links, and camera controls over the canvas.*
+
+The route in use is an accent path. Every relay it crosses is outlined, with the relay the app is
+currently driving outlined more strongly; alternate routes remain visibly secondary. This makes a
+transit relay readable as part of the connection without implying that it is the selected target.
+
 **A relay's home screen is the swarm.** Of an agent's API a relay serves only its own settings
 (`/coddy/config*`) - no sessions, no workspace, no model, no documentation - so there is nothing
 for a composer to send to and nothing for a history drawer to list. Pointed at a relay the app therefore drops the chat screen, hides History and
 Scheduler in the rail, and shows the map instead. The environment selector moves into the
-map's header, since the composer that usually carries it is not on screen. Enter a node and
-all of it comes back, because the node does have those things.
+map's header, since the composer that usually carries it is not on screen. The selector remains in
+that header even while the map reports an error, including a relay that needs a token, so the
+operator can switch environments or supply the needed credentials. Enter a node and all of it
+comes back, because the node does have those things.
 
 **Working on a node.** Click a node on the map and the app points at that node's mount, with the
 map left open over it until you choose what to do there. From there every screen that already

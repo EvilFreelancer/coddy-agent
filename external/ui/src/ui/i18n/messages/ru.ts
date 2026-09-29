@@ -100,82 +100,124 @@ export const messagesRu: Record<string, string> = {
   "settings.section.swarm.desc": "Адрес, токены, CORS, узлы",
   "settings.secret.keep": "Задан. Оставьте пустым, чтобы не менять",
   "settings.secret.unset": "Не задан",
-  "settings.secret.listSet.one": "Задан {count} токен, он не показывается. Введённые здесь значения заменят его.",
-  "settings.secret.listSet.few": "Задано {count} токена, они не показываются. Введённые здесь значения заменят их все.",
-  "settings.secret.listSet.many": "Задано {count} токенов, они не показываются. Введённые здесь значения заменят их все.",
-  "settings.secret.listSet.other": "Задано {count} токена, они не показываются. Введённые здесь значения заменят их все.",
+  "settings.secret.listSet.one":
+    "Задан {count} токен, он не показывается. Введённые здесь значения заменят его.",
+  "settings.secret.listSet.few":
+    "Задано {count} токена, они не показываются. Введённые здесь значения заменят их все.",
+  "settings.secret.listSet.many":
+    "Задано {count} токенов, они не показываются. Введённые здесь значения заменят их все.",
+  "settings.secret.listSet.other":
+    "Задано {count} токена, они не показываются. Введённые здесь значения заменят их все.",
   "settings.schema.swarm.label": "Релей роя",
-  "settings.schema.swarm.desc": "Развёртывание этого релея. Имя и адрес, токены клиентов и узлов, CORS для страниц с других адресов, узлы, до которых релей дозванивается сам, и релеи, к которым он присоединяется. Сохранение пересобирает релей, новый адрес вступает в силу после перезапуска.",
+  "settings.schema.swarm.desc":
+    "Развёртывание этого релея. Имя и адрес, токены клиентов и узлов, CORS для страниц с других адресов, узлы, до которых релей дозванивается сам, и релеи, к которым он присоединяется. Сохранение пересобирает релей, новый адрес вступает в силу после перезапуска.",
   "settings.schema.swarm.name.label": "Имя",
   "settings.schema.swarm.name.desc": "Имя релея на карте и в /swarm/info.",
   "settings.schema.swarm.host.label": "Адрес прослушивания",
-  "settings.schema.swarm.host.desc": "Адрес для привязки, 0.0.0.0 слушает на всех интерфейсах. Вступает в силу после перезапуска.",
+  "settings.schema.swarm.host.desc":
+    "Адрес для привязки, 0.0.0.0 слушает на всех интерфейсах. Вступает в силу после перезапуска.",
   "settings.schema.swarm.port.label": "Порт",
-  "settings.schema.swarm.port.desc": "Порт для привязки. Вступает в силу после перезапуска.",
+  "settings.schema.swarm.port.desc":
+    "Порт для привязки. Вступает в силу после перезапуска.",
   "settings.schema.swarm.auth_token.label": "Клиентский токен",
-  "settings.schema.swarm.auth_token.desc": "Bearer-токен, который клиент предъявляет, чтобы пользоваться релеем и всеми узлами за ним. Новый токен отключает всех клиентов, эту страницу тоже, после сохранения введите его заново в меню окружения, пункт \"Подключиться к…\".",
+  "settings.schema.swarm.auth_token.desc":
+    'Bearer-токен, который клиент предъявляет, чтобы пользоваться релеем и всеми узлами за ним. Новый токен отключает всех клиентов, эту страницу тоже, после сохранения введите его заново в меню окружения, пункт "Подключиться к…".',
   "settings.schema.swarm.pairing_tokens.label": "Токены присоединения",
-  "settings.schema.swarm.pairing_tokens.desc": "Токены, с которыми узел присоединяется к релею. Список не показывается, введённые здесь токены заменяют заданные.",
+  "settings.schema.swarm.pairing_tokens.desc":
+    "Токены, с которыми узел присоединяется к релею. Список не показывается, введённые здесь токены заменяют заданные.",
   "settings.schema.swarm.cors.label": "CORS",
-  "settings.schema.swarm.cors.desc": "Страницы с других адресов, например coddy serve на ноутбуке, которым можно обращаться к релею из браузера.",
+  "settings.schema.swarm.cors.desc":
+    "Страницы с других адресов, например coddy serve на ноутбуке, которым можно обращаться к релею из браузера.",
   "settings.schema.swarm.cors.enable.label": "Включить CORS",
-  "settings.schema.swarm.cors.enable.desc": "Отвечать на кросс-доменные запросы с адресов ниже.",
+  "settings.schema.swarm.cors.enable.desc":
+    "Отвечать на кросс-доменные запросы с адресов ниже.",
   "settings.schema.swarm.cors.allowed_origins.label": "Разрешённые origin",
-  "settings.schema.swarm.cors.allowed_origins.desc": "Точные origin, например http://localhost:12345, или * для любого.",
+  "settings.schema.swarm.cors.allowed_origins.desc":
+    "Точные origin, например http://localhost:12345, или * для любого.",
   "settings.schema.swarm.tls.label": "TLS",
-  "settings.schema.swarm.tls.desc": "Сертификат и ключ, с которыми релей отвечает по HTTPS. Нужны оба или ни одного.",
+  "settings.schema.swarm.tls.desc":
+    "Сертификат и ключ, с которыми релей отвечает по HTTPS. Нужны оба или ни одного.",
   "settings.schema.swarm.tls.cert_file.label": "Файл сертификата",
   "settings.schema.swarm.tls.cert_file.desc": "Цепочка сертификатов в PEM.",
   "settings.schema.swarm.tls.key_file.label": "Файл ключа",
   "settings.schema.swarm.tls.key_file.desc": "Закрытый ключ в PEM.",
   "settings.schema.swarm.lease_ttl_seconds.label": "Срок аренды (секунды)",
-  "settings.schema.swarm.lease_ttl_seconds.desc": "Сколько живёт регистрация без обновления, узлы обновляют её на трети срока.",
-  "settings.schema.swarm.fanout_timeout_seconds.label": "Ожидание узлов (секунды)",
-  "settings.schema.swarm.fanout_timeout_seconds.desc": "Сколько общий список сессий и топология ждут ответа узла.",
+  "settings.schema.swarm.lease_ttl_seconds.desc":
+    "Сколько живёт регистрация без обновления, узлы обновляют её на трети срока.",
+  "settings.schema.swarm.fanout_timeout_seconds.label":
+    "Ожидание узлов (секунды)",
+  "settings.schema.swarm.fanout_timeout_seconds.desc":
+    "Сколько общий список сессий и топология ждут ответа узла.",
   "settings.schema.swarm.upstreams.label": "Узлы релея",
-  "settings.schema.swarm.upstreams.desc": "Узлы, до которых релей дозванивается сам. Они закреплены на карте, отмечаются они или нет.",
+  "settings.schema.swarm.upstreams.desc":
+    "Узлы, до которых релей дозванивается сам. Они закреплены на карте, отмечаются они или нет.",
   "settings.schema.swarm.upstreams.name.label": "Имя",
-  "settings.schema.swarm.upstreams.name.desc": "Имя, под которым узел смонтирован, /swarm/nodes/<name>.",
+  "settings.schema.swarm.upstreams.name.desc":
+    "Имя, под которым узел смонтирован, /swarm/nodes/<name>.",
   "settings.schema.swarm.upstreams.url.label": "URL",
-  "settings.schema.swarm.upstreams.url.desc": "Адрес, по которому релей обращается к узлу.",
+  "settings.schema.swarm.upstreams.url.desc":
+    "Адрес, по которому релей обращается к узлу.",
   "settings.schema.swarm.upstreams.kind.label": "Вид",
-  "settings.schema.swarm.upstreams.kind.desc": "agent или relay для релея, подключённого под этим.",
+  "settings.schema.swarm.upstreams.kind.desc":
+    "agent или relay для релея, подключённого под этим.",
   "settings.schema.swarm.upstreams.token.label": "Токен",
-  "settings.schema.swarm.upstreams.token.desc": "Собственный bearer-токен узла, который релей предъявляет, проксируя запросы.",
+  "settings.schema.swarm.upstreams.token.desc":
+    "Собственный bearer-токен узла, который релей предъявляет, проксируя запросы.",
   "settings.schema.swarm.upstreams.dial.label": "Подключение",
-  "settings.schema.swarm.upstreams.dial.desc": "Как релей добирается до узла, исходящий прокси и проверка сертификата.",
+  "settings.schema.swarm.upstreams.dial.desc":
+    "Как релей добирается до узла, исходящий прокси и проверка сертификата.",
   "settings.schema.swarm.upstreams.dial.proxy.label": "Прокси",
-  "settings.schema.swarm.upstreams.dial.proxy.desc": "URL прокси http, https, socks5 или socks5h. В нём может быть пароль, поэтому он не показывается.",
+  "settings.schema.swarm.upstreams.dial.proxy.desc":
+    "URL прокси http, https, socks5 или socks5h. В нём может быть пароль, поэтому он не показывается.",
   "settings.schema.swarm.upstreams.dial.ca_file.label": "Файл CA",
-  "settings.schema.swarm.upstreams.dial.ca_file.desc": "Набор сертификатов в PEM, которому доверяют для сертификата узла вдобавок к системным.",
-  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.label": "Не проверять сертификат",
-  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.desc": "Только для стенда, каждое такое соединение пишется в журнал как небезопасное.",
+  "settings.schema.swarm.upstreams.dial.ca_file.desc":
+    "Набор сертификатов в PEM, которому доверяют для сертификата узла вдобавок к системным.",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.label":
+    "Не проверять сертификат",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.desc":
+    "Только для стенда, каждое такое соединение пишется в журнал как небезопасное.",
   "settings.schema.swarm.join.label": "Родительские релеи",
-  "settings.schema.swarm.join.desc": "Релеи, в которых регистрируется этот релей. Так релеи выстраиваются в цепочку.",
+  "settings.schema.swarm.join.desc":
+    "Релеи, в которых регистрируется этот релей. Так релеи выстраиваются в цепочку.",
   "settings.schema.swarm.join.url.label": "URL релея",
-  "settings.schema.swarm.join.url.desc": "Родительский релей, в котором регистрируется этот.",
+  "settings.schema.swarm.join.url.desc":
+    "Родительский релей, в котором регистрируется этот.",
   "settings.schema.swarm.join.name.label": "Имя",
-  "settings.schema.swarm.join.name.desc": "Имя, под которым регистрируется этот релей. Пустое берёт имя хоста.",
+  "settings.schema.swarm.join.name.desc":
+    "Имя, под которым регистрируется этот релей. Пустое берёт имя хоста.",
   "settings.schema.swarm.join.pairing_token.label": "Токен присоединения",
-  "settings.schema.swarm.join.pairing_token.desc": "Токен присоединения родительского релея.",
+  "settings.schema.swarm.join.pairing_token.desc":
+    "Токен присоединения родительского релея.",
   "settings.schema.swarm.join.advertise_url.label": "Адрес для родителя",
-  "settings.schema.swarm.join.advertise_url.desc": "Адрес, по которому родитель обращается к этому релею. Пустой означает исходящее подключение, и родитель управляет релеем через туннель.",
+  "settings.schema.swarm.join.advertise_url.desc":
+    "Адрес, по которому родитель обращается к этому релею. Пустой означает исходящее подключение, и родитель управляет релеем через туннель.",
   "settings.schema.swarm.join.token.label": "Токен",
-  "settings.schema.swarm.join.token.desc": "Собственный клиентский токен этого релея, который предъявляет родитель, проксируя запросы.",
+  "settings.schema.swarm.join.token.desc":
+    "Собственный клиентский токен этого релея, который предъявляет родитель, проксируя запросы.",
   "settings.schema.swarm.join.dial.label": "Подключение",
-  "settings.schema.swarm.join.dial.desc": "Как этот релей добирается до родителя, исходящий прокси и проверка сертификата.",
+  "settings.schema.swarm.join.dial.desc":
+    "Как этот релей добирается до родителя, исходящий прокси и проверка сертификата.",
   "settings.schema.swarm.join.dial.proxy.label": "Прокси",
-  "settings.schema.swarm.join.dial.proxy.desc": "URL прокси http, https, socks5 или socks5h. В нём может быть пароль, поэтому он не показывается.",
+  "settings.schema.swarm.join.dial.proxy.desc":
+    "URL прокси http, https, socks5 или socks5h. В нём может быть пароль, поэтому он не показывается.",
   "settings.schema.swarm.join.dial.ca_file.label": "Файл CA",
-  "settings.schema.swarm.join.dial.ca_file.desc": "Набор сертификатов в PEM, которому доверяют для сертификата родителя вдобавок к системным.",
-  "settings.schema.swarm.join.dial.insecure_skip_verify.label": "Не проверять сертификат",
-  "settings.schema.swarm.join.dial.insecure_skip_verify.desc": "Только для стенда, каждое такое соединение пишется в журнал как небезопасное.",
+  "settings.schema.swarm.join.dial.ca_file.desc":
+    "Набор сертификатов в PEM, которому доверяют для сертификата родителя вдобавок к системным.",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.label":
+    "Не проверять сертификат",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.desc":
+    "Только для стенда, каждое такое соединение пишется в журнал как небезопасное.",
   "settings.schema.swarm.allow_private_upstreams.label": "Частные адреса узлов",
-  "settings.schema.swarm.allow_private_upstreams.desc": "Имена хостов, которым можно указывать на частные диапазоны адресов, когда узел сообщает свой URL.",
-  "settings.schema.swarm.allow_insecure.label": "Работать без клиентского токена",
-  "settings.schema.swarm.allow_insecure.desc": "Разрешить релею на внешнем адресе работать без клиентского токена. Только для стенда.",
-  "settings.schema.swarm.insecure_open_registration.label": "Открытая регистрация",
-  "settings.schema.swarm.insecure_open_registration.desc": "Разрешить любому узлу присоединяться без токена присоединения. Только для стенда.",
+  "settings.schema.swarm.allow_private_upstreams.desc":
+    "Имена хостов, которым можно указывать на частные диапазоны адресов, когда узел сообщает свой URL.",
+  "settings.schema.swarm.allow_insecure.label":
+    "Работать без клиентского токена",
+  "settings.schema.swarm.allow_insecure.desc":
+    "Разрешить релею на внешнем адресе работать без клиентского токена. Только для стенда.",
+  "settings.schema.swarm.insecure_open_registration.label":
+    "Открытая регистрация",
+  "settings.schema.swarm.insecure_open_registration.desc":
+    "Разрешить любому узлу присоединяться без токена присоединения. Только для стенда.",
   "settings.section.logger.label": "Логирование",
   "settings.section.logger.desc": "Уровень, приёмники, ротация",
   "settings.section.gateways.label": "Шлюзы",
@@ -1852,6 +1894,7 @@ export const messagesRu: Record<string, string> = {
   "docs.ask.selectionTitle":
     "Начать чат с цитатой выделенного текста и его разделом",
   "swarm.title": "Рой",
+  "swarm.close": "Закрыть карту роя",
   "swarm.summary.relays.one": "{count} релей",
   "swarm.summary.relays.few": "{count} релея",
   "swarm.summary.relays.many": "{count} релеев",
@@ -1875,6 +1918,12 @@ export const messagesRu: Record<string, string> = {
   "swarm.graph.enter": "Открыть узел {node} через этот релей",
   "swarm.graph.enterRelay": "Подключиться к релею {node}",
   "swarm.graph.enterClient": "Открыть локальную машину",
+  "swarm.layout.label": "Раскладка графа",
+  "swarm.layout.tree": "Древовидная раскладка",
+  "swarm.layout.graph": "Графовая раскладка",
+  "swarm.viewport.zoomIn": "Увеличить",
+  "swarm.viewport.zoomOut": "Уменьшить",
+  "swarm.viewport.fit": "Показать граф целиком",
   "swarm.tier.client": "эта машина",
   "swarm.graph.hereIs": "Сейчас вы на узле {node}, маршрут {route}.",
   "swarm.graph.busy": "Работа идёт на узлах {names}.",
@@ -1906,10 +1955,12 @@ export const messagesRu: Record<string, string> = {
   "swarm.state.offline": "не в сети",
   "swarm.state.noRoute": "нет маршрута",
   "swarm.search.placeholder": "Поиск по задаче, папке, узлу или адресу",
-  "swarm.results.label": "Найденные сессии",
+  "swarm.results.label": "Результаты поиска",
+  "swarm.results.nodes": "Узлы",
+  "swarm.results.sessions": "Сессии",
   "swarm.empty.noSwarm": "Роя здесь нет.",
   "swarm.empty.looking": "Загрузка…",
-  "swarm.empty.noMatches": "Подходящих сессий нет.",
+  "swarm.empty.noMatches": "Ничего не найдено.",
   "swarm.empty.noNodes": "Ни один узел ещё не подключился.",
   "swarm.error.notRelay": "Это окружение не релей роя.",
   "swarm.error.needsToken":

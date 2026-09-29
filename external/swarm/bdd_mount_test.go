@@ -36,19 +36,23 @@ type nodeRecord struct {
 }
 
 type mountFeatureState struct {
-	relay  *httptest.Server
-	srv    *Server
-	node   *httptest.Server
-	client string
-	pair   string
+	relay    *httptest.Server
+	srv      *Server
+	node     *httptest.Server
+	child    *httptest.Server
+	childSrv *Server
+	client   string
+	pair     string
 
-	mu   sync.Mutex
-	seen []nodeRecord
+	mu        sync.Mutex
+	seen      []nodeRecord
+	childSeen []nodeRecord
 
-	status int
-	body   []byte
-	header http.Header
-	chunks []string
+	status         int
+	body           []byte
+	header         http.Header
+	chunks         []string
+	childResponses map[string][]byte
 	// nodeCORS makes the node answer with CORS headers of its own.
 	nodeCORS bool
 	// delivered carries the client's word that the chunk the node just wrote
@@ -69,12 +73,22 @@ func (s *mountFeatureState) reset() {
 		s.node.Close()
 		s.node = nil
 	}
+	if s.child != nil {
+		s.child.Close()
+		s.child = nil
+	}
+	if s.childSrv != nil {
+		s.childSrv.Close()
+		s.childSrv = nil
+	}
 	s.mu.Lock()
 	s.seen = nil
+	s.childSeen = nil
 	s.stalled = false
 	s.mu.Unlock()
 	s.status, s.body, s.chunks, s.streamErr = 0, nil, nil, nil
 	s.header, s.nodeCORS = nil, false
+	s.childResponses = nil
 }
 
 // awaitDelivery blocks the node until the client reports the chunk it just
@@ -195,6 +209,84 @@ func (s *mountFeatureState) anAgentNode(name string) error {
 		Version:      "test",
 	})
 	return err
+}
+
+func (s *mountFeatureState) aChildRelay(name, clientToken string) error {
+	cfg := &config.Config{}
+	cfg.Swarm.Host = "127.0.0.1"
+	cfg.Swarm.Name = name
+	cfg.Swarm.AuthToken = clientToken
+	childSrv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		return err
+	}
+	s.childSrv = childSrv
+	s.child = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		s.childSeen = append(s.childSeen, nodeRecord{Path: r.URL.Path, Auth: r.Header.Get("Authorization")})
+		s.mu.Unlock()
+		childSrv.Handler().ServeHTTP(w, r)
+	}))
+
+	_, err = s.srv.registry.Register(swarmdto.RegisterRequest{
+		Name:         name,
+		Kind:         swarmdto.KindRelay,
+		Transport:    swarmdto.TransportDirect,
+		AdvertiseURL: s.child.URL,
+		InstanceUUID: "uuid-" + name,
+		Token:        clientToken,
+		Version:      "test",
+	})
+	return err
+}
+
+func (s *mountFeatureState) browserReadsChildRelayEndpoints() error {
+	s.childResponses = make(map[string][]byte, 2)
+	for _, path := range []string{"/swarm/info", "/swarm/topology"} {
+		if err := s.callWithClientToken(path, "inner"); err != nil {
+			return err
+		}
+		if s.status != http.StatusOK {
+			return fmt.Errorf("GET %s returned %d: %s", path, s.status, s.body)
+		}
+		s.childResponses[path] = append([]byte(nil), s.body...)
+	}
+	return nil
+}
+
+func (s *mountFeatureState) mountedChildIdentifiesItself(name string) error {
+	var info swarmdto.Info
+	if err := json.Unmarshal(s.childResponses["/swarm/info"], &info); err != nil {
+		return fmt.Errorf("decode child info: %w", err)
+	}
+	if info.Name != name {
+		return fmt.Errorf("child info name = %q, want %q", info.Name, name)
+	}
+	var topology Topology
+	if err := json.Unmarshal(s.childResponses["/swarm/topology"], &topology); err != nil {
+		return fmt.Errorf("decode child topology: %w", err)
+	}
+	if topology.Root.Name != name {
+		return fmt.Errorf("child topology root = %q, want %q", topology.Root.Name, name)
+	}
+	return nil
+}
+
+func (s *mountFeatureState) childSawCredential(want string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.childSeen) != 2 {
+		return fmt.Errorf("child saw %d requests, want 2", len(s.childSeen))
+	}
+	for _, rec := range s.childSeen {
+		if rec.Auth != want {
+			return fmt.Errorf("child saw authorization %q on %s, want %q", rec.Auth, rec.Path, want)
+		}
+		if rec.Auth == "Bearer "+s.client {
+			return fmt.Errorf("outer client token crossed the child boundary on %s", rec.Path)
+		}
+	}
+	return nil
 }
 
 func (s *mountFeatureState) callOnNode(path, node, bearer string) error {
@@ -413,6 +505,7 @@ func TestSwarmMountFeature(t *testing.T) {
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
 			ctx.Step(`^a swarm relay with pairing token "([^"]*)" and client token "([^"]*)"$`, st.aRelay)
 			ctx.Step(`^an agent node "([^"]*)" that reports what it receives$`, st.anAgentNode)
+			ctx.Step(`^a child relay "([^"]*)" with client token "([^"]*)" registered under the outer relay$`, st.aChildRelay)
 			ctx.Step(`^I call "([^"]*)" on node "([^"]*)" with the client token$`, st.callWithClientToken)
 			ctx.Step(`^I call "([^"]*)" on node "([^"]*)" without any credential$`, st.callWithoutCredential)
 			ctx.Step(`^I stream "([^"]*)" from node "([^"]*)" with the client token$`, st.streamFromNode)
@@ -428,6 +521,9 @@ func TestSwarmMountFeature(t *testing.T) {
 			ctx.Step(`^the node answers with CORS headers of its own$`, st.nodeAnswersWithCORS)
 			ctx.Step(`^a browser at "([^"]*)" calls "([^"]*)" on node "([^"]*)" with the client token$`, st.browserCallsOnNode)
 			ctx.Step(`^the response allows the origin "([^"]*)" exactly once$`, st.responseAllowsOriginOnce)
+			ctx.Step(`^a browser using only the outer client token reads the mounted child relay endpoints$`, st.browserReadsChildRelayEndpoints)
+			ctx.Step(`^the mounted child relay identifies itself as "([^"]*)"$`, st.mountedChildIdentifiesItself)
+			ctx.Step(`^the child relay saw "([^"]*)", not the outer client token$`, st.childSawCredential)
 			ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 				st.reset()
 				return ctx, nil
