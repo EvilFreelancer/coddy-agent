@@ -38,7 +38,10 @@ var streamTruncationScripts = map[string]string{
 
 	// The body ends inside the JSON of the last frame, with no blank line
 	// after it: the lenient reader dispatches that frame like a browser
-	// would, and its decode fails at the end of the input.
+	// would, and its decode fails at the end of the input. The cut lands
+	// inside a string value on purpose, the commonest place for a cut mid
+	// delta; which end-of-input diagnostic the decoder reports depends on
+	// that position (streamDecodeTruncation names the spellings).
 	"cuts the last frame inside its JSON": "data: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null}}],\"id\":\"chatcmpl-j1\",\"model\":\"test-model\",\"object\":\"chat.completion.chunk\"}\n\n" +
 		"data: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"Hello\"}}],\"id\":\"chatcmpl-j1\",\"model\":\"test-model\",\"object\":\"chat.completion.chunk\"}\n\n" +
 		"data: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\" fr\"}}],\"id\":\"chatcmpl-j1\",\"model\":\"test-model\",\"object\":\"chat.completion.chunk\"}\n\n" +
@@ -59,7 +62,9 @@ var codexStreamTruncationScripts = map[string]string{
 
 	// A framed event (the blank line is there) whose JSON stops short: the
 	// SDK decoder dispatches it and its decode fails at the end of the input,
-	// the error of issue #384.
+	// the error of issue #384. The cut lands inside a string value on
+	// purpose; the SDK decoder appends a newline to the data line, so this
+	// position reads "invalid character '\n' in string literal".
 	"cuts an event inside its JSON after text deltas": "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\" fr\"}\n\n" +
 		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"del\n\n",

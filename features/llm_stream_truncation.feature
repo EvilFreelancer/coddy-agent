@@ -22,6 +22,7 @@ Feature: Truncated LLM streams surface as errors
     When a streaming completion is requested
     Then the call fails with a truncation error
     And the partial response preserves text "Hello fr"
+    And the stub server received 1 request
 
   Scenario: A stream with a finish_reason but no [DONE] marker succeeds
     Given an "openai" provider pointed at a stub server that ends the stream with a finish_reason but no [DONE] marker
@@ -34,6 +35,7 @@ Feature: Truncated LLM streams surface as errors
     When a streaming completion is requested
     Then the call fails with a truncation error
     And the partial response preserves text "Hello fr"
+    And the stub server received 1 request
 
   Scenario: A Codex event cut inside its JSON after text deltas fails and keeps the partial text
     Given a "codex" provider pointed at a stub server that cuts an event inside its JSON after text deltas

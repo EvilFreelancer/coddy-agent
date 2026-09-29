@@ -254,10 +254,11 @@ func (p *codexProvider) Stream(ctx context.Context, messages []Message, tools []
 		}
 		// The SDK decodes every framed event with json.Unmarshal, so an event
 		// whose JSON stops short surfaces here as a syntax error at the end
-		// of its input. That is a cut inside the event (issue #384) and takes
-		// the contract of a stream cut before its terminal event: the
-		// delivered text and reasoning next to a truncation error, no tool
-		// calls, the decoder's error kept as the cause.
+		// of its input. That is a cut inside the event (issue #384), the
+		// terminal event itself included, and it takes the contract of a
+		// stream cut short of its terminal event: the delivered text and
+		// reasoning next to a truncation error, no tool calls, the decoder's
+		// error kept as the cause.
 		if trunc := streamDecodeTruncation(err, emitted, 0); trunc != nil {
 			return partialWithoutTools(), fmt.Errorf("codex stream: %w", trunc)
 		}

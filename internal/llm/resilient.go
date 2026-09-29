@@ -450,9 +450,10 @@ func isRetryableLLMError(err error) bool {
 	if errors.As(err, &und) {
 		// A frame that is not JSON is a corrupt stream, not a cut: final
 		// before and after output, whatever status or transport phrase the
-		// frame's text happens to hold. After the truncation branch on
-		// purpose: a frame cut inside its JSON is a truncation wrapping this
-		// error, retried while nothing reached the caller.
+		// frame's text happens to hold. This branch sits after the truncation
+		// branch on purpose. A frame cut inside its JSON is a truncation that
+		// wraps this error as its cause, and that one is retried while
+		// nothing reached the caller.
 		return false
 	}
 	var transport *streamTransportError
@@ -577,8 +578,8 @@ func httpStatusFromError(err error) int {
 		}
 		return sse.code
 	}
-	// Typed like the streamed server error above: a truncation's cause and
-	// an undecodable frame carry server bytes (the OpenAI reader's frame
+	// Typed like streamServerError above: a truncation's cause and an
+	// undecodable frame carry server bytes (the OpenAI reader's frame
 	// snippet), which must not be read as a status. Neither has one.
 	var trunc *streamTruncatedError
 	if errors.As(err, &trunc) {

@@ -193,10 +193,12 @@ func (e *streamTruncatedError) Unwrap() error { return e.cause }
 // nil is returned so the caller keeps its own contract for it.
 //
 // payloadLen, when the caller has the decoded payload (the OpenAI-compatible
-// reader), is its length, and the error must then sit at its end: that rules
-// out a malformed but complete event whose whitespace happens to fall inside
-// a token, such as `{"a":nu ll}` or a JSON string split across two data:
-// lines. The SDK streams hand out no payload, so Codex and Anthropic pass 0
+// reader), is its length, and the error's Offset must then equal it - the
+// decoder consumed the whole payload before it ran out, which is what the
+// three diagnostics mean at the end of the input: that rules out a malformed
+// but complete event whose whitespace happens to fall inside a token, such
+// as `{"a":nu ll}` or a JSON string split across two data: lines, where the
+// same diagnostic fires short of the end. The SDK streams hand out no payload, so Codex and Anthropic pass 0
 // and take the diagnostic alone: a bounded heuristic that treats such an
 // event as a cut too - kept text, no tool call, a retry before output or a
 // continue after it, never a replay - which is the safe side of the

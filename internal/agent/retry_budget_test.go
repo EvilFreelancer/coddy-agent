@@ -218,8 +218,36 @@ func TestReActRecoversFromAnEventCutInsideItsJSON(t *testing.T) {
 		second = f.requests[1]
 	}
 	f.mu.Unlock()
-	if !strings.Contains(second, "Continue exactly where it stopped") || !strings.Contains(second, "Hello fr") {
-		t.Errorf("the recovery request does not carry the continue nudge and the text delivered before the cut: %s", second)
+	if !strings.Contains(second, "Continue exactly where it stopped") {
+		t.Errorf("the recovery request does not carry the continue nudge: %s", second)
+	}
+	// The text delivered before the cut travels as assistant history, not
+	// merely somewhere in the body, so the model continues its own answer.
+	var req struct {
+		Messages []struct {
+			Role    string
+			Content []struct {
+				Type string
+				Text string
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(second), &req); err != nil {
+		t.Fatalf("decode the recovery request: %v", err)
+	}
+	kept := false
+	for _, msg := range req.Messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, block := range msg.Content {
+			if strings.Contains(block.Text, "Hello fr") {
+				kept = true
+			}
+		}
+	}
+	if !kept {
+		t.Errorf("the recovery request does not carry the delivered text as an assistant message: %s", second)
 	}
 
 	zero := 0
