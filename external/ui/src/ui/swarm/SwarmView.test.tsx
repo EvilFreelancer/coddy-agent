@@ -1241,9 +1241,25 @@ describe("SwarmView", () => {
     });
     await waitFor(() => {
       expect(screen.getByTestId("swarm-results-empty")).toHaveTextContent(
-        "No sessions match",
+        "Nothing matches",
       );
     });
+  });
+
+  it("finds a node by name among the sessions", async () => {
+    const onOpenNode = vi.fn();
+    render(<SwarmView onOpenNode={onOpenNode} />);
+    await drawn();
+    fireEvent.change(screen.getByTestId("swarm-search"), {
+      target: { value: "nas02" },
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("swarm-node-hit-nas02"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("swarm-node-hit-nas02"));
+    expect(onOpenNode).toHaveBeenCalledWith(["nas02"]);
   });
 
   it("hands a picked session to its owner", async () => {

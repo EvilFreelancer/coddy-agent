@@ -13214,23 +13214,29 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 
 /* The head follows the documentation reader's own: the title block on the
    left, the search centred, the actions at the right edge, and a hairline
-   under it that runs to the dock's edges. */
+   under it that runs to the dock's edges. The band is pulled up over the
+   view's own top padding so it starts flush with the dock's top edge
+   instead of floating as a strip inside it. */
 .swarm-header {
+  position: relative;
+  z-index: 3;
   display: grid;
   grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(
       170px,
       210px
     );
+  grid-template-areas: "title search actions";
   column-gap: 32px;
   align-items: center;
-  margin-inline: calc(-1 * var(--swarm-inline, 24px));
-  padding: 0 var(--swarm-inline, 24px) 12px;
+  margin: -14px calc(-1 * var(--swarm-inline, 24px)) 0;
+  padding: 14px var(--swarm-inline, 24px) 12px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   border-bottom: 1px solid
     color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
 .swarm-title-block {
+  grid-area: title;
   min-width: 0;
 }
 
@@ -13254,6 +13260,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 }
 
 .swarm-header-actions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -13889,6 +13896,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
    field with a "/" hint, and the results hang over the map rather than push
    it down. */
 .swarm-search-box {
+  grid-area: search;
   position: relative;
 }
 
@@ -13984,6 +13992,23 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.swarm-result-group {
+  padding: 4px 12px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+}
+
+.swarm-result-here {
+  color: var(--accent);
+}
+
+.swarm-result-offline {
+  color: color-mix(in srgb, var(--text) 45%, var(--coddy-blend-base));
 }
 
 .swarm-result-hit {
