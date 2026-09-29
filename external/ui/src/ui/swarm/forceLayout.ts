@@ -74,6 +74,21 @@ function routeSlots(
   }
   for (const list of children.values()) {
     list.sort((a, b) => compare(a.name, b.name) || compare(a.uuid, b.uuid));
+    // A leaf belongs right under its parent; a relay carries a whole subtree
+    // of its own, so relay children take the band's edges and the leaf agents
+    // hang in the middle where the parent stands.
+    const relays = list.filter((n) => n.kind === "relay");
+    if (relays.length > 0 && relays.length < list.length) {
+      const leaves = list.filter((n) => n.kind !== "relay");
+      const split = Math.ceil(relays.length / 2);
+      list.splice(
+        0,
+        list.length,
+        ...relays.slice(0, split),
+        ...leaves,
+        ...relays.slice(split),
+      );
+    }
   }
   const slot = new Map<string, number>();
   let next = 0;

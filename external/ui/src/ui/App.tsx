@@ -125,6 +125,8 @@ import {
   localFetch,
   snapshotEnv,
   subscribeEnv,
+  swarmMountPath,
+  swarmRootRelay,
 } from "./env/remoteEnv";
 import {
   configuredRemoteFor,
@@ -5433,7 +5435,7 @@ export function App() {
       // the one entry point this screen exists for silently did nothing.
       const relay =
         env.mode === "remote"
-          ? (env.swarmRelay ?? env.baseUrl)
+          ? swarmRootRelay(env)
           : window.location.origin;
       if (!relay) {
         return;
@@ -5449,21 +5451,27 @@ export function App() {
   );
 
   // A relay on the map opens as a relay: the one the map is drawn for is
-  // connected to itself, a relay chained under it opens on its own map.
+  // connected to itself, a relay chained under it opens through its mount -
+  // staying on the same map, which is always drawn by the outermost relay.
   const openSwarmRelay = useCallback(
     (relayPath: string[], name: string) => {
       const env = getEnv();
-      // Already on the relay the map is drawn for: nothing to connect to, and a
-      // reload would only blink the page.
-      if (
-        relayPath.length === 0 &&
-        !(env.mode === "remote" && env.swarmRelay)
-      ) {
+      // Already on the relay this path names - the map's root for a home or
+      // a local env, a chained relay for its own mount env: nothing to
+      // connect to, and a reload would only blink the page. A node env never
+      // matches: leaving it for a relay is a switch.
+      const onRelayPath =
+        env.mode === "remote"
+          ? env.swarmRelay
+            ? null
+            : swarmMountPath(env.baseUrl)
+          : swarmMountPath(window.location.origin);
+      if (onRelayPath && onRelayPath.join("/") === relayPath.join("/")) {
         return;
       }
       const relay =
         env.mode === "remote"
-          ? (env.swarmRelay ?? env.baseUrl)
+          ? swarmRootRelay(env)
           : window.location.origin;
       if (!relay) {
         return;
@@ -5494,7 +5502,10 @@ export function App() {
     if (env.mode !== "remote") {
       return [] as string[];
     }
-    return (env.swarmNode || "").split("/").filter(Boolean);
+    const path = (env.swarmNode || "").split("/").filter(Boolean);
+    // A chained relay's env carries no swarmNode, but its mount URL spells
+    // the same path - the map marks where the app stands on the whole swarm.
+    return path.length ? path : swarmMountPath(env.baseUrl);
   }, []);
 
   /**
@@ -5507,10 +5518,18 @@ export function App() {
    */
   const swarmRelayTarget = useMemo(() => {
     const env = getEnv();
-    if (env.mode !== "remote" || !env.swarmRelay) {
+    if (env.mode !== "remote") {
       return undefined;
     }
-    return { baseUrl: env.swarmRelay, token: env.token };
+    // The map is drawn by the outermost relay of the chain the environment
+    // hangs off: entering a node or a chained relay keeps the whole swarm in
+    // view and only moves the mark of where the app stands (env.swarmRelay
+    // for a node, the mount in its own baseUrl for a chained relay).
+    const relay =
+      env.swarmRelay || swarmMountPath(env.baseUrl).length
+        ? swarmRootRelay(env)
+        : "";
+    return relay ? { baseUrl: relay, token: env.token } : undefined;
   }, []);
 
   const openSwarmFromNav = useCallback(() => {
@@ -6281,7 +6300,10 @@ export function App() {
               {...(swarmCurrentNode.length > 0
                 ? { currentNode: swarmCurrentNode }
                 : {})}
-              {...(atSwarmRoot ? { rootCurrent: true } : { onClose: onCloseSwarm })}
+              {...(atSwarmRoot && swarmCurrentNode.length === 0
+                ? { rootCurrent: true }
+                : {})}
+              {...(atSwarmRoot ? {} : { onClose: onCloseSwarm })}
             />
           </div>
         ) : null}

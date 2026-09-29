@@ -4,6 +4,9 @@ import {
   connectSwarmRelay,
   getEnv,
   setEnv,
+  swarmMountPath,
+  swarmMountRoot,
+  swarmRootRelay,
 } from "./remoteEnv";
 
 // The env module caches and reloads the page, so both are stubbed.
@@ -121,5 +124,51 @@ describe("connectSwarmRelay", () => {
     // a chat for it.
     expect(env.swarmRelay).toBeUndefined();
     expect(window.location.hash).toBe("#/swarm");
+  });
+});
+
+describe("swarm mount helpers", () => {
+  // A mount URL spells the whole chain from the outermost relay down, so the
+  // map can always be drawn by the root relay no matter how deep the env is.
+  it("swarmMountRoot returns the relay a mount hangs off", () => {
+    expect(
+      swarmMountRoot("http://r:1/swarm/nodes/east/swarm/nodes/deep"),
+    ).toBe("http://r:1");
+    expect(swarmMountRoot("http://r:1/swarm/nodes/east")).toBe("http://r:1");
+    expect(swarmMountRoot("http://r:1")).toBe("");
+    expect(swarmMountRoot("http://node.example")).toBe("");
+  });
+
+  it("swarmMountPath lists the chained names, outermost first", () => {
+    expect(
+      swarmMountPath("http://r:1/swarm/nodes/east/swarm/nodes/deep"),
+    ).toEqual(["east", "deep"]);
+    expect(swarmMountPath("http://r:1/swarm/nodes/east")).toEqual(["east"]);
+    expect(swarmMountPath("http://r:1")).toEqual([]);
+  });
+
+  it("swarmRootRelay resolves to the outermost relay of the chain", () => {
+    // A node reached through a chained relay: its swarmRelay is itself a
+    // mount, and the root is still the outermost relay.
+    expect(
+      swarmRootRelay({
+        baseUrl: "http://r:1/swarm/nodes/east/swarm/nodes/laptop",
+        swarmRelay: "http://r:1/swarm/nodes/east",
+      }),
+    ).toBe("http://r:1");
+    // A chained relay env: the mount is in its own baseUrl.
+    expect(
+      swarmRootRelay({ baseUrl: "http://r:1/swarm/nodes/east" }),
+    ).toBe("http://r:1");
+    // A plain node mount and a direct remote stand as they are.
+    expect(
+      swarmRootRelay({
+        baseUrl: "http://r:1/swarm/nodes/box",
+        swarmRelay: "http://r:1",
+      }),
+    ).toBe("http://r:1");
+    expect(swarmRootRelay({ baseUrl: "http://other.example" })).toBe(
+      "http://other.example",
+    );
   });
 });

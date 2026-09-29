@@ -381,6 +381,43 @@ export function connectSwarmRelay(
   );
 }
 
+/**
+ * The relay a mount URL hangs off - the part before the first /swarm/nodes/,
+ * or "" when the base is not a mount. The map is always drawn by the
+ * outermost relay of the chain: entering a node or a chained relay keeps the
+ * whole swarm in view and only moves the mark of where the app stands.
+ */
+export function swarmMountRoot(baseUrl: string): string {
+  const i = baseUrl.indexOf("/swarm/nodes/");
+  return i < 0 ? "" : baseUrl.slice(0, i);
+}
+
+/**
+ * The names a mount URL chains, outermost first:
+ * "<relay>/swarm/nodes/a/swarm/nodes/b" -> ["a", "b"].
+ */
+export function swarmMountPath(baseUrl: string): string[] {
+  const out: string[] = [];
+  for (const part of baseUrl.split("/swarm/nodes/").slice(1)) {
+    const head = part.split("/")[0];
+    if (head) out.push(head);
+  }
+  return out;
+}
+
+/**
+ * The relay that draws the swarm map for an environment: the outermost relay
+ * of the mount chain a node or a chained relay is reached through, else the
+ * environment's own base.
+ */
+export function swarmRootRelay(env: {
+  swarmRelay?: string;
+  baseUrl: string;
+}): string {
+  const through = env.swarmRelay ?? env.baseUrl;
+  return swarmMountRoot(through) || through;
+}
+
 /** The name the current environment gives a relay base, for its chip. */
 function getEnvName(relay: string): string {
   const env = getEnv();

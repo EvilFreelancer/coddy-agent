@@ -468,18 +468,24 @@ function hopLink(from: PlacedNode, to: PlacedNode): Connector {
       peer: false,
     };
   }
-  const hdir = to.x > from.x ? 1 : -1;
+  // A fan-out leaves at several points of the parent's lower half, the exit
+  // riding the bottom edge toward the child, rather than one centre stub
+  // every sibling shares.
+  const spread = nodeHalfWidth(from) * 0.8;
+  const exitX =
+    from.x + Math.max(-spread, Math.min(spread, to.x - from.x));
+  const hdir = to.x > exitX ? 1 : -1;
   const r = Math.min(
     CORNER,
-    Math.abs(to.x - from.x) / 2,
+    Math.abs(to.x - exitX) / 2,
     Math.abs(railY - y0),
     Math.abs(y1 - railY),
   );
   return {
     d:
-      `M${round(from.x)} ${round(y0)}` +
-      ` L${round(from.x)} ${round(railY - vdir * r)}` +
-      ` Q${round(from.x)} ${round(railY)} ${round(from.x + hdir * r)} ${round(railY)}` +
+      `M${round(exitX)} ${round(y0)}` +
+      ` L${round(exitX)} ${round(railY - vdir * r)}` +
+      ` Q${round(exitX)} ${round(railY)} ${round(exitX + hdir * r)} ${round(railY)}` +
       ` L${round(to.x - hdir * r)} ${round(railY)}` +
       ` Q${round(to.x)} ${round(railY)} ${round(to.x)} ${round(railY + vdir * r)}` +
       ` L${round(to.x)} ${round(y1)}`,
@@ -504,7 +510,11 @@ export function graphConnectorFor(edge: PlacedEdge): Connector {
   const { from, to } = edge;
   const dir = to.x >= from.x ? 1 : -1;
   if (to.y - from.y > 1) {
-    const x0 = from.x;
+    // The exit rides the source's bottom edge toward the target, so a fan
+    // leaves at several points of its lower half rather than one centre stub.
+    const spread = nodeHalfWidth(from) * 0.8;
+    const x0 =
+      from.x + Math.max(-spread, Math.min(spread, to.x - from.x));
     const y0 = from.y + nodeHalfHeight(from) + EXIT_GAP;
     const x1 = to.x;
     const y1 = to.y - nodeHalfHeight(to) - ARRIVE_GAP;

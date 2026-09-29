@@ -611,7 +611,11 @@ describe("graphConnectorFor", () => {
     const points = pathPoints(conn.d);
     const start = points[0]!;
     const end = points[points.length - 1]!;
-    expect(start.x).toBe(from.x);
+    // The exit rides the bottom edge toward the child: off-centre towards it,
+    // clamped inside the shape's lower half.
+    expect(start.x).toBe(
+      from.x + Math.min(to.x - from.x, nodeHalfWidth(from) * 0.8),
+    );
     expect(start.y).toBe(from.y + nodeHalfHeight(from) + 10);
     expect(end.x).toBe(to.x);
     expect(end.y).toBe(to.y - nodeHalfHeight(to) - 10);
@@ -621,6 +625,19 @@ describe("graphConnectorFor", () => {
     expect(conn.labelX).toBeGreaterThanOrEqual(Math.min(start.x, end.x) - 60);
     expect(conn.labelX).toBeLessThanOrEqual(Math.max(start.x, end.x) + 60);
     expect(conn.peer).toBe(false);
+  });
+
+  it("fans a parent's wires out of several exit points instead of one", () => {
+    const from = relay("parent", 400, 120);
+    const left = graphConnectorFor(edge(from, relay("left", 120, 380)));
+    const mid = graphConnectorFor(edge(from, relay("mid", 400, 380)));
+    const right = graphConnectorFor(edge(from, relay("right", 760, 380)));
+    const exitX = (d: string) => pathPoints(d)[0]!.x;
+    // The exit follows the child's direction along the bottom edge, clamped
+    // inside the lower half; a child straight under keeps the centre.
+    expect(exitX(left.d)).toBe(from.x - nodeHalfWidth(from) * 0.8);
+    expect(exitX(mid.d)).toBe(from.x);
+    expect(exitX(right.d)).toBe(from.x + nodeHalfWidth(from) * 0.8);
   });
 
   it("keeps an alternate edge a distinct cubic over the same endpoints", () => {
