@@ -1196,6 +1196,7 @@ export const messagesRu: Record<string, string> = {
   "chat.contextCompactNow": "Сжать сейчас",
   "chat.contextCompacting": "Сжимаю…",
   "chat.contextCompactError": "Не удалось сжать контекст",
+  "chat.contextCompactNothing": "Сжимать пока нечего",
   "chat.contextClose": "Закрыть",
   "chat.contextCloseBreakdown": "Закрыть разбор контекста",
   "chat.contextEmpty": "Контекст пока не используется",

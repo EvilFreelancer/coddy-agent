@@ -94,7 +94,7 @@ export function ContextBreakdownPopover(props: {
   modelId?: string;
   sessionId?: string | undefined;
   compactAvailable?: boolean | undefined;
-  compactEnabled?: boolean | undefined;
+  compactAutoEnabled?: boolean | undefined;
   compactThreshold?: number | undefined;
   onCompacted?: (() => void) | undefined;
 }) {
@@ -105,13 +105,15 @@ export function ContextBreakdownPopover(props: {
   );
   const useSheet = props.useSheet === true;
   const [compacting, setCompacting] = useState(false);
-  const [compactError, setCompactError] = useState(false);
+  const [compactState, setCompactState] = useState<
+    "idle" | "error" | "nothing"
+  >("idle");
 
   const compactNow = async () => {
     const sid = props.sessionId?.trim();
     if (!sid || compacting) return;
     setCompacting(true);
-    setCompactError(false);
+    setCompactState("idle");
     try {
       const res = await fetch(
         `/coddy/sessions/${encodeURIComponent(sid)}/compact`,
@@ -125,9 +127,18 @@ export function ContextBreakdownPopover(props: {
         },
       );
       if (!res.ok) throw new Error(`compact: ${res.status}`);
+      const payload = (await res.json().catch(() => null)) as {
+        compacted?: boolean;
+      } | null;
+      if (payload && payload.compacted === false) {
+        // The endpoint answers 200 with compacted:false when nothing
+        // could be folded - report that instead of a fake success.
+        setCompactState("nothing");
+        return;
+      }
       props.onCompacted?.();
     } catch {
-      setCompactError(true);
+      setCompactState("error");
     } finally {
       setCompacting(false);
     }
@@ -241,7 +252,7 @@ export function ContextBreakdownPopover(props: {
           {t("chat.contextTitle")}
         </span>
         <div className="context-breakdown-actions">
-          {props.sessionId && props.compactAvailable !== false ? (
+          {props.sessionId && props.compactAvailable === true ? (
             <button
               type="button"
               className="context-breakdown-compact"
@@ -251,7 +262,7 @@ export function ContextBreakdownPopover(props: {
             >
               {compacting
                 ? t("chat.contextCompacting")
-                : props.compactEnabled === false
+                : props.compactAutoEnabled === false
                   ? t("chat.contextCompactNow")
                   : t("chat.contextCompactAt", {
                       percent: String(props.compactThreshold || 80),
@@ -271,9 +282,14 @@ export function ContextBreakdownPopover(props: {
           ) : null}
         </div>
       </div>
-      {compactError ? (
+      {compactState === "error" ? (
         <p role="alert" className="context-breakdown-error">
           {t("chat.contextCompactError")}
+        </p>
+      ) : null}
+      {compactState === "nothing" ? (
+        <p className="context-breakdown-note">
+          {t("chat.contextCompactNothing")}
         </p>
       ) : null}
       <div className="context-breakdown-summary">

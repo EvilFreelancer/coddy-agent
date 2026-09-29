@@ -1174,6 +1174,7 @@ export const messagesEn: Record<string, string> = {
   "chat.contextCompactNow": "Compact now",
   "chat.contextCompacting": "Compacting…",
   "chat.contextCompactError": "Could not compact context",
+  "chat.contextCompactNothing": "Nothing to compact yet",
   "chat.contextClose": "Close",
   "chat.contextCloseBreakdown": "Close context breakdown",
   "chat.contextEmpty": "No context usage yet",

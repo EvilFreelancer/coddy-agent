@@ -6311,6 +6311,11 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   font-size: 12px;
 }
 
+.context-breakdown-note {
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+  font-size: 12px;
+}
+
 html:not([data-theme="light"]) .context-breakdown-error {
   color: #f87171;
 }

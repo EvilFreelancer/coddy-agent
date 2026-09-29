@@ -3307,7 +3307,7 @@ export function Composer(props: {
           breakdown={props.contextBreakdown}
           sessionId={props.sessionId}
           compactAvailable={props.compactionSettings?.enabled}
-          compactEnabled={props.compactionSettings?.autoEnabled}
+          compactAutoEnabled={props.compactionSettings?.autoEnabled}
           compactThreshold={props.compactionSettings?.threshold}
           onCompacted={props.onContextCompacted}
           usage={props.providerUsage ?? null}

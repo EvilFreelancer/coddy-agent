@@ -29,7 +29,8 @@ test("context action shows the threshold, posts compaction and holds progress", 
       onClose={() => {}}
       maxContextTokens={1000}
       sessionId="sess_123"
-      compactEnabled
+      compactAvailable
+      compactAutoEnabled
       compactThreshold={95}
       onCompacted={onCompacted}
     />,
@@ -60,12 +61,43 @@ test("context action says compact now when automation is disabled", () => {
       onClose={() => {}}
       maxContextTokens={1000}
       sessionId="sess_123"
-      compactEnabled={false}
+      compactAvailable
+      compactAutoEnabled={false}
     />,
   );
   expect(screen.getByTestId("context-breakdown-compact")).toHaveTextContent(
     "Compact now",
   );
+});
+
+test("context action says nothing to compact when the endpoint folds nothing", async () => {
+  const fetchMock = vi.fn(async () =>
+    Promise.resolve(
+      new Response(JSON.stringify({ compacted: false, reason: "nothing_to_compact" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const onCompacted = vi.fn();
+  render(
+    <ContextBreakdownPopover
+      open
+      onClose={() => {}}
+      maxContextTokens={1000}
+      sessionId="sess_123"
+      compactAvailable
+      compactAutoEnabled
+      onCompacted={onCompacted}
+    />,
+  );
+
+  fireEvent.click(screen.getByTestId("context-breakdown-compact"));
+  await waitFor(() =>
+    expect(screen.getByText(/nothing to compact/i)).toBeInTheDocument(),
+  );
+  expect(onCompacted).not.toHaveBeenCalled();
 });
 
 // History open beside the chat, the breakdown opened over the composer after
