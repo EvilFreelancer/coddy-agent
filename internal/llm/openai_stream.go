@@ -203,7 +203,12 @@ func (e *streamTruncatedError) Unwrap() error { return e.cause }
 // event as a cut too - kept text, no tool call, a retry before output or a
 // continue after it, never a replay - which is the safe side of the
 // ambiguity, and no encoder writes a raw space or newline inside a literal,
-// a number or an SSE data string.
+// a number or an SSE data string. The one SDK error with no syntax error in
+// its chain is the in-band error event, spelled "received error while
+// streaming: <payload>" by both SDKs; when that payload ends inside its JSON
+// it is re-parsed and classified here. The spelling is pinned by the stream
+// tests, which drive the real SDK decoders, so a renamed message fails the
+// suite instead of silently falling back to the transport branch.
 func streamDecodeTruncation(err error, emitted bool, payloadLen int) *streamTruncatedError {
 	var syn *json.SyntaxError
 	if err == nil {
