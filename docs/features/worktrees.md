@@ -8,10 +8,20 @@ manual `cd`.
 In an agent conversation, ask Coddy to work on a feature branch. The
 `worktree_create` tool takes `{"branch":"feature/login"}`. It fetches `origin`,
 reads the default branch from `origin/HEAD`, and creates a new branch from the
-fresh `origin/<base>` commit. A branch already checked out in a worktree is
-reused. The tool refuses the default branch itself and a local branch that
-tracks `origin/<base>`. It requires an `origin` remote and an approval under
-the current tool permission mode.
+fresh `origin/<base>` commit. A branch that exists only on `origin` is checked
+out from `origin/<branch>` with tracking; a branch that already exists locally
+is reused at its own tip, and a branch already checked out in a worktree reuses
+that worktree. The tool refuses the default branch itself and a local branch
+that tracks `origin/<base>`.
+
+Creation requires an `origin` remote and an approval under the current tool
+permission mode; reusing a worktree that already exists needs neither the
+network nor `origin`. A refusal or a failed fetch leaves the session in its
+original directory. Other errors the tool reports: an invalid branch name,
+`origin/HEAD` that resolves to nothing, the branch being checked out in the
+main checkout, and a worktree path that already exists on disk. Sessions whose
+cwd sits inside a git submodule resolve `repo_root` to nothing and group under
+their own folder in History.
 
 The main checkout is advanced to the fetched default commit only by a safe
 fast-forward: it must already be an ancestor, and a checked-out default branch

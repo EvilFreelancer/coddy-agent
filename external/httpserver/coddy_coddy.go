@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -40,6 +41,30 @@ func describeClampWords(s string, maxWords int) string {
 		return strings.Join(w, " ")
 	}
 	return strings.Join(w[:maxWords], " ")
+}
+
+// repoRootCache memoizes gitws.MainCheckoutRoot per session cwd for a short
+// window: the sessions list is polled while History is open, and a
+// `git rev-parse` spawn per distinct cwd per request is measurable for
+// folders outside git.
+var repoRootCache sync.Map // string cwd -> repoRootCacheEntry
+
+type repoRootCacheEntry struct {
+	root    string
+	expires time.Time
+}
+
+// sessionRepoRoot reports the main checkout a session's cwd belongs to, or ""
+// for a folder outside git.
+func sessionRepoRoot(cwd string) string {
+	if v, ok := repoRootCache.Load(cwd); ok {
+		if ent, ok := v.(repoRootCacheEntry); ok && time.Now().Before(ent.expires) {
+			return ent.root
+		}
+	}
+	root := gitws.MainCheckoutRoot(cwd)
+	repoRootCache.Store(cwd, repoRootCacheEntry{root: root, expires: time.Now().Add(30 * time.Second)})
+	return root
 }
 
 func describeStripLineNoise(s string) string {
@@ -917,7 +942,7 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 			ent["cwd"] = row.CWD
 			root, seen := repoRoots[row.CWD]
 			if !seen {
-				root = gitws.MainCheckoutRoot(row.CWD)
+				root = sessionRepoRoot(row.CWD)
 				repoRoots[row.CWD] = root
 			}
 			if root != "" {

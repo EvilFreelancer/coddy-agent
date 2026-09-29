@@ -18,12 +18,13 @@ import (
 )
 
 type worktreeCreateState struct {
-	root     string
-	state    *session.State
-	manager  *session.Manager
-	env      *apptools.Env
-	output   string
-	worktree string
+	root      string
+	state     *session.State
+	manager   *session.Manager
+	env       *apptools.Env
+	output    string
+	worktree  string
+	createErr error
 }
 
 func (s *worktreeCreateState) git(dir string, args ...string) (string, error) {
@@ -88,6 +89,22 @@ func (s *worktreeCreateState) run(command string) error {
 	return err
 }
 
+func (s *worktreeCreateState) tryCreate(branch string) error {
+	_, s.createErr = apptools.NewRegistry().Execute(context.Background(), apptools.ToolWorktreeCreate,
+		fmt.Sprintf(`{"branch":%q}`, branch), s.env)
+	return nil
+}
+
+func (s *worktreeCreateState) refused() error {
+	if s.createErr == nil {
+		return fmt.Errorf("worktree_create succeeded where a refusal was expected")
+	}
+	if cwd := s.state.GetCWD(); cwd != s.root {
+		return fmt.Errorf("session moved to %q on a refused request", cwd)
+	}
+	return nil
+}
+
 func (s *worktreeCreateState) check() error {
 	if s.worktree == s.root || !strings.Contains(s.worktree, filepath.Join(".coddy", "worktrees")) {
 		return fmt.Errorf("session did not move into a worktree: %q", s.worktree)
@@ -113,6 +130,8 @@ func TestWorktreeCreateFeature(t *testing.T) {
 			})
 			sc.Step(`^a session in a repository with a bare origin$`, func() error { return nil })
 			sc.Step(`^the agent creates a worktree for "([^"]*)"$`, s.create)
+			sc.Step(`^the agent tries to create a worktree for "([^"]*)"$`, s.tryCreate)
+			sc.Step(`^the creation is refused and the session stays in the main checkout$`, s.refused)
 			sc.Step(`^the agent runs "([^"]*)" without a cwd argument$`, s.run)
 			sc.Step(`^the command runs inside the new worktree$`, s.check)
 		},

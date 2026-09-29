@@ -1511,6 +1511,7 @@ export const messagesEn: Record<string, string> = {
   "tool.name.list_dir": "browsing a directory",
   "tool.name.mkdir": "creating a directory",
   "tool.name.touch": "creating a file",
+  "tool.name.worktree_create": "creating a worktree",
   "tool.name.mv": "moving a path",
   "tool.name.rm": "removing a path",
   "tool.name.rmdir": "removing a directory",

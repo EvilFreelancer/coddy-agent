@@ -40,6 +40,10 @@ func GitAvailable() bool {
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	// These commands run synchronously inside request handlers and agent
+	// turns: a remote that answers an auth prompt on the terminal would hang
+	// them for good, so every credential prompt fails instead of asking.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	platform.AdaptCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -232,24 +236,24 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 	if mainRoot == "" {
 		return "", false, fmt.Errorf("cannot locate the main checkout of %s", repoDir)
 	}
-	if _, err := runGit(repoDir, "fetch", "origin"); err != nil {
-		return "", false, fmt.Errorf("refresh origin before creating a worktree: %w", err)
-	}
-	if _, err := runGit(repoDir, "remote", "set-head", "origin", "-a"); err != nil {
-		return "", false, fmt.Errorf("resolve origin/HEAD: %w", err)
-	}
-	base := defaultBranch(repoDir)
-	if base == "" {
-		return "", false, fmt.Errorf("origin/HEAD does not name a default branch")
-	}
-	if branch == base || branch == "origin/"+base {
-		return "", false, fmt.Errorf("worktrees require a feature branch; %q is the default branch", branch)
-	}
-	if upstream, _ := runGit(repoDir, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+branch); upstream == "origin/"+base {
-		return "", false, fmt.Errorf("branch %q tracks the default branch origin/%s", branch, base)
-	}
 	root := WorktreesRoot(mainRoot)
-
+	// `.coddy` is repository content, so a checkout can ship it - or the
+	// worktrees folder under it - as a symlink aimed anywhere. Resolve what
+	// already exists and refuse to write outside the checkout the worktree
+	// belongs to, before the reuse loop's ignore-file repair or MkdirAll
+	// below follow one.
+	if err := checkWorktreesRoot(mainRoot, root); err != nil {
+		return "", false, err
+	}
+	// Refusing the default branch and branches tracking it is a local
+	// decision whenever origin/HEAD is already resolved; it must not wait on
+	// the network. A base git has not resolved yet is checked again after
+	// the fetch below.
+	if err := refuseDefaultBranch(repoDir, branch, defaultBranch(repoDir)); err != nil {
+		return "", false, err
+	}
+	// Reusing an existing worktree needs no origin at all: keep the fast
+	// path offline-capable.
 	for _, wt := range list {
 		if wt.Branch != branch {
 			continue
@@ -267,14 +271,29 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 		}
 		return wt.Path, false, nil
 	}
+
+	if _, err := runGit(repoDir, "fetch", "origin"); err != nil {
+		return "", false, fmt.Errorf("refresh origin before creating a worktree: %w", err)
+	}
+	if _, err := runGit(repoDir, "remote", "set-head", "origin", "-a"); err != nil {
+		return "", false, fmt.Errorf("resolve origin/HEAD: %w", err)
+	}
+	base := defaultBranch(repoDir)
+	if base == "" {
+		return "", false, fmt.Errorf("origin/HEAD does not name a default branch")
+	}
+	// The default branch may have moved with the fetch, or been unknown
+	// locally before it.
+	if err := refuseDefaultBranch(repoDir, branch, base); err != nil {
+		return "", false, err
+	}
 	fastForwardBase(repoDir, mainRoot, base, list)
 
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", false, fmt.Errorf("worktrees root: %w", err)
 	}
-	// `.coddy` is repository content, so a checkout can ship it as a symlink
-	// aimed anywhere, and every call above follows one. Resolve what we ended
-	// up with and refuse to put a worktree outside the checkout it belongs to.
+	// The same containment check as above, on the directories MkdirAll
+	// actually produced.
 	if !isInside(mainRoot, root) {
 		return "", false, fmt.Errorf("worktrees root %s resolves outside %s", root, mainRoot)
 	}
@@ -283,16 +302,66 @@ func EnsureWorktree(repoDir, branch string) (string, bool, error) {
 	}
 	path := filepath.Join(root, dirName)
 	args := []string{"worktree", "add"}
-	if _, err := runGit(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+	switch {
+	case refExists(repoDir, "refs/heads/"+branch):
+		// A local branch is reused at its own tip; it is not rebased onto
+		// the fetched default branch.
+		args = append(args, "--", path, branch)
+	case refExists(repoDir, "refs/remotes/origin/"+branch):
+		// The branch exists on origin but has no local tip: materialize it
+		// instead of silently redefining it at origin/<base>.
+		args = append(args, "--track", "-b", branch, "--", path, "origin/"+branch)
+	default:
 		args = append(args, "--no-track", "-b", branch)
 		args = append(args, "--", path, "origin/"+base)
-	} else {
-		args = append(args, "--", path, branch)
 	}
 	if _, err := runGit(repoDir, args...); err != nil {
 		return "", false, err
 	}
 	return path, true, nil
+}
+
+// refuseDefaultBranch rejects the default branch itself and local branches
+// that track it. An empty base means origin/HEAD is not resolved yet and
+// nothing can be proven here; the caller checks again after fetching.
+func refuseDefaultBranch(repoDir, branch, base string) error {
+	if base == "" {
+		return nil
+	}
+	if branch == base || branch == "origin/"+base {
+		return fmt.Errorf("worktrees require a feature branch; %q is the default branch", branch)
+	}
+	if upstream, _ := runGit(repoDir, "for-each-ref", "--format=%(upstream:short)", "refs/heads/"+branch); upstream == "origin/"+base {
+		return fmt.Errorf("branch %q tracks the default branch origin/%s", branch, base)
+	}
+	return nil
+}
+
+// checkWorktreesRoot verifies that every component of root below mainRoot
+// that already exists resolves inside mainRoot. `.coddy` and `worktrees`
+// are repository content a checkout can ship as symlinks aimed anywhere;
+// a dangling symlink (existing entry that does not resolve) is refused too,
+// so MkdirAll never creates directories outside the checkout.
+func checkWorktreesRoot(mainRoot, root string) error {
+	for _, dir := range []string{filepath.Join(mainRoot, ".coddy"), root} {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			if _, statErr := os.Lstat(dir); statErr != nil {
+				continue // nothing there; MkdirAll creates real directories
+			}
+			return fmt.Errorf("worktrees root %s does not resolve: %w", dir, err)
+		}
+		if !isInside(mainRoot, resolved) {
+			return fmt.Errorf("worktrees root %s resolves outside %s", dir, mainRoot)
+		}
+	}
+	return nil
+}
+
+// refExists reports whether ref resolves to a commit.
+func refExists(repoDir, ref string) bool {
+	_, err := runGit(repoDir, "show-ref", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 // fastForwardBase advances a local default branch only when its old commit is
