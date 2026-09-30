@@ -223,6 +223,9 @@ groups:
       - path: contributing/build.md
         title: Build from source
         summary: Prerequisites, make build, TAGS against go build -tags, the release binaries and the distribution packages.
+      - path: contributing/security-scanning.md
+        title: AppSec scanning
+        summary: Trivy and semgrep locally and in CI through one script, the severity gate, triage and suppression.
       - path: contributing/custom-tools.md
         title: Custom tools
         summary: Adding a built-in tool to the registry, its schema and permission wiring, with a complete example.

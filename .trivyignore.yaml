@@ -1,0 +1,10 @@
+# Accepted findings, each with a statement and an expiry so the list rots
+# instead of silently pardoning new issues. Format:
+# https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml
+#
+# Path exclusions live in trivy.yaml (scan.skip-dirs), not here. This file
+# cannot suppress secret findings — those need skip-dirs/skip-files or a fix.
+vulnerabilities: []
+misconfigurations: []
+secrets: []
+licenses: []

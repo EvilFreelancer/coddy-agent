@@ -1,0 +1,19 @@
+# Trivy configuration for the repository scan (read automatically when trivy
+# runs from the repo root — local binary, docker fallback in
+# scripts/security-scan.sh, and CI all share it).
+#
+# Trivy does not honor .gitignore: without these skips a developer machine
+# after `npm install` would scan hundreds of thousands of files CI never
+# sees. Keep this list to directories a fresh checkout does not contain or
+# that carry no product code.
+scan:
+  skip-dirs:
+    - .git
+    - node_modules
+    - dist
+    - build
+    - docs/assets
+    - examples/.venv
+    - .venv
+    - vendor
+    - .coddy/worktrees

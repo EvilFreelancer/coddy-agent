@@ -358,7 +358,10 @@ func (s *Server) coddyMemoryFileDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"invalid root"}}`, http.StatusBadRequest)
 		return
 	}
-	if memRoot == "" || filepath.Clean(abs) == filepath.Clean(memRoot) {
+	// Clean is not used as a traversal sanitizer here: abs is already
+	// constrained to memRoot by absUnder() in coddyResolveMemoryAbs, and this
+	// is an equality check that refuses deleting the memory root itself.
+	if memRoot == "" || filepath.Clean(abs) == filepath.Clean(memRoot) { // nosemgrep: go.lang.security.filepath-clean-misuse.filepath-clean-misuse
 		http.Error(w, `{"error":{"message":"cannot delete memory root"}}`, http.StatusBadRequest)
 		return
 	}

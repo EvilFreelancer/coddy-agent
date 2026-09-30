@@ -2,6 +2,8 @@
 
 Coddy executes what the model decides on the machine it runs on, with the rights of the user who started it. This page gathers in one place what bounds that: the permission gate and the modes, the trust receipts for files that arrive with a checkout, where secrets live and where they are redacted, what the HTTP, Telegram and swarm surfaces expose, hooks as a policy layer, the loop guards, and what is not sandboxed at all. Each section points at the page that carries the detail.
 
+For the repository's own AppSec posture — trivy and semgrep run locally and in CI, the severity gate and triage — see [AppSec scanning](../contributing/security-scanning.md).
+
 ## What is not sandboxed
 
 There is no kernel-level sandbox. `run_command` runs through the host shell as the user who started Coddy, and the file tools read and write with that user's rights; a permission prompt, a mode or a hook decides whether a call runs, not what the process could reach if it did. The isolation Coddy is designed for is the container: the binary is static and distroless-friendly, so it fits a `scratch` or `distroless` image with a read-only root filesystem, a mounted workspace and the orchestrator's limits (the published image runs `coddy serve -H 0.0.0.0` on port 12345; see [Docker](../getting-started/docker.md)). Outside a container, bound to loopback in `ask` mode, the boundary is the person answering the prompts.
