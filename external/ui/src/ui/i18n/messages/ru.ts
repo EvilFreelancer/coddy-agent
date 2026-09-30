@@ -935,6 +935,7 @@ export const messagesRu: Record<string, string> = {
   "subagents.fact.inherits": "наследуется",
   "subagents.fact.background": "в фоне",
   "subagents.fact.backgroundAlways": "всегда, без ожидания",
+  "subagents.fact.spawns": "порождает",
   "subagents.fact.role": "инструкции",
   "mcp.validation.nameRequired": "Требуется имя сервера.",
   "mcp.validation.noDoubleUnderscore": "Имя сервера не должно содержать «__».",

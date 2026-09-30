@@ -394,7 +394,8 @@ tools:
 #     - "${CWD}/.coddy/agents"       # project scope
 #   project_trust: ask              # ask | allow | deny
 #   max_concurrent: 4               # subagent runs in flight across the whole process
-#   max_depth: 1                    # 1 = children cannot spawn further; 0 = nobody spawns
+#   max_depth: 1                    # 1 = children cannot spawn further (a definition's
+                                   #   `spawns` allowlist excepted); 0 = nobody spawns
 #   default_timeout_seconds: 1800   # hard limit when the definition and the call give none
 #   max_turns: 0                    # 0 follows agent.max_turns
 

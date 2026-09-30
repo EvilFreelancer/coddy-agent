@@ -453,6 +453,10 @@ type SubagentMeta struct {
 	Role string
 	// Tools is the effective tool set the child may call. Not persisted.
 	Tools []string
+	// Spawns is the spawn allowlist the child's definition declared: the
+	// names this session itself may delegate to, including at
+	// subagents.max_depth. Not persisted.
+	Spawns []string
 	// Kind marks a child the runtime started on its own behalf (SubagentKindMemory);
 	// empty for a spawn_agent child. The tool registration, the system flag
 	// of the task and the manager's shortcuts key on it. Not persisted.
@@ -502,6 +506,7 @@ const SubagentKindMemory = "memory"
 // itself: the manager saves the state right after building it.
 func (s *State) SetSubagentMeta(meta SubagentMeta) {
 	meta.Tools = append([]string(nil), meta.Tools...)
+	meta.Spawns = append([]string(nil), meta.Spawns...)
 	meta.FallbackModels = append([]string(nil), meta.FallbackModels...)
 	meta.Scheduler = meta.Scheduler.clone()
 	s.mu.Lock()
@@ -531,6 +536,7 @@ func (s *State) Subagent() *SubagentMeta {
 	}
 	out := *s.subagent
 	out.Tools = append([]string(nil), s.subagent.Tools...)
+	out.Spawns = append([]string(nil), s.subagent.Spawns...)
 	out.FallbackModels = append([]string(nil), s.subagent.FallbackModels...)
 	out.Scheduler = s.subagent.Scheduler.clone()
 	return &out
