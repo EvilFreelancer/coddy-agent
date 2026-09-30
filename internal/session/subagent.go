@@ -718,13 +718,6 @@ func subagentParentOf(st *State) string {
 	return "an unknown parent session"
 }
 
-// interruptedToolCallResult answers a call an earlier run of a child made
-// without a result on record. The run may have been stopped before it got to
-// the call, or the process may have died while the call ran: the transcript
-// cannot tell which, so the answer says so rather than that the call never
-// ran, and a call with a side effect is not repeated on a guess.
-const interruptedToolCallResult = "no result was recorded: the earlier run of this subagent ended before this call finished, so it may or may not have run; check the current state before running it again"
-
 // closeInterruptedToolCalls answers every call of the transcript that has no
 // result, right after the results its batch does have. A run stopped or timed
 // out in the middle of a batch of calls leaves the rest of the batch
@@ -735,45 +728,9 @@ const interruptedToolCallResult = "no result was recorded: the earlier run of th
 // makes the call again. A transcript with nothing to answer comes back as it
 // was.
 func closeInterruptedToolCalls(msgs []llm.Message) []llm.Message {
-	var out []llm.Message
-	for i := 0; i < len(msgs); i++ {
-		if msgs[i].Role != llm.RoleAssistant || len(msgs[i].ToolCalls) == 0 {
-			if out != nil {
-				out = append(out, msgs[i])
-			}
-			continue
-		}
-		// The batch's results follow it directly.
-		end := i + 1
-		answered := map[string]bool{}
-		for ; end < len(msgs) && msgs[end].Role == llm.RoleTool; end++ {
-			answered[msgs[end].ToolCallID] = true
-		}
-		var missing []llm.Message
-		for _, tc := range msgs[i].ToolCalls {
-			if strings.TrimSpace(tc.ID) == "" || answered[tc.ID] {
-				continue
-			}
-			missing = append(missing, llm.Message{
-				Role:       llm.RoleTool,
-				ToolCallID: tc.ID,
-				Content:    interruptedToolCallResult,
-				CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-			})
-		}
-		if len(missing) > 0 && out == nil {
-			out = append(make([]llm.Message, 0, len(msgs)+len(missing)), msgs[:i]...)
-		}
-		if out != nil {
-			out = append(out, msgs[i:end]...)
-			out = append(out, missing...)
-		}
-		i = end - 1
-	}
-	if out == nil {
-		return msgs
-	}
-	return out
+	// The session-layer repair API is also used when a subagent resumes.
+	repaired, _ := RepairMissingToolResults(msgs)
+	return repaired
 }
 
 // liveSubagentTaskID is the task of the run working on a child right now, or

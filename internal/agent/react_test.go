@@ -107,6 +107,32 @@ type emptyThenAnswerProvider struct {
 	calls int
 }
 
+type cancelToolBatchProvider struct {
+	cancel context.CancelFunc
+	mode   string
+}
+
+func (p *cancelToolBatchProvider) Complete(context.Context, []llm.Message, []llm.ToolDefinition) (*llm.Response, error) {
+	return nil, fmt.Errorf("Complete must not be used")
+}
+
+func (p *cancelToolBatchProvider) Stream(_ context.Context, _ []llm.Message, _ []llm.ToolDefinition, onChunk func(llm.StreamChunk)) (*llm.Response, error) {
+	calls := []llm.ToolCall{
+		{ID: "cancel-1", Name: "run_command", InputJSON: `{"command":"printf FIRST"}`},
+		{ID: "cancel-2", Name: "run_command", InputJSON: `{"command":"printf SECOND"}`},
+	}
+	for _, call := range calls {
+		onChunk(llm.StreamChunk{ToolCall: &call})
+	}
+	if p.cancel != nil {
+		p.cancel()
+	}
+	if p.mode == "partial" {
+		return &llm.Response{ToolCalls: calls, StopReason: "tool_use"}, context.Canceled
+	}
+	return &llm.Response{ToolCalls: calls, StopReason: "tool_use"}, nil
+}
+
 type configReloadProvider struct {
 	calls int
 	tools [][]llm.ToolDefinition
@@ -558,7 +584,146 @@ func TestRunReActLoopResetsEmptyCounterOnToolProgress(t *testing.T) {
 	}
 }
 
+func TestBuildMessagesRepairsMissingToolResultsWithoutChangingStoredHistory(t *testing.T) {
+	st := &session.State{
+		ID:         "sess_pairing_repair",
+		CWD:        t.TempDir(),
+		Mode:       session.ModeAgent,
+		SessionDir: t.TempDir(),
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "continue"},
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "missing-1", Name: "read"}}},
+		},
+	}
+	var logs bytes.Buffer
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	first := ag.buildMessages("system")
+	second := ag.buildMessages("system")
+	if len(first) != len(second) || !reflect.DeepEqual(first, second) {
+		t.Fatalf("repair is not stable: first=%+v second=%+v", first, second)
+	}
+	if len(first) != 4 || first[2].Role != llm.RoleAssistant || len(first[2].ToolCalls) != 1 {
+		t.Fatalf("assistant tool call was not preserved in outbound history: %+v", first)
+	}
+	if first[3].Role != llm.RoleTool || first[3].ToolCallID != "missing-1" || first[3].Content != "no result was recorded: the call may or may not have run; check the current state before running it again" {
+		t.Fatalf("unexpected synthetic result: %+v", first[3])
+	}
+	if first[3].CreatedAt != "" {
+		t.Fatalf("outbound synthetic result gained a timestamp: %+v", first[3])
+	}
+	if len(session.ValidateToolPairing(st.GetMessages())) == 0 {
+		t.Fatal("stored history was unexpectedly rewritten by outbound repair")
+	}
+	if !strings.Contains(logs.String(), "sess_pairing_repair") {
+		t.Fatalf("pairing diagnostics did not name the session: %s", logs.String())
+	}
+}
+
+func TestRunCancelsUnstartedToolBatchWithStableResults(t *testing.T) {
+	st := &session.State{ID: "sess_cancel_batch", CWD: t.TempDir(), Mode: session.ModeAgent, SessionDir: t.TempDir()}
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{Name: "fake", Type: "openai", APIKey: "test"}},
+		Models:    []config.ModelEntry{{Model: "fake/model", MaxTokens: 100}},
+		Agent:     config.Agent{Model: "fake/model"},
+	}
+	ag := NewAgent(cfg, st, resumePermissionSender{}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &cancelToolBatchProvider{cancel: cancel}
+	ag.providerFactory = func(llm.ProviderInput) (llm.Provider, error) { return provider, nil }
+
+	stop, err := ag.Run(ctx, []acp.ContentBlock{{Type: "text", Text: "run both"}})
+	if err != nil || stop != string(acp.StopReasonCancelled) {
+		t.Fatalf("run = %q, %v; want cancelled", stop, err)
+	}
+	msgs := st.GetMessages()
+	if len(msgs) < 4 || msgs[len(msgs)-2].Role != llm.RoleTool || msgs[len(msgs)-1].Role != llm.RoleTool {
+		t.Fatalf("unstarted calls were not recorded as results: %+v", msgs)
+	}
+	if msgs[len(msgs)-2].Content != toolCallInterruptedResult || msgs[len(msgs)-1].Content != toolCallInterruptedResult {
+		t.Fatalf("unstable or incorrect cancellation results: %+v", msgs[len(msgs)-2:])
+	}
+}
+
+func TestPartialStreamClosesToolCallsWhilePreservingAssistantMessage(t *testing.T) {
+	st := &session.State{ID: "sess_partial_batch", CWD: t.TempDir(), Mode: session.ModeAgent, SessionDir: t.TempDir()}
+	cfg := &config.Config{
+		Providers: []config.ProviderConfig{{Name: "fake", Type: "openai", APIKey: "test"}},
+		Models:    []config.ModelEntry{{Model: "fake/model", MaxTokens: 100}},
+		Agent:     config.Agent{Model: "fake/model"},
+	}
+	ag := NewAgent(cfg, st, resumePermissionSender{}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := &cancelToolBatchProvider{cancel: cancel, mode: "partial"}
+	ag.providerFactory = func(llm.ProviderInput) (llm.Provider, error) { return provider, nil }
+
+	stop, err := ag.Run(ctx, []acp.ContentBlock{{Type: "text", Text: "start"}})
+	if err != nil || stop != string(acp.StopReasonCancelled) {
+		t.Fatalf("run = %q, %v; want cancelled", stop, err)
+	}
+	msgs := st.GetMessages()
+	if len(msgs) != 4 || msgs[1].Role != llm.RoleAssistant || len(msgs[1].ToolCalls) != 2 {
+		t.Fatalf("partial assistant tool calls were not preserved: %+v", msgs)
+	}
+	if msgs[2].Content != toolCallInterruptedResult || msgs[3].Content != toolCallInterruptedResult {
+		t.Fatalf("partial calls were not closed with stable results: %+v", msgs)
+	}
+}
+
 // --- resume_permission.go --------------------------------------------------
+
+func TestCloseUnexecutedPermissionBatchMovesLateTargetResultIntoBatch(t *testing.T) {
+	st := &session.State{
+		ID:         "sess_resume_late_target",
+		CWD:        t.TempDir(),
+		Mode:       session.ModeAgent,
+		SessionDir: t.TempDir(),
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleAssistant,
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_target", Name: "run_command"},
+					{ID: "call_sibling", Name: "run_command"},
+				},
+			},
+			{Role: llm.RoleUser, Content: "continue"},
+			{Role: llm.RoleTool, ToolCallID: "call_target", Content: "real result"},
+		},
+	}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	ag.closeUnexecutedPermissionBatch("call_target")
+
+	msgs := st.GetMessages()
+	if len(msgs) != 4 {
+		t.Fatalf("normalized history has %d messages, want 4: %+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != llm.RoleAssistant || len(msgs[0].ToolCalls) != 2 {
+		t.Fatalf("assistant tool-call batch moved or changed: %+v", msgs[0])
+	}
+	if msgs[1].Role != llm.RoleTool || msgs[1].ToolCallID != "call_target" || msgs[1].Content != "real result" {
+		t.Fatalf("late target result was not moved into the batch: %+v", msgs[1])
+	}
+	if msgs[2].Role != llm.RoleTool || msgs[2].ToolCallID != "call_sibling" || msgs[2].Content != permissionBatchSkippedResult {
+		t.Fatalf("later sibling was not skipped: %+v", msgs[2])
+	}
+	if msgs[3].Role != llm.RoleUser || msgs[3].Content != "continue" {
+		t.Fatalf("user message was not preserved after the normalized batch: %+v", msgs[3])
+	}
+	var targetResults int
+	for _, msg := range msgs {
+		if msg.Role == llm.RoleTool && msg.ToolCallID == "call_target" {
+			targetResults++
+		}
+	}
+	if targetResults != 1 {
+		t.Fatalf("target result appears %d times, want exactly once: %+v", targetResults, msgs)
+	}
+	if issues := session.ValidateToolPairing(msgs); len(issues) != 0 {
+		t.Fatalf("normalized history has invalid tool pairing: %+v", issues)
+	}
+}
 
 func TestResumeAfterPermissionRejectContinuesWithoutExecutingTool(t *testing.T) {
 	sessionDir := t.TempDir()
@@ -571,11 +736,18 @@ func TestResumeAfterPermissionRejectContinuesWithoutExecutingTool(t *testing.T) 
 			{Role: llm.RoleUser, Content: "run blocked command then continue"},
 			{
 				Role: llm.RoleAssistant,
-				ToolCalls: []llm.ToolCall{{
-					ID:        "call_blocked",
-					Name:      "run_command",
-					InputJSON: `{"command":"printf SHOULD_NOT_RUN"}`,
-				}},
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:        "call_blocked",
+						Name:      "run_command",
+						InputJSON: `{"command":"printf SHOULD_NOT_RUN"}`,
+					},
+					{
+						ID:        "call_sibling",
+						Name:      "run_command",
+						InputJSON: `{"command":"printf SIBLING_MUST_NOT_RUN"}`,
+					},
+				},
 			},
 		},
 	}
@@ -617,29 +789,38 @@ func TestResumeAfterPermissionRejectContinuesWithoutExecutingTool(t *testing.T) 
 	if toolMsg.Content != "permission denied by user" {
 		t.Fatalf("tool result %q", toolMsg.Content)
 	}
+	var siblingMsg *llm.Message
+	for i := range st.GetMessages() {
+		m := st.GetMessages()[i]
+		if m.Role == llm.RoleTool && m.ToolCallID == "call_sibling" {
+			siblingMsg = &m
+			break
+		}
+	}
+	if siblingMsg == nil || siblingMsg.Content != permissionBatchSkippedResult {
+		t.Fatalf("missing or incorrect sibling result: %+v", siblingMsg)
+	}
 	if len(provider.seen) == 0 {
 		t.Fatal("provider was not called to continue after rejected permission")
 	}
-	last := lastHistoryMessage(provider.seen)
-	if last.Role != llm.RoleTool || last.ToolCallID != "call_blocked" || last.Content != "permission denied by user" {
-		t.Fatalf("provider did not receive denied tool result as latest message: %+v", last)
+	var sawBlocked, sawSibling bool
+	for _, msg := range provider.seen {
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		if msg.ToolCallID == "call_blocked" && msg.Content == "permission denied by user" {
+			sawBlocked = true
+		}
+		if msg.ToolCallID == "call_sibling" && msg.Content == permissionBatchSkippedResult {
+			sawSibling = true
+		}
+	}
+	if !sawBlocked || !sawSibling {
+		t.Fatalf("provider did not receive both closed batch results: %+v", provider.seen)
 	}
 	if got := st.GetMessages()[len(st.GetMessages())-1]; got.Role != llm.RoleAssistant || got.Content != "continued" {
 		t.Fatalf("missing continuation assistant message: %+v", got)
 	}
-}
-
-// lastHistoryMessage is the newest message of a request that is part of the
-// replayed conversation: the turn context block trails it and belongs to no
-// transcript (turn_context.go).
-func lastHistoryMessage(msgs []llm.Message) llm.Message {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if strings.Contains(msgs[i].Content, turnContextOpenTag) {
-			continue
-		}
-		return msgs[i]
-	}
-	return llm.Message{}
 }
 
 // --- system_prompt.go: context breakdown -----------------------------------

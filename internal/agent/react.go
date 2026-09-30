@@ -44,6 +44,7 @@ type SessionState interface {
 	EffectiveReasoning(cfg *config.Config) string
 	AddMessage(msg llm.Message)
 	GetMessages() []llm.Message
+	ReplaceMessages(msgs []llm.Message)
 	InsertCompactionSummary(idx int, msg llm.Message)
 	GetMCPClients() []*mcp.Client
 	GetMCPToolFilter() func(server, tool string) bool
@@ -631,6 +632,14 @@ const (
 
 	toolLoopSkippedResult = "not executed: the loop guard stopped this turn after repeated identical tool calls"
 
+	// toolCallInterruptedResult is stable because it is both persisted as the
+	// tool result and sent to the model on a later request. Do not add a clock
+	// or other per-run detail here: the same interrupted transcript must repair
+	// to the same request every time.
+	toolCallInterruptedResult = "not executed: the turn was interrupted before this tool call ran"
+
+	permissionBatchSkippedResult = "not executed: permission was resolved for another tool call in this batch"
+
 	// permissionDeniedByUser is what a tool call gets when the gate was
 	// answered with a refusal. It is matched verbatim elsewhere (the
 	// context-eviction pass reads it as "this write never happened"), so it
@@ -922,6 +931,26 @@ func (a *Agent) runReActLoop(
 		// brought in are joined to its result only here, so an evicted result
 		// keeps them and every request replays them byte for byte.
 		sendMessages := withTurnContext(withToolImages(withToolRules(a.prunedForLLM(messages)), a.modelReadsImages(), a.loadToolImage), turnCtx)
+		// Repair only the outbound projection. The persisted transcript remains
+		// unchanged; malformed IDs and misplaced/duplicate results are refused.
+		repairedSendMessages, pairingIssues := session.RepairMissingToolResults(sendMessages)
+		if len(pairingIssues) > 0 && a.log != nil {
+			a.log.Warn("tool-call pairing diagnostics in outbound history",
+				"session", a.state.GetID(), "issues", pairingIssues,
+				"repaired", len(repairedSendMessages) != len(sendMessages))
+		}
+		sendMessages = repairedSendMessages
+		if issues := session.ValidateToolPairing(sendMessages); len(issues) > 0 {
+			stopFirstTokenTimer()
+			streamCancel()
+			if a.log != nil {
+				a.log.Error("refusing malformed tool-call history",
+					"session", a.state.GetID(), "issues", issues)
+			}
+			return string(acp.StopReasonRefused), fmt.Errorf(
+				"tool-call pairing is invalid for session %s (%s); use /compact or start a new session",
+				a.state.GetID(), formatToolPairingIssues(issues))
+		}
 		// The call's own clock: when it went out, when the first chunk came
 		// back and how many followed. It names the silence in the errors
 		// below and is the debug-level account of every call.
@@ -1198,7 +1227,15 @@ func (a *Agent) runReActLoop(
 						Model:               transport.model,
 						CreatedAt:           time.Now().UTC().Format(time.RFC3339),
 					}
+					messages = append(messages, assistantMsg)
 					a.state.AddMessage(assistantMsg)
+					if hasTools {
+						// The response never reached the execution loop, so every
+						// announced call is still unstarted. Keep the assistant
+						// message (including its tool calls) and close the batch with
+						// the normal cancelled-result/UI semantics.
+						a.recordSkippedToolCalls(&messages, response.ToolCalls, toolCallInterruptedResult)
+					}
 					a.refreshConversationContextUsage(true)
 				}
 			}
@@ -1404,6 +1441,7 @@ func (a *Agent) runReActLoop(
 		// Execute all tool calls.
 		for i, tc := range response.ToolCalls {
 			if ctx.Err() != nil {
+				a.recordSkippedToolCalls(&messages, response.ToolCalls[i:], toolCallInterruptedResult)
 				return string(acp.StopReasonCancelled), nil
 			}
 
@@ -1578,7 +1616,7 @@ func (a *Agent) persistLoopAbortedMessage(
 		}
 	}
 
-	a.state.AddMessage(llm.Message{
+	msg := llm.Message{
 		Role:                llm.RoleAssistant,
 		Content:             content,
 		Reasoning:           reasonStore,
@@ -1587,7 +1625,11 @@ func (a *Agent) persistLoopAbortedMessage(
 		ReasoningDurationMs: reasoningMs,
 		Model:               model,
 		CreatedAt:           time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	a.state.AddMessage(msg)
+	if len(toolCalls) > 0 {
+		a.recordSkippedToolCalls(nil, toolCalls, toolCallInterruptedResult)
+	}
 	a.refreshConversationContextUsage(true)
 }
 
@@ -1596,13 +1638,25 @@ func (a *Agent) persistLoopAbortedMessage(
 // OpenAI-compatible endpoints reject the next request in the conversation.
 func (a *Agent) recordSkippedToolCalls(messages *[]llm.Message, calls []llm.ToolCall, reason string) {
 	for _, tc := range calls {
+		if strings.TrimSpace(tc.ID) == "" {
+			continue
+		}
 		msg := llm.Message{
 			Role:       llm.RoleTool,
 			Content:    reason,
 			ToolCallID: tc.ID,
 		}
-		*messages = append(*messages, msg)
+		if messages != nil {
+			*messages = append(*messages, msg)
+		}
 		a.state.AddMessage(msg)
+	}
+	a.sendSkippedToolCallUpdates(calls, reason)
+	a.persistSkippedToolCallResults(calls, reason)
+}
+
+func (a *Agent) sendSkippedToolCallUpdates(calls []llm.ToolCall, reason string) {
+	for _, tc := range calls {
 		_ = a.server.SendSessionUpdate(a.state.GetID(), acp.ToolCallStatusUpdate{
 			SessionUpdate: acp.UpdateTypeToolCallUpdate,
 			ToolCallID:    tc.ID,
@@ -1613,6 +1667,24 @@ func (a *Agent) recordSkippedToolCalls(messages *[]llm.Message, calls []llm.Tool
 		})
 	}
 	a.refreshConversationContextUsage(true)
+}
+
+func (a *Agent) persistSkippedToolCallResults(calls []llm.ToolCall, reason string) {
+	sessionDir := strings.TrimSpace(a.state.GetPersistedSessionDir())
+	if sessionDir == "" {
+		return
+	}
+	for _, tc := range calls {
+		if strings.TrimSpace(tc.ID) == "" {
+			continue
+		}
+		if err := session.WriteToolCallResult(sessionDir, tc.ID, reason); err != nil && a.log != nil {
+			a.log.Error("failed to persist skipped tool result", "tool_call_id", tc.ID, "error", err)
+		}
+		if err := session.MarkToolCallFinished(sessionDir, tc.ID, tc.Name, toolKind(tc.Name), "cancelled"); err != nil && a.log != nil {
+			a.log.Error("failed to persist skipped tool metadata", "tool_call_id", tc.ID, "error", err)
+		}
+	}
 }
 
 // loopAbortChannelName labels the streamed channel that looped, for logs.
@@ -2105,15 +2177,28 @@ func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
 	// was written into it when it was sent (mentions.go), so no request
 	// rewrites an earlier message and the provider's cached prefix holds.
 	history := session.MessagesForLLM(a.state.GetMessages())
-	msgs := make([]llm.Message, 0, len(history)+1)
+	repaired, issues := session.RepairMissingToolResults(history)
+	if len(issues) > 0 && a.log != nil {
+		a.log.Warn("tool-call pairing diagnostics in LLM history",
+			"session", a.state.GetID(), "issues", issues, "repaired", len(repaired) != len(history))
+	}
+	msgs := make([]llm.Message, 0, len(repaired)+1)
 	msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
-	for _, m := range history {
+	for _, m := range repaired {
 		if !isLLMHistoryMessage(m) {
 			continue
 		}
 		msgs = append(msgs, m)
 	}
 	return msgs
+}
+
+func formatToolPairingIssues(issues []session.ToolPairingIssue) string {
+	parts := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		parts = append(parts, fmt.Sprintf("%s at message %d (call %q)", issue.Kind, issue.MessageIndex, issue.ToolCallID))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // invokedSkillBlocks returns an attachment carrying the body of every skill

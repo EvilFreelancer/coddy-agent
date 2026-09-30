@@ -50,6 +50,7 @@ func (a *Agent) ResumeAfterPermission(ctx context.Context, toolCallID string, pe
 			_ = session.WriteToolCallResult(sd, tc.ID, toolResultMsg.Content)
 			_ = session.MarkToolCallFinished(sd, tc.ID, tc.Name, toolKind(tc.Name), "cancelled")
 		}
+		a.closeUnexecutedPermissionBatch(toolCallID)
 		return a.continueReAct(ctx, mode, toolEnv)
 	}
 	// The history holds the arguments the model produced; the bundle holds
@@ -90,7 +91,111 @@ func (a *Agent) ResumeAfterPermission(ctx context.Context, toolCallID string, pe
 	callRules := a.toolCallRules(mode, tc, toolEnv.CWD)
 	result, execErr := a.executeToolCall(ctx, tc, toolEnv, mode, a.state.GetID(), !askAgain)
 	a.state.AddMessage(a.callResultMessage(tc, result, execErr, callRules))
+	a.closeUnexecutedPermissionBatch(toolCallID)
 	return a.continueReAct(ctx, mode, toolEnv)
+}
+
+// closeUnexecutedPermissionBatch records cancelled results for calls paired
+// with a permission-resumed call. A permission reply approves or refuses one
+// call, not its siblings; continuing without closing them would send an
+// incomplete assistant batch back to a provider.
+func (a *Agent) closeUnexecutedPermissionBatch(toolCallID string) {
+	msgs := a.state.GetMessages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		assistant := msgs[i]
+		if assistant.Role != llm.RoleAssistant || len(assistant.ToolCalls) == 0 {
+			continue
+		}
+
+		containsTarget := false
+		for _, tc := range assistant.ToolCalls {
+			if tc.ID == toolCallID {
+				containsTarget = true
+				break
+			}
+		}
+		if !containsTarget {
+			continue
+		}
+
+		batchEnd := i + 1
+		answered := make(map[string]struct{})
+		for ; batchEnd < len(msgs) && msgs[batchEnd].Role == llm.RoleTool; batchEnd++ {
+			j := batchEnd
+			answered[msgs[j].ToolCallID] = struct{}{}
+		}
+		lateTarget := -1
+		for j := batchEnd; j < len(msgs); j++ {
+			if msgs[j].Role == llm.RoleTool {
+				// A late real result wins over a synthetic cancellation. Leave its
+				// ordering untouched for the send-boundary validator to diagnose.
+				answered[msgs[j].ToolCallID] = struct{}{}
+			}
+			if msgs[j].Role != llm.RoleTool || msgs[j].ToolCallID != toolCallID {
+				continue
+			}
+			if lateTarget != -1 {
+				return
+			}
+			lateTarget = j
+		}
+		targetIndex := -1
+		for j, call := range assistant.ToolCalls {
+			if call.ID == toolCallID {
+				targetIndex = j
+				break
+			}
+		}
+		if targetIndex < 0 {
+			return
+		}
+		seen := make(map[string]struct{})
+		var siblings []llm.ToolCall
+		for j, tc := range assistant.ToolCalls {
+			// Calls before the resumed target are not known to be unstarted:
+			// they may have run before the permission gate was reached. Only the
+			// later suffix is definitely skipped.
+			if j <= targetIndex {
+				continue
+			}
+			if strings.TrimSpace(tc.ID) == "" || tc.ID == toolCallID {
+				continue
+			}
+			if _, exists := answered[tc.ID]; exists {
+				continue
+			}
+			if _, duplicate := seen[tc.ID]; duplicate {
+				continue
+			}
+			seen[tc.ID] = struct{}{}
+			siblings = append(siblings, tc)
+		}
+		if lateTarget != -1 {
+			normalized := make([]llm.Message, 0, len(msgs)+len(siblings))
+			normalized = append(normalized, msgs[:batchEnd]...)
+			normalized = append(normalized, msgs[lateTarget])
+			for _, sibling := range siblings {
+				normalized = append(normalized, llm.Message{
+					Role:       llm.RoleTool,
+					Content:    permissionBatchSkippedResult,
+					ToolCallID: sibling.ID,
+				})
+			}
+			for j := batchEnd; j < len(msgs); j++ {
+				if j != lateTarget {
+					normalized = append(normalized, msgs[j])
+				}
+			}
+			a.state.ReplaceMessages(normalized)
+			a.sendSkippedToolCallUpdates(siblings, permissionBatchSkippedResult)
+			a.persistSkippedToolCallResults(siblings, permissionBatchSkippedResult)
+			return
+		}
+		if len(siblings) > 0 {
+			a.recordSkippedToolCalls(&msgs, siblings, permissionBatchSkippedResult)
+		}
+		return
+	}
 }
 
 // httpPromptMoved reports whether the http_request prompt persisted for tc
