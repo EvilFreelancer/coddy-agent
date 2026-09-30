@@ -1585,6 +1585,7 @@ export const messagesRu: Record<string, string> = {
   "tool.name.list_dir": "просматриваю директорию",
   "tool.name.mkdir": "создаю каталог",
   "tool.name.touch": "создаю файл",
+  "tool.name.worktree_create": "создаю worktree",
   "tool.name.mv": "перемещаю",
   "tool.name.rm": "удаляю",
   "tool.name.rmdir": "удаляю каталог",

@@ -96,6 +96,9 @@ var subagentMandatoryExclusions = []string{
 	"plan_exit",
 	// A child runs on the model its parent (or its definition) chose.
 	"switch_model",
+	// A child shares the parent's workspace; moving it mid-run would strand
+	// every tool of both, and the child has no switcher wired anyway.
+	"worktree_create",
 }
 
 // The process-wide limiter and the per-parent permission arbiters. Both are

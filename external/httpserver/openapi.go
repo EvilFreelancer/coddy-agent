@@ -217,6 +217,7 @@ func openAPISpec() map[string]interface{} {
 						"Child sessions of subagent runs (**subagentRun** metadata, stored inside the parent's bundle) are hidden unless **include_subagents=true**; an included child row carries **subagent** **`{parentSessionId, name, taskId}`** so a client can route back to the parent chat and to the task in its drawer. " +
 						"Sessions the operator **archived** are hidden unless **archived** says otherwise, and a row carries **tags**, **archived** / **archivedAt**, **origin** and **pinned** / **pinnedAt** when it has them. " +
 						"A **pinned** session leads the listing whatever **sort** says - a pin that worked in one order only would not be one - and the pins are ordered among themselves by **pinnedRank**, the order the operator dragged them into, newest pin first until one is dragged. " +
+						"A row inside a git checkout also carries **repoRoot**, the main checkout path shared by its worktrees, so clients can group conversations by project. " +
 						"**sort** and **order** replace the default ordering; they are applied to the whole filtered listing before paging, so page two of a sorted listing continues page one.",
 					"parameters": append(coddyPagingParams(), map[string]interface{}{
 						"name":   "cwd",
@@ -834,7 +835,7 @@ func openAPISpec() map[string]interface{} {
 					"summary": "Workspace context for the composer chips (folder, git branch, worktree)",
 					"description": "Describes the workspace of the session in **`X-Coddy-Session-ID`** (or the server default cwd without the header). " +
 						"With **`path`** the given folder is described instead (pre-session preview); a missing folder yields **400**. " +
-						"Inside a git repository the payload adds **`repo_root`**, **`branch`**, **`branches`**, and **`worktrees`** (from `git worktree list`); **`is_worktree`** is true when the workspace is a linked (non-main) worktree. **`shell`** is the interpreter `run_command` executes through on the server host.",
+						"Inside a git repository the payload adds **`repo_root`** (the main checkout path), **`base_branch`** (the branch named by origin/HEAD, when available), **`branch`**, **`branches`**, and **`worktrees`** (from `git worktree list`); **`is_worktree`** is true when the workspace is a linked (non-main) worktree. **`shell`** is the interpreter `run_command` executes through on the server host.",
 					"operationId": "coddyWorkspaceContextGet",
 					"parameters": []interface{}{
 						map[string]interface{}{
@@ -3786,8 +3787,9 @@ func openAPISpec() map[string]interface{} {
 							"description": "Path of the interpreter run_command executes through on the server host.",
 							"example":     "/usr/bin/bash",
 						},
-						"repo_root": map[string]string{"type": "string"},
-						"branch":    map[string]string{"type": "string"},
+						"repo_root":   map[string]string{"type": "string"},
+						"base_branch": map[string]string{"type": "string"},
+						"branch":      map[string]string{"type": "string"},
 						"branches": map[string]interface{}{
 							"type":  "array",
 							"items": map[string]string{"type": "string"},

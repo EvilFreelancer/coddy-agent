@@ -321,6 +321,8 @@ func (s *State) GetID() string {
 
 // GetCWD returns the session working directory.
 func (s *State) GetCWD() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.CWD
 }
 

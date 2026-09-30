@@ -91,14 +91,17 @@ type SessionState interface {
 
 // Agent runs the ReAct loop for a single session turn.
 type Agent struct {
-	cfg             *config.Config
-	state           SessionState
-	server          acp.UpdateSender
-	log             *slog.Logger
-	registry        *tools.Registry
-	environment     platform.Environment
-	providerFactory func(llm.ProviderInput) (llm.Provider, error)
-	configReloader  func(context.Context) ([]string, error)
+	cfg                  *config.Config
+	state                SessionState
+	server               acp.UpdateSender
+	log                  *slog.Logger
+	registry             *tools.Registry
+	environment          platform.Environment
+	providerFactory      func(llm.ProviderInput) (llm.Provider, error)
+	configReloader       func(context.Context) ([]string, error)
+	workspaceSwitcher    func(context.Context, string) error
+	workspaceContextCWD  string
+	workspaceContextText string
 
 	// subagentRuntime owns child sessions; nil when this surface cannot spawn.
 	subagentRuntime SubagentRuntime
@@ -183,6 +186,28 @@ func (a *Agent) SetConfigReloader(reload func(context.Context) ([]string, error)
 		return
 	}
 	a.configReloader = reload
+}
+
+// SetWorkspaceSwitcher connects worktree_create to the session manager's
+// workspace reload path. Child sessions cannot move their inherited workspace.
+func (a *Agent) SetWorkspaceSwitcher(switchTo func(context.Context, string) error) {
+	if a != nil {
+		a.workspaceSwitcher = switchTo
+	}
+}
+
+func (a *Agent) wireWorkspaceTool(env *tools.Env) {
+	if a.workspaceSwitcher == nil || a.subagent != nil {
+		return
+	}
+	env.SwitchWorkspace = func(ctx context.Context, dir string) error {
+		if err := a.workspaceSwitcher(ctx, dir); err != nil {
+			return err
+		}
+		a.resetHooks()
+		a.workspaceContextCWD = ""
+		return nil
+	}
 }
 
 // Run executes the ReAct loop and returns the stop reason.
@@ -379,6 +404,7 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 		ImageRefusal:      a.toolImageRefusal,
 	}
 	httpRequestEnv(toolEnv, a.cfg)
+	a.wireWorkspaceTool(toolEnv)
 	// The model's own model switch; a subagent runs on what its parent chose.
 	if a.subagent == nil && a.settings() != nil {
 		toolEnv.SwitchModel = a.switchModel
@@ -1469,6 +1495,15 @@ func (a *Agent) runReActLoop(
 			turnCtx = a.buildTurnContext(sys)
 			a.refreshContextBreakdown(sys, turnCtx)
 		}
+		if toolEnv.WorkspaceChanged {
+			activeSkills = FilterSkillsForContext(a.state.GetSkills(), contextFiles)
+			toolDefs = a.currentToolDefinitions(mode)
+			sys = a.buildSystemPromptParts(mode, activeSkills, toolDefs)
+			messages = a.buildMessages(sys.Content)
+			turnCtx = a.buildTurnContext(sys)
+			a.refreshContextBreakdown(sys, turnCtx)
+			toolEnv.WorkspaceChanged = false
+		}
 		if toolEnv.ConfigReloaded {
 			activeSkills = FilterSkillsForContext(a.state.GetSkills(), contextFiles)
 			toolDefs = a.currentToolDefinitions(mode)
@@ -2076,6 +2111,15 @@ func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 		available = filtered
 	}
 	defs := FilterToolDefinitions(available, toolSet)
+	if a.workspaceSwitcher == nil || a.subagent != nil {
+		filtered := defs[:0]
+		for _, def := range defs {
+			if def.Name != tools.ToolWorktreeCreate {
+				filtered = append(filtered, def)
+			}
+		}
+		defs = filtered
+	}
 	if toolSet.Unrestricted() || mode == "plan" {
 		defs = append(defs, mcpToolDefinitions(a.state.GetMCPClients(), a.state.GetMCPToolFilter())...)
 	}
