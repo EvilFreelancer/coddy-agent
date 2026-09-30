@@ -81,9 +81,9 @@ failure on the environment.
   pardoning new issues forever.
 - **`trivy.yaml`** — `scan.skip-dirs` for paths a fresh checkout does not
   hold (`node_modules`, `dist`, …). Trivy does not honor `.gitignore`;
-  without this a local scan walks trees CI never sees. Secret findings are
-  not suppressible through `.trivyignore.yaml` — a real false positive needs
-  `skip-dirs`/`skip-files` or stays visible.
+  without this a local scan walks trees CI never sees. Secret-rule suppressions
+  are supported but use the same expiry and written justification as an
+  accepted CVE; prefer a `skip-dirs`/`skip-files` rule or a fix when possible.
 - **`.semgrepignore`** — kept minimal (`.venv`); semgrep honors `.gitignore`
   on its own. Inline suppression is `// nosemgrep` (Go/TS) or
   `# nosemgrep` (YAML/shell), always with a justification comment.

@@ -42,6 +42,10 @@ jobs:
       # The docker fallback of scripts/security-scan.sh: the runner ships
       # docker, the images are pinned tag@sha256 in the script.
       - name: Run trivy and semgrep
+        env:
+          # Optional: fork pull requests receive no repository secrets, which
+          # is fine because semgrep is report-only until its backlog is triaged.
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: make security
 
       # SARIF goes to code scanning only from trusted events: a fork
@@ -78,6 +82,7 @@ jobs:
         with:
           name: security-reports
           path: dist/security/
+          include-hidden-files: false
           retention-days: 30
 
       - name: Job summary

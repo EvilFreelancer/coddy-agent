@@ -78,7 +78,7 @@ resolve_trivy() {
     return 0
   fi
   if [ "$SEC_DOCKER" = "1" ] && command -v docker >/dev/null 2>&1; then
-    TRIVY_RUN=(docker run --rm --pull=missing
+    TRIVY_RUN=(docker run --rm
       --user "$(id -u):$(id -g)"
       -e "TRIVY_CACHE_DIR=/cache/trivy"
       -v "$root:/src" -w /src
@@ -95,10 +95,10 @@ resolve_semgrep() {
     return 0
   fi
   if [ "$SEC_DOCKER" = "1" ] && command -v docker >/dev/null 2>&1; then
-    SEMGREP_RUN=(docker run --rm --pull=missing
+    SEMGREP_RUN=(docker run --rm
       --user "$(id -u):$(id -g)"
       -e "HOME=/cache/semgrep-home"
-      -e "SEMGREP_APP_TOKEN=${SEMGREP_APP_TOKEN:-}"
+      -e "SEMGREP_APP_TOKEN"
       -v "$root:/src" -w /src
       -v "$root/$OUT/.cache:/cache"
       "$SEMGREP_IMAGE" semgrep)
@@ -141,11 +141,10 @@ for s in $SEC_SCANNERS; do
   esac
 done
 IFS=$old_ifs
-[ "$known" -eq 0 ] || true   # SEC_SCANNERS may be empty only via the exact default; a lone comma yields nothing
-case ",$SEC_SCANNERS," in
-  *"trivy"*|*"semgrep"*) : ;;
-  *) log "SEC_SCANNERS='$SEC_SCANNERS' selects no known scanner (want trivy,semgrep)"; exit 2 ;;
-esac
+if [ "$known" -eq 0 ]; then
+  log "SEC_SCANNERS='$SEC_SCANNERS' selects no known scanner (want trivy,semgrep)"
+  exit 2
+fi
 
 if ! command -v python3 >/dev/null 2>&1; then
   log "python3 not found — the gate counter needs it"; exit 127
@@ -184,17 +183,18 @@ fi
 #         without secrets for code scanning ---
 if want_scanner trivy; then
   log "trivy: filesystem scan (vuln,secret,misconfig)"
-  if ! "${TRIVY_RUN[@]}" fs --scanners vuln,secret,misconfig \
-        --format json --output "$OUT/trivy.json" .; then
+  if ! "${TRIVY_RUN[@]}" fs --ignorefile .trivyignore.yaml \
+        --scanners vuln,secret,misconfig --format json --output "$OUT/trivy.json" .; then
     log "trivy: scan failed"
     status=1
   elif [ ! -s "$OUT/trivy.json" ]; then
     log "trivy: empty report"
     status=1
   else
-    if ! "${TRIVY_RUN[@]}" fs --scanners vuln,misconfig \
-          --format sarif --output "$OUT/trivy.sarif" .; then
-      log "trivy: SARIF pass failed (findings still in trivy.json)"
+    if ! "${TRIVY_RUN[@]}" fs --ignorefile .trivyignore.yaml \
+          --scanners vuln,misconfig --format sarif --output "$OUT/trivy.sarif" .; then
+      log "trivy: SARIF pass failed"
+      status=1
     fi
   fi
 fi
@@ -214,7 +214,8 @@ if want_scanner semgrep; then
   else
     if ! "${SEMGREP_RUN[@]}" scan "${cfgs[@]}" --metrics=off \
           --sarif --output "$OUT/semgrep.sarif" .; then
-      log "semgrep: SARIF pass failed (findings still in semgrep.json)"
+      log "semgrep: SARIF pass failed"
+      status=1
     fi
   fi
 fi
