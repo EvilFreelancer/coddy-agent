@@ -920,6 +920,7 @@ export const messagesEn: Record<string, string> = {
   "subagents.fact.inherits": "inherited",
   "subagents.fact.background": "runs detached",
   "subagents.fact.backgroundAlways": "always, without waiting",
+  "subagents.fact.spawns": "may spawn",
   "subagents.fact.role": "instructions",
   "mcp.validation.nameRequired": "Server name is required.",
   "mcp.validation.noDoubleUnderscore": 'Server name must not contain "__".',
