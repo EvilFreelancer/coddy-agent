@@ -55,9 +55,18 @@ func (s *anthropicEmptyAssistantState) requestHasOnlyUserMessages() error {
 	if len(s.messages) != 2 {
 		return fmt.Errorf("request has %d messages, want 2", len(s.messages))
 	}
-	for i, message := range s.messages {
-		if message.(map[string]any)["role"] != "user" {
-			return fmt.Errorf("message %d is not a user message: %#v", i, message)
+	for i, want := range []string{"first", "second"} {
+		message, ok := s.messages[i].(map[string]any)
+		if !ok || message["role"] != "user" {
+			return fmt.Errorf("message %d is not a user message: %#v", i, s.messages[i])
+		}
+		blocks, ok := message["content"].([]any)
+		if !ok || len(blocks) != 1 {
+			return fmt.Errorf("message %d content = %#v, want %q", i, message["content"], want)
+		}
+		block, ok := blocks[0].(map[string]any)
+		if !ok || block["text"] != want || block["type"] != "text" {
+			return fmt.Errorf("message %d content = %#v, want %q", i, message["content"], want)
 		}
 	}
 	return nil

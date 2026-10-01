@@ -85,7 +85,10 @@ func anthropicThinkingBudget(level string, maxTokens int) int64 {
 }
 
 func (p *anthropicProvider) Complete(ctx context.Context, messages []Message, tools []ToolDefinition) (*Response, error) {
-	system, msgs := p.splitMessages(messages)
+	system, msgs, err := p.splitMessages(messages)
+	if err != nil {
+		return nil, err
+	}
 	params := p.buildParams(system, msgs, tools)
 	resp, err := p.client.Messages.New(ctx, params)
 	if err != nil {
@@ -95,7 +98,10 @@ func (p *anthropicProvider) Complete(ctx context.Context, messages []Message, to
 }
 
 func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tools []ToolDefinition, onChunk func(StreamChunk)) (*Response, error) {
-	system, msgs := p.splitMessages(messages)
+	system, msgs, err := p.splitMessages(messages)
+	if err != nil {
+		return nil, err
+	}
 	params := p.buildParams(system, msgs, tools)
 
 	stream := p.client.Messages.NewStreaming(ctx, params)
@@ -282,9 +288,10 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 }
 
 // splitMessages extracts the system message and converts messages to Anthropic format.
-func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthropic.MessageParam) {
+func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthropic.MessageParam, error) {
 	var system string
 	var result []anthropic.MessageParam
+	var skippedTrailingAssistant bool
 
 	for _, m := range messages {
 		if m.Role == RoleSystem {
@@ -295,6 +302,7 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 		switch m.Role {
 		case RoleUser:
 			result = append(result, anthropic.NewUserMessage(anthropicUserBlocks(m)...))
+			skippedTrailingAssistant = false
 
 		case RoleAssistant:
 			var blocks []anthropic.ContentBlockParamUnion
@@ -315,18 +323,24 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 			if len(blocks) == 0 {
 				// Nothing in this assistant turn can be replayed. In particular,
 				// a signature without thinking text cannot form a valid block.
+				skippedTrailingAssistant = true
 				continue
 			}
 			result = append(result, anthropic.NewAssistantMessage(blocks...))
+			skippedTrailingAssistant = false
 
 		case RoleTool:
 			result = append(result, anthropic.NewUserMessage(
 				anthropic.NewToolResultBlock(m.ToolCallID, m.Content, false),
 			))
+			skippedTrailingAssistant = false
 		}
 	}
 
-	return system, result
+	if skippedTrailingAssistant {
+		return "", nil, fmt.Errorf("anthropic: final assistant turn has no replayable content")
+	}
+	return system, result, nil
 }
 
 // anthropicUserBlocks is a user message as the Messages API takes it: the
