@@ -30,6 +30,18 @@ func (e *stalePermissionError) Error() string {
 
 func (e *stalePermissionError) Unwrap() error { return errStalePermission }
 
+// answeredToolCallError reports a resume asked for a call that already carries
+// its own result in the transcript (a refusal written when the turn was
+// cancelled, a repaired sibling, an execution that finished). The call has an
+// outcome, so only the persisted gate is left to lift - nothing may run.
+type answeredToolCallError struct {
+	call llm.ToolCall
+}
+
+func (e *answeredToolCallError) Error() string {
+	return fmt.Sprintf("tool call %s already has a result", e.call.ID)
+}
+
 // ResumeAfterPermission executes a tool call that was approved via POST /permission after the HTTP
 // stream ended or the server restarted, then continues the ReAct loop from persisted messages.
 func (a *Agent) ResumeAfterPermission(ctx context.Context, toolCallID string, perm *acp.PermissionResult) (string, error) {
@@ -52,6 +64,13 @@ func (a *Agent) ResumeAfterPermission(ctx context.Context, toolCallID string, pe
 			if settleErr != nil {
 				return string(acp.StopReasonCancelled), settleErr
 			}
+			return string(acp.StopReasonCancelled), nil
+		}
+		var answeredErr *answeredToolCallError
+		if errors.As(err, &answeredErr) {
+			// The call was resolved without this resume; the gate file is
+			// residue that would resurrect the answered card after a reload.
+			clearMatchingPendingPermission(sd, toolCallID)
 			return string(acp.StopReasonCancelled), nil
 		}
 		return "", err
@@ -241,24 +260,41 @@ func (a *Agent) findPendingToolCall(toolCallID string) (llm.ToolCall, error) {
 		if pending == nil {
 			continue
 		}
-		stale := false
-		for j := i + 1; j < len(msgs); j++ {
+		// Only a result inside this batch's contiguous tool chain answers the
+		// call: a same-ID result after an intervening message belongs to a
+		// different occurrence or is misplaced, and never makes this one
+		// answered.
+		j := i + 1
+		for ; j < len(msgs); j++ {
 			if !isLLMHistoryMessage(msgs[j]) {
 				continue
 			}
-			if msgs[j].Role == llm.RoleTool && strings.TrimSpace(msgs[j].ToolCallID) == toolCallID {
-				return llm.ToolCall{}, fmt.Errorf("tool call %s already has a result", toolCallID)
-			}
 			if msgs[j].Role != llm.RoleTool {
-				stale = true
+				break
+			}
+			if strings.TrimSpace(msgs[j].ToolCallID) == toolCallID {
+				return llm.ToolCall{}, &answeredToolCallError{call: *pending}
 			}
 		}
-		if stale {
+		if j < len(msgs) {
 			return llm.ToolCall{}, &stalePermissionError{call: *pending}
 		}
 		return *pending, nil
 	}
 	return llm.ToolCall{}, fmt.Errorf("tool call %s not found in session history", toolCallID)
+}
+
+// clearMatchingPendingPermission lifts the persisted gate only when it names
+// this call: a gate belonging to a different pending call must survive.
+func clearMatchingPendingPermission(sessionDir, toolCallID string) {
+	rec, err := session.ReadPendingPermission(sessionDir)
+	if err != nil || rec == nil {
+		return
+	}
+	if strings.TrimSpace(rec.ToolCall.ToolCallID) != toolCallID {
+		return
+	}
+	_ = session.ClearPendingPermission(sessionDir)
 }
 
 func settleStalePermission(sessionDir, toolCallID string, call llm.ToolCall) (bool, error) {

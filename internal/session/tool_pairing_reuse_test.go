@@ -109,9 +109,41 @@ func TestToolPairingDoesNotMoveResultsOwnedBySeparateBatches(t *testing.T) {
 	assertToolPairingIssues(t, issues, want...)
 }
 
+// A call id pending in two batches is not ambiguous: each batch is closed with
+// its own synthetic result, batch-locally, the way a completed reuse already
+// is.
+func TestToolPairingRepairsPendingBatchesWithReusedID(t *testing.T) {
+	msgs := []llm.Message{
+		toolCallMessage("a"),
+		{Role: llm.RoleUser, Content: "next"},
+		toolCallMessage("a"),
+	}
+	got, issues := RepairMissingToolResults(msgs)
+	if len(got) != len(msgs)+2 || len(issues) == 0 {
+		t.Fatalf("repair = %d messages, issues=%+v; want two synthetic results", len(got), issues)
+	}
+	if got[1].ToolCallID != "a" || got[4].ToolCallID != "a" ||
+		got[1].Content != interruptedToolCallResult || got[4].Content != interruptedToolCallResult {
+		t.Fatalf("synthetic results misplaced: %#v", got)
+	}
+	if remaining := ValidateToolPairing(got); len(remaining) != 0 {
+		t.Fatalf("repaired history still invalid: %+v", remaining)
+	}
+}
+
+// A stray result carrying the id of pending calls cannot be attributed to one
+// batch, so nothing is repaired on a guess. A batch repeating an id inside a
+// single assistant message cannot tell one call's result from the other's
+// either.
 func TestToolPairingAmbiguousPendingBatchesAreNotRepaired(t *testing.T) {
 	for _, msgs := range [][]llm.Message{
-		{toolCallMessage("a"), {Role: llm.RoleUser, Content: "next"}, toolCallMessage("a")},
+		{
+			toolCallMessage("a"),
+			{Role: llm.RoleUser, Content: "next"},
+			toolCallMessage("a"),
+			{Role: llm.RoleUser, Content: "more"},
+			toolResultMessage("a"),
+		},
 		{toolCallMessage("a", "a", "b")},
 	} {
 		got, issues := RepairMissingToolResults(msgs)

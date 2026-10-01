@@ -14,7 +14,6 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
-	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 )
 
@@ -534,7 +533,11 @@ func (m *Manager) resumableChildSnapshot(id, parentID, name string) (*LoadedSnap
 // the definition as they are now, so nothing an earlier run was allowed
 // carries over.
 func restoreChildTranscript(st *State, snap *LoadedSnapshot) {
-	st.ReplaceMessagesWithoutPersist(closeInterruptedToolCalls(snap.Messages))
+	// The stored transcript is seeded as written, holes included: unanswered
+	// calls of the earlier run are closed only on the outbound projection
+	// (RepairMissingToolResults in the resumed run's request building), so the
+	// file keeps saying no result was recorded instead of gaining one.
+	st.ReplaceMessagesWithoutPersist(snap.Messages)
 	st.SetPlanWithoutPersist(snap.Plan)
 	st.RestoreUILogWithoutPersist(snap.UILog)
 	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq)
@@ -721,21 +724,6 @@ func subagentParentOf(st *State) string {
 		return meta.ParentSessionID
 	}
 	return "an unknown parent session"
-}
-
-// closeInterruptedToolCalls answers every call of the transcript that has no
-// result, right after the results its batch does have. A run stopped or timed
-// out in the middle of a batch of calls leaves the rest of the batch
-// unanswered, and so does a process that died during a call; an
-// OpenAI-compatible provider refuses a request that carries a call without its
-// result anywhere in the history, so the resumed run would fail on its first
-// step. The answer says the outcome is unknown; the model checks before it
-// makes the call again. A transcript with nothing to answer comes back as it
-// was.
-func closeInterruptedToolCalls(msgs []llm.Message) []llm.Message {
-	// The session-layer repair API is also used when a subagent resumes.
-	repaired, _ := RepairMissingToolResults(msgs)
-	return repaired
 }
 
 // liveSubagentTaskID is the task of the run working on a child right now, or

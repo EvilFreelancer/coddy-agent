@@ -161,25 +161,18 @@ func batchHasDuplicateCall(batch toolBatch, id string) bool {
 	return false
 }
 
-func pendingBatchCount(a toolPairingAnalysis, id string) int {
-	pending := make(map[int]struct{})
-	for _, occurrence := range a.calls[id] {
-		if !a.validResults[occurrence.batch][id] {
-			pending[occurrence.batch] = struct{}{}
-		}
-	}
-	return len(pending)
-}
-
 // ValidateToolPairing checks assistant tool-call batches and their contiguous
 // tool results without changing the transcript.
 func ValidateToolPairing(msgs []llm.Message) []ToolPairingIssue {
 	return analyzeToolPairing(msgs).issues
 }
 
-// RepairMissingToolResults inserts stable synthetic results for unambiguous
-// missing calls. Existing malformed, orphan, and duplicate messages are kept
-// in place and unchanged.
+// RepairMissingToolResults inserts stable synthetic results for calls that
+// have no result of their own. A call stays unrepaired when a stray result
+// carries its id (the real one cannot be attributed to a batch) or when a
+// single batch repeats the id (one result cannot be told from the other).
+// Existing malformed, orphan, and duplicate messages are kept in place and
+// unchanged.
 func RepairMissingToolResults(msgs []llm.Message) ([]llm.Message, []ToolPairingIssue) {
 	a := analyzeToolPairing(msgs)
 	missing := make(map[int][]string)
@@ -195,7 +188,7 @@ func RepairMissingToolResults(msgs []llm.Message) ([]llm.Message, []ToolPairingI
 			continue
 		}
 		for _, call := range batch.calls {
-			if !a.validResults[batchIndex][call.id] && !a.strayResults[call.id] && pendingBatchCount(a, call.id) == 1 {
+			if !a.validResults[batchIndex][call.id] && !a.strayResults[call.id] {
 				missing[batchIndex] = append(missing[batchIndex], call.id)
 			}
 		}

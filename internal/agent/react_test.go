@@ -889,6 +889,135 @@ func TestFindPendingToolCallRejectsNewestAnsweredOccurrence(t *testing.T) {
 	}
 }
 
+// A same-ID result that is not part of the call's own batch chain - it follows
+// an intervening message - belongs to a different occurrence or is misplaced.
+// It never makes this call answered; the call is stale.
+func TestFindPendingToolCallStaleWhenResultFollowsInterveningMessage(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_a", Name: "run_command"}}},
+		{Role: llm.RoleUser, Content: "newer user message"},
+		{Role: llm.RoleTool, ToolCallID: "call_a", Content: "late result"},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	_, err := ag.findPendingToolCall("call_a")
+	var staleErr *stalePermissionError
+	if !errors.As(err, &staleErr) {
+		t.Fatalf("findPendingToolCall error = %v, want stale permission", err)
+	}
+}
+
+// A call whose result is already on record - a refusal the interrupted turn
+// wrote, a repaired sibling - has an outcome; answering its leftover gate must
+// only lift the gate, never run the tool.
+func TestResumeAfterPermissionClearsGateForAnsweredCall(t *testing.T) {
+	sessionDir := t.TempDir()
+	st := &session.State{
+		ID:         "sess_answered_permission",
+		CWD:        t.TempDir(),
+		Mode:       session.ModeAgent,
+		SessionDir: sessionDir,
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "run the command"},
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+				ID:        "call_answered",
+				Name:      "run_command",
+				InputJSON: `{"command":"printf SHOULD_NOT_RUN"}`,
+			}}},
+			{Role: llm.RoleTool, ToolCallID: "call_answered", Content: "not executed: the turn was interrupted before this tool call ran"},
+		},
+	}
+	if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+		SessionID: st.ID,
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "call_answered", Status: "pending"},
+	}, "run_command", `{"command":"printf SHOULD_NOT_RUN"}`); err != nil {
+		t.Fatal(err)
+	}
+	before := st.GetMessages()
+	provider := &pairingProvider{legacy: true}
+	ag := newPairingAgent(provider, st, resumePermissionSender{})
+
+	stop, err := ag.ResumeAfterPermission(context.Background(), "call_answered", &acp.PermissionResult{
+		Outcome:  "selected",
+		OptionID: "allow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop != string(acp.StopReasonCancelled) {
+		t.Fatalf("stop reason %q, want cancelled", stop)
+	}
+	if session.PendingPermissionHeld(sessionDir) {
+		t.Fatal("the gate of an already answered call was not lifted")
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider received %d requests for an answered call", provider.calls)
+	}
+	if got := st.GetMessages(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("resume of an answered call changed history: got=%+v want=%+v", got, before)
+	}
+}
+
+// An answered call lifts only the gate that names it: a gate persisted for a
+// different call keeps waiting for its own answer.
+func TestResumeAfterPermissionAnsweredCallKeepsAnotherGate(t *testing.T) {
+	sessionDir := t.TempDir()
+	st := &session.State{
+		ID:         "sess_answered_mismatch",
+		CWD:        t.TempDir(),
+		Mode:       session.ModeAgent,
+		SessionDir: sessionDir,
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_answered", Name: "read"}}},
+			{Role: llm.RoleTool, ToolCallID: "call_answered", Content: "done"},
+		},
+	}
+	if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+		SessionID: st.ID,
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "call_other", Status: "pending"},
+	}, "write", `{}`); err != nil {
+		t.Fatal(err)
+	}
+	ag := newPairingAgent(&pairingProvider{legacy: true}, st, resumePermissionSender{})
+
+	if _, err := ag.ResumeAfterPermission(context.Background(), "call_answered", &acp.PermissionResult{
+		Outcome:  "selected",
+		OptionID: "allow",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !session.PendingPermissionHeld(sessionDir) {
+		t.Fatal("an answered call lifted a gate belonging to call_other")
+	}
+}
+
+// A bare plan-document row between a call and its result is UI-only and out of
+// the pairing analysis: the batch's contiguous result chain stays whole, no
+// synthetic result is inserted.
+func TestBuildMessagesIgnoresPlanDocumentRowsInPairing(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleUser, Content: "write a plan"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+			{ID: "call_plan", Name: "plan_write"},
+			{ID: "call_read", Name: "read"},
+		}},
+		{Role: llm.RoleAssistant, PlanDocument: &llm.PlanDocumentSnapshot{Slug: "plan"}},
+		{Role: llm.RoleTool, ToolCallID: "call_plan", Content: "saved"},
+		{Role: llm.RoleTool, ToolCallID: "call_read", Content: "content"},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	got := ag.buildMessages("sys")
+	if len(got) != 5 {
+		t.Fatalf("buildMessages = %d messages, want system + 4 with no synthetic: %+v", len(got), got)
+	}
+	for i, m := range got {
+		if strings.Contains(m.Content, "no result was recorded") || strings.Contains(m.Content, "not executed") {
+			t.Fatalf("a synthetic result was inserted at %d: %+v", i, m)
+		}
+	}
+}
+
 func TestResumeAfterPermissionSettlesStaleAllowAndRejectWithoutRunning(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

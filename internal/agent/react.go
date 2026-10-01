@@ -958,13 +958,12 @@ func (a *Agent) runReActLoop(
 		sendMessages := withTurnContext(withToolImages(withToolRules(a.prunedForLLM(messages)), a.modelReadsImages(), a.loadToolImage), turnCtx)
 		// Repair only the outbound projection. The persisted transcript remains
 		// unchanged; malformed IDs and misplaced/duplicate results are refused.
-		repairedSendMessages, pairingIssues := session.RepairMissingToolResults(sendMessages)
-		if len(pairingIssues) > 0 && a.log != nil {
-			a.log.Warn("tool-call pairing diagnostics in outbound history",
-				"session", a.state.GetID(), "issues", pairingIssues,
-				"repaired", len(repairedSendMessages) != len(sendMessages))
+		prevLen := len(sendMessages)
+		sendMessages, _ = session.RepairMissingToolResults(sendMessages)
+		if len(sendMessages) != prevLen && a.log != nil {
+			a.log.Info("repaired missing tool results in outbound history",
+				"session", a.state.GetID(), "inserted", len(sendMessages)-prevLen)
 		}
-		sendMessages = repairedSendMessages
 		if issues := session.ValidateToolPairing(sendMessages); len(issues) > 0 {
 			stopFirstTokenTimer()
 			streamCancel()
@@ -2231,19 +2230,28 @@ func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
 	// was written into it when it was sent (mentions.go), so no request
 	// rewrites an earlier message and the provider's cached prefix holds.
 	history := session.MessagesForLLM(a.state.GetMessages())
-	repaired, issues := session.RepairMissingToolResults(history)
-	if len(issues) > 0 && a.log != nil {
-		a.log.Warn("tool-call pairing diagnostics in LLM history",
-			"session", a.state.GetID(), "issues", issues, "repaired", len(repaired) != len(history))
+	// UI-only rows (a bare plan document between a call and its result) must be
+	// out of the analysis: they would cut a batch's contiguous result chain and
+	// make a healthy pair look misplaced.
+	filtered := make([]llm.Message, 0, len(history))
+	for _, m := range history {
+		if isLLMHistoryMessage(m) {
+			filtered = append(filtered, m)
+		}
+	}
+	repaired, _ := session.RepairMissingToolResults(filtered)
+	if a.log != nil {
+		if issues := session.ValidateToolPairing(repaired); len(issues) > 0 {
+			a.log.Warn("unrepairable tool-call pairing in LLM history",
+				"session", a.state.GetID(), "issues", issues)
+		} else if len(repaired) != len(filtered) {
+			a.log.Info("repaired missing tool results in LLM history",
+				"session", a.state.GetID(), "inserted", len(repaired)-len(filtered))
+		}
 	}
 	msgs := make([]llm.Message, 0, len(repaired)+1)
 	msgs = append(msgs, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
-	for _, m := range repaired {
-		if !isLLMHistoryMessage(m) {
-			continue
-		}
-		msgs = append(msgs, m)
-	}
+	msgs = append(msgs, repaired...)
 	return msgs
 }
 
