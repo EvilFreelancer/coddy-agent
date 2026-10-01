@@ -542,7 +542,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/commands": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "List built-in slash commands",
-					"description": "Returns the built-in commands that run without an LLM turn, so the composer can show a **Commands** group alongside skills: the settings commands first (**`/model`**, **`/reasoning`**, **`/think`**, **`/nothink`**, **`/agent`**, **`/plan`**, **`/ask`**, **`/permissions`**; **kind** **setting**, with the **setting** they change, an argument **hint**, **aliases**, the **choices** of their argument for the session named by **X-Coddy-Session-ID** or the fixed **value** a command without one sets), then the deterministic actions (**`/compact`** only while **`compaction.enable`** is true, **`/export`**, **`/plugin`**; **kind** **action**). **duringTurn** says a command may be sent while a turn runs. Optional **`prefix`** filters by case-insensitive name prefix. These are intentionally not part of **`/coddy/slash-commands`** (skills only).",
+					"description": "Returns the built-in commands that run without an LLM turn, so the composer can show a **Commands** group alongside skills: the settings commands first (**`/model`**, **`/reasoning`**, **`/think`**, **`/nothink`**, **`/agent`**, **`/plan`**, **`/ask`**, **`/permissions`**; **kind** **setting**, with the **setting** they change, an argument **hint**, **aliases**, the **choices** of their argument for the session named by **X-Coddy-Session-ID** or the fixed **value** a command without one sets), then the deterministic actions (**`/compact`** only while **`compaction.enable`** is true, **`/goal`**, **`/export`**, **`/plugin`**; **kind** **action**). **duringTurn** says a command may be sent while a turn runs. Optional **`prefix`** filters by case-insensitive name prefix. These are intentionally not part of **`/coddy/slash-commands`** (skills only).",
 					"operationId": "listBuiltinCommands",
 					"parameters": []interface{}{
 						map[string]interface{}{
@@ -2841,7 +2841,7 @@ func openAPISpec() map[string]interface{} {
 							"type": "array", "items": map[string]string{"type": "string"},
 							"description": "Spawn allowlist from the frontmatter (same pattern syntax as tools): names the child may delegate to, including one level past subagents.max_depth. Honored for builtin and user scope only; a project definition's declaration is shown but ignored.",
 						},
-						"role_bytes":      map[string]string{"type": "integer", "description": "Size of the role body. The body itself is never served: an unapproved file's instructions must not reach a client that would render them."},
+						"role_bytes": map[string]string{"type": "integer", "description": "Size of the role body. The body itself is never served: an unapproved file's instructions must not reach a client that would render them."},
 					},
 					"required": []string{"name", "description", "scope", "builtin", "hidden", "trust", "trusted", "needs_approval"},
 				},
