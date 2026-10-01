@@ -103,6 +103,11 @@ func (m *Manager) runSupervisedTurn(ctx context.Context, st *State, prompt []acp
 		}
 		cause := watch.cause()
 		if cause != "" {
+			// A queued operator message gets the next run before any recovery
+			// prompt. In particular, /goal clear must be able to stop a goal.
+			if len(st.QueuedMessages()) > 0 {
+				return string(acp.StopReasonEndTurn), nil
+			}
 			if nudges >= cfg.Supervisor.NudgeLimit() || used >= limit {
 				return m.stopSupervisedTurn(st, cause, used)
 			}
@@ -116,6 +121,9 @@ func (m *Manager) runSupervisedTurn(ctx context.Context, st *State, prompt []acp
 		if err != nil || stop != string(acp.StopReasonEndTurn) {
 			return stop, err
 		}
+		if len(st.QueuedMessages()) > 0 {
+			return stop, nil
+		}
 		if runningBackgroundWork(st.ID) {
 			return stop, nil
 		}
@@ -124,6 +132,9 @@ func (m *Manager) runSupervisedTurn(ctx context.Context, st *State, prompt []acp
 		verdictCancel()
 		if ctx.Err() != nil || st.IsUserCancelledTurn() {
 			return string(acp.StopReasonCancelled), nil
+		}
+		if len(st.QueuedMessages()) > 0 {
+			return string(acp.StopReasonEndTurn), nil
 		}
 		if verdictErr != nil {
 			m.log.Warn("supervisor completion check failed", "session", st.ID, "error", verdictErr)

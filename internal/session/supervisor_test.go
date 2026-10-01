@@ -160,6 +160,58 @@ func TestSupervisorStopsAtContinuationLimit(t *testing.T) {
 	}
 }
 
+func TestSupervisorQueuedGoalClearPreemptsAutomaticContinuation(t *testing.T) {
+	calls := 0
+	mgr, sid := supervisorTestManager(t, func(_ context.Context, st *session.State, prompt []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		calls++
+		if calls == 1 {
+			if _, err := st.EnqueueMessage("/goal clear"); err != nil {
+				t.Fatal(err)
+			}
+		} else if prompt[0].Text == "/goal clear" {
+			st.SetGoal(session.GoalState{})
+		} else {
+			t.Fatalf("run %d received %q before queued command", calls, prompt[0].Text)
+		}
+		return string(acp.StopReasonEndTurn), nil
+	})
+	checks := 0
+	mgr.SetSupervisorJudge(func(context.Context, *config.Config, *session.State, string) (session.SupervisorVerdict, error) {
+		checks++
+		return session.SupervisorVerdict{Remaining: "unfinished"}, nil
+	})
+	runSupervisorPrompt(t, mgr, sid)
+	if calls != 2 || checks != 0 || mgr.SessionByID(sid).GetGoal().Text != "" {
+		t.Fatalf("calls=%d checks=%d goal=%+v", calls, checks, mgr.SessionByID(sid).GetGoal())
+	}
+}
+
+func TestSupervisorGoalClearQueuedDuringVerdictPreemptsContinuation(t *testing.T) {
+	calls := 0
+	mgr, sid := supervisorTestManager(t, func(_ context.Context, st *session.State, prompt []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		calls++
+		if calls == 2 {
+			if prompt[0].Text != "/goal clear" {
+				t.Fatalf("queued command was preceded by %q", prompt[0].Text)
+			}
+			st.SetGoal(session.GoalState{})
+		}
+		return string(acp.StopReasonEndTurn), nil
+	})
+	checks := 0
+	mgr.SetSupervisorJudge(func(_ context.Context, _ *config.Config, st *session.State, _ string) (session.SupervisorVerdict, error) {
+		checks++
+		if _, err := st.EnqueueMessage("/goal clear"); err != nil {
+			t.Fatal(err)
+		}
+		return session.SupervisorVerdict{Remaining: "unfinished"}, nil
+	})
+	runSupervisorPrompt(t, mgr, sid)
+	if calls != 2 || checks != 1 || mgr.SessionByID(sid).GetGoal().Text != "" {
+		t.Fatalf("calls=%d checks=%d goal=%+v", calls, checks, mgr.SessionByID(sid).GetGoal())
+	}
+}
+
 func TestSupervisorStallTimerPausesForPermission(t *testing.T) {
 	sender := &holdingPermissionSender{started: make(chan struct{}), release: make(chan struct{})}
 	mgr, sid := supervisorTestManager(t, func(ctx context.Context, st *session.State, _ []acp.ContentBlock, snd acp.UpdateSender) (string, error) {
