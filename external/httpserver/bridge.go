@@ -385,7 +385,15 @@ func (s *Sender) RequestPermission(ctx context.Context, params acp.PermissionReq
 	ch := registerPermissionWait(sid, tcid, sd)
 	defer unregisterPermissionWait(sid, tcid, sd)
 	if err := s.writeNamedEventJSON("permission", params); err != nil {
-		return nil, err
+		if _, merr := json.Marshal(params); merr != nil {
+			// A marshal failure means the prompt never left the process;
+			// waiting for an answer nobody saw would only hang the turn.
+			return nil, err
+		}
+		// A dead client socket is not fatal: the frame still reached the
+		// composer relay through the tee, the answer arrives through POST
+		// /coddy/sessions/{id}/permission on a connection of its own, and a
+		// watcher can pick the prompt up there.
 	}
 	select {
 	case res := <-ch:
@@ -414,7 +422,14 @@ func (s *Sender) RequestQuestion(ctx context.Context, params acp.QuestionRequest
 	ch := registerQuestionWait(sid, rid)
 	defer unregisterQuestionWait(sid, rid)
 	if err := s.writeNamedEventJSON("question", params); err != nil {
-		return nil, err
+		if _, merr := json.Marshal(params); merr != nil {
+			// Same rule as in RequestPermission: only a payload that never
+			// existed as an event aborts the wait.
+			return nil, err
+		}
+		// A dead client socket must not fail the question: the frame still
+		// reached the composer relay through the tee, and the answer arrives
+		// through POST /coddy/sessions/{id}/question, not through this stream.
 	}
 	select {
 	case res := <-ch:
