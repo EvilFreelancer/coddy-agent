@@ -733,7 +733,7 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 	st.SetPlanWithoutPersist(snap.Plan)
 	st.RestorePermissionGrantsWithoutPersist(snap.PermissionCommands, snap.PermissionWriteKeys, snap.PermissionHTTPKeys)
 	st.RestoreUILogWithoutPersist(snap.UILog)
-	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq)
+	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq, snap.Meta.LastErrorSeq)
 	restoreContextBreakdown(st)
 
 	st.SetPersistHook(m.makePersist(st))
@@ -1372,9 +1372,14 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	}
 
 	var ranRunner bool
+	outcome := ActivityOutcomeSuccess
+	outcomeRecorded := false
 	defer func() {
-		if ranRunner {
-			state.BumpActivitySeq()
+		if ranRunner && !outcomeRecorded {
+			if turnCtx.Err() != nil && outcome == ActivityOutcomeSuccess {
+				outcome = ActivityOutcomeCanceled
+			}
+			state.RecordActivityOutcome(outcome)
 		}
 	}()
 
@@ -1383,6 +1388,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	stopReason, err := m.runner(turnCtx, state, hydrated, sender)
 	if err != nil {
 		state.TakeTurnStopNotice()
+		if errors.Is(err, context.Canceled) {
+			outcome = ActivityOutcomeCanceled
+		} else {
+			outcome = ActivityOutcomeFailure
+		}
+		state.RecordActivityOutcome(outcome)
+		outcomeRecorded = true
 		if !errors.Is(err, context.Canceled) {
 			state.AppendUILogError(CountUserTurns(state.GetMessages()), err.Error())
 		}
@@ -1444,6 +1456,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 		}
 		if err != nil {
 			state.TakeTurnStopNotice()
+			if errors.Is(err, context.Canceled) {
+				outcome = ActivityOutcomeCanceled
+			} else {
+				outcome = ActivityOutcomeFailure
+			}
+			state.RecordActivityOutcome(outcome)
+			outcomeRecorded = true
 			if !errors.Is(err, context.Canceled) {
 				state.AppendUILogError(CountUserTurns(state.GetMessages()), err.Error())
 			}
@@ -1456,6 +1475,11 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	// output limit - says why, on every surface (issue #255): the notice is
 	// kept in the UI log and handed to the caller.
 	if notice := state.TakeTurnStopNotice(); notice != "" {
+		if turnCtx.Err() != nil && outcome == ActivityOutcomeSuccess {
+			outcome = ActivityOutcomeCanceled
+		}
+		state.RecordActivityOutcome(outcome)
+		outcomeRecorded = true
 		state.AppendUILogNotice(CountUserTurns(state.GetMessages()), notice)
 		res.StopNotice = notice
 	}
@@ -2044,10 +2068,31 @@ func (m *Manager) acquireTurnLockWithReloadDrain(sessionID string, st *State) (f
 	if err != nil {
 		return nil, err
 	}
+	if err := m.synchronizeActivityAfterTurnLock(st); err != nil {
+		unlock()
+		return nil, err
+	}
 	return func() {
 		unlock()
 		m.drainPendingMCPReload(sessionID, st)
 	}, nil
+}
+
+// synchronizeActivityAfterTurnLock refreshes the activity generation while
+// this process owns the per-session turn lock. A State can outlive a turn in
+// another process, so its in-memory counter may be behind the generation that
+// process persisted. Refreshing before the runner records its outcome makes
+// the next outcome allocation monotonic across processes.
+func (m *Manager) synchronizeActivityAfterTurnLock(st *State) error {
+	if m.store == nil || st == nil || strings.TrimSpace(st.GetPersistedSessionDir()) == "" {
+		return nil
+	}
+	activitySeq, readActivitySeq, lastErrorSeq, err := m.store.ReadDiskActivity(st.GetID())
+	if err != nil {
+		return fmt.Errorf("refresh session activity: %w", err)
+	}
+	st.RestoreActivityFromSnapshot(activitySeq, readActivitySeq, lastErrorSeq)
+	return nil
 }
 
 // acpMCPServerToConfig converts an ACP client-supplied MCP server definition

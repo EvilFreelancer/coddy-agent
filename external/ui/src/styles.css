@@ -10,6 +10,7 @@
   --syntax-type: #67e8f9;
   --syntax-meta: #f9a8d4;
   --syntax-deletion: #fca5a5;
+  --coddy-danger: #f87171;
   --bg: #121212;
   --diff-add-bg: rgba(46, 160, 67, 0.13);
   --diff-del-bg: rgba(248, 81, 73, 0.13);
@@ -118,6 +119,7 @@
   --syntax-type: #0e646e;
   --syntax-meta: #93306a;
   --syntax-deletion: #b91c1c;
+  --coddy-danger: #b91c1c;
   --bg: #f8f8fa;
   --diff-add-bg: rgba(46, 160, 67, 0.09);
   --diff-del-bg: rgba(248, 81, 73, 0.09);
@@ -1387,16 +1389,15 @@ a.rail-brand {
   box-sizing: border-box;
 }
 
-/* Two columns: the state marks, then the title with its tags under it. The tags
-   label the words, so they start where the title's text starts rather than under
-   the marks; a row with no mark leaves the first column empty. */
+/* Two columns: a fixed state-mark slot, then the title with its tags under it.
+   The fixed slot keeps an 8px dot and a 16px prompt marker from moving text. */
 .session-row-link {
   flex: 1;
   min-width: 0;
   text-decoration: none;
   color: inherit;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
 }
 
@@ -1405,8 +1406,13 @@ a.rail-brand {
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-right: 6px;
+  align-content: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 16px;
+  min-width: 16px;
+  gap: 0;
+  margin-left: 0px;
 }
 
 .session-item:hover {
@@ -1479,6 +1485,31 @@ a.rail-brand {
   flex-shrink: 0;
 }
 
+.session-idle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--text) 30%, var(--coddy-blend-base));
+}
+
+.session-error-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--coddy-danger);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--coddy-danger) 25%, transparent);
+}
+
+.session-error-dot.is-seen {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--coddy-danger);
+}
+
 .session-permission-icon,
 .session-question-icon {
   flex-shrink: 0;
@@ -1491,22 +1522,6 @@ a.rail-brand {
   font-weight: 700;
   line-height: 1;
   color: rgba(196, 181, 253, 0.95);
-}
-
-.session-question-icon {
-  animation: session-question-pulse 1.1s ease-in-out infinite;
-}
-
-@keyframes session-question-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.92);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-  }
 }
 
 .sessions-empty {

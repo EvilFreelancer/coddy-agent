@@ -103,6 +103,7 @@ import { retireRelayedPermissionPrompts } from "./chat/relayedPermissionPrompts"
 import { normalizeTodoPlanSnapshot } from "./chat/todoToolPreview";
 import {
   clearQuestionPromptRecords,
+  hasUnresolvedQuestionPrompt,
   mergeStoredQuestionPromptsIntoTranscript,
   patchQuestionToolArgsFromPromptRecords,
   upsertQuestionPromptRecord,
@@ -161,6 +162,10 @@ import {
 } from "./chat/reasoningCookie";
 import { pickReasoningLevel } from "./chat/reasoningSelection";
 import { SessionsSidebar } from "./sessions/SessionsSidebar";
+import {
+  reconcilePermissionPendingSessionIds,
+  reconcileQuestionPendingSessionIds,
+} from "./sessions/sessionRowActivity";
 import { useConfirm } from "./components/useConfirm";
 import { useT } from "./i18n/I18nProvider";
 import { composerAutoFocusAllowed } from "./chat/composerFocus";
@@ -647,6 +652,7 @@ export function App() {
     messageQueue: (sid: string, queue: QueuedMessageEvent) => void;
     sessionSettings: (event: SessionSettingsEvent) => void;
     subagentPermission: (parentSid: string) => void;
+    questionPending: (sid: string) => void;
     sessionRewound: (sid: string) => void;
     ready: () => void;
   }>({
@@ -657,6 +663,7 @@ export function App() {
     messageQueue: () => {},
     sessionSettings: () => {},
     subagentPermission: () => {},
+    questionPending: () => {},
     sessionRewound: () => {},
     ready: () => {},
   });
@@ -2683,20 +2690,33 @@ export function App() {
   }, [headers, configEpoch]);
 
   useEffect(() => {
-    const ids = new Set(permissionPendingSessionIdsFromStorage());
-    for (const row of sessions) {
-      if (row.permissionPending) {
-        ids.add(row.id);
-      }
-    }
     const sid = sessionId.trim();
-    if (
-      sid &&
-      items.some((x) => x.type === "permission_prompt" && !x.resolved)
-    ) {
-      ids.add(sid);
-    }
-    setPermissionPendingSids(ids);
+    const viewedPromptPending =
+      sid !== "" &&
+      items.some((x) => x.type === "permission_prompt" && !x.resolved);
+    setPermissionPendingSids((prev) =>
+      reconcilePermissionPendingSessionIds(
+        sessions,
+        prev,
+        sid,
+        viewedPromptPending,
+      ),
+    );
+  }, [sessions, items, sessionId]);
+
+  useEffect(() => {
+    const sid = sessionId.trim();
+    const viewedPromptPending =
+      sid !== "" &&
+      items.some((x) => x.type === "question_prompt" && !x.resolved);
+    setQuestionPendingSids((prev) =>
+      reconcileQuestionPendingSessionIds(
+        sessions,
+        prev,
+        sid,
+        viewedPromptPending,
+      ),
+    );
   }, [sessions, items, sessionId]);
 
   // /coddy/config may resolve after the first loadMessages; re-synthesize permission_prompt rows then.
@@ -2803,6 +2823,11 @@ export function App() {
         void refreshBackgroundTasks({ silent: true });
       }
     },
+    // The question itself stays on the composer stream. The global event only
+    // tells every History view to re-read the row's questionPending flag.
+    questionPending: () => {
+      void loadSessionsList(true);
+    },
     // A surface - this tab, another tab, a console over --remote - rewound the
     // session: the tail it held is gone, so the shadow transcript and the
     // prompts of the removed turns are dropped and the kept prefix reloads.
@@ -2825,6 +2850,7 @@ export function App() {
       void loadMessages(key, { freshLoad: true });
     },
     ready: () => {
+      void loadSessionsList(true);
       // A config_reloaded may have been missed while the stream was down: the
       // Settings copy is read again if the drawer ever held one.
       noteSettingsConfigReloaded();
@@ -2861,6 +2887,8 @@ export function App() {
         serverEventHandlersRef.current.sessionSettings(event),
       onSubagentPermission: (parentSid) =>
         serverEventHandlersRef.current.subagentPermission(parentSid),
+      onQuestionPending: (sid) =>
+        serverEventHandlersRef.current.questionPending(sid),
       onSessionRewound: (sid) =>
         serverEventHandlersRef.current.sessionRewound(sid),
       onConnectedChange: setServerEventsConnected,
@@ -3162,6 +3190,16 @@ export function App() {
     setPermissionPendingSids((prev) => {
       const next = new Set(prev);
       if (hasPendingPermission) {
+        next.add(sid);
+      } else {
+        next.delete(sid);
+      }
+      return next;
+    });
+    const hasPendingQuestion = hasUnresolvedQuestionPrompt(applied);
+    setQuestionPendingSids((prev) => {
+      const next = new Set(prev);
+      if (hasPendingQuestion) {
         next.add(sid);
       } else {
         next.delete(sid);

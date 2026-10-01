@@ -96,6 +96,57 @@ func TestRequestQuestionSSECompletesWhenPosted(t *testing.T) {
 	}
 }
 
+func TestRequestQuestionNotifiesPendingLifecycle(t *testing.T) {
+	rec := &syncBuffer{}
+	sender := NewSender(&config.Config{}, rec, true, "agent-model")
+	transitions := make(chan struct {
+		sessionID string
+		pending   bool
+	}, 2)
+	sender.SetQuestionPendingCallback(func(sessionID string, pending bool) {
+		transitions <- struct {
+			sessionID string
+			pending   bool
+		}{sessionID: sessionID, pending: pending}
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.RequestQuestion(context.Background(), acp.QuestionRequestParams{
+			SessionID: "s-pending",
+			RequestID: "r-pending",
+			Questions: []acp.QuestionPrompt{{Question: "private question", Options: []acp.QuestionOption{{Label: "yes"}}}},
+		})
+		done <- err
+	}()
+
+	select {
+	case transition := <-transitions:
+		if transition.sessionID != "s-pending" || !transition.pending {
+			t.Fatalf("first question transition = %+v, want pending", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question pending transition was not reported")
+	}
+	if !QuestionPending("s-pending") {
+		t.Fatal("question wait was not registered")
+	}
+	if !CompleteQuestionAnswer("s-pending", "r-pending", &acp.QuestionResult{Answers: [][]string{{"yes"}}}) {
+		t.Fatal("CompleteQuestionAnswer failed")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case transition := <-transitions:
+		if transition.sessionID != "s-pending" || transition.pending {
+			t.Fatalf("second question transition = %+v, want settled", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question settled transition was not reported")
+	}
+}
+
 // deadResponseWriter stands in for a client that went away mid-turn: every
 // write reports the broken pipe a real socket returns.
 type deadResponseWriter struct{}

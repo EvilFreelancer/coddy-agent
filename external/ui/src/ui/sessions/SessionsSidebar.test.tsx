@@ -128,7 +128,7 @@ test("draft session row links to #/draft/<id>", () => {
   expect(link).toHaveAttribute("href", "#/draft/draft_1");
 });
 
-test("shows the activity dot on every running session and the unread dot on others", () => {
+test("shows activity on every running session without duplicating unread state", () => {
   render(
     <SessionsSidebar
       sessionId="current"
@@ -153,7 +153,7 @@ test("shows the activity dot on every running session and the unread dot on othe
     />,
   );
   expect(screen.getByTestId("session-activity-busy")).toBeInTheDocument();
-  expect(screen.getByTestId("session-unread-busy")).toBeInTheDocument();
+  expect(screen.queryByTestId("session-unread-busy")).toBeNull();
   expect(screen.getByTestId("session-activity-current")).toBeInTheDocument();
   expect(screen.queryByTestId("session-unread-current")).toBeNull();
 });
@@ -179,7 +179,99 @@ test("question pending hides the activity dot and shows animated question icon",
     />,
   );
   expect(screen.queryByTestId("session-activity-q")).toBeNull();
+  expect(screen.queryByTestId("session-idle-q")).toBeNull();
   expect(screen.getByTestId("session-question-q")).toBeInTheDocument();
+});
+
+test("server-reported permission owns the state slot and exposes its name", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "permission",
+        title: "Permission",
+        turnActive: true,
+        permissionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.queryByTestId("session-activity-permission")).toBeNull();
+  expect(screen.queryByTestId("session-idle-permission")).toBeNull();
+  expect(
+    screen.getByRole("img", { name: "Permission required" }),
+  ).toBeInTheDocument();
+});
+
+test("server-reported question owns the state slot before its chat is opened", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "question",
+        title: "Question",
+        turnActive: true,
+        questionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.queryByTestId("session-activity-question")).toBeNull();
+  expect(
+    screen.getByRole("img", { name: "Question pending" }),
+  ).toBeInTheDocument();
+});
+
+test("permission marker wins when a row reports both pending states", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "both",
+        title: "Both",
+        turnActive: true,
+        permissionPending: true,
+        questionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.getByTestId("session-permission-both")).toBeInTheDocument();
+  expect(screen.queryByTestId("session-question-both")).toBeNull();
+  expect(screen.getAllByRole("img", { name: /pending|required/i })).toHaveLength(
+    1,
+  );
+});
+
+test("finished and failed rows carry a state dot that distinguishes unseen errors", () => {
+  renderDrawer({
+    sessionId: "current",
+    sessions: [
+      { id: "idle", title: "Idle" },
+      {
+        id: "unseen-error",
+        title: "Unseen error",
+        lastErrorSeq: 4,
+        readActivitySeq: 3,
+      },
+      {
+        id: "seen-error",
+        title: "Seen error",
+        lastErrorSeq: 4,
+        readActivitySeq: 4,
+        unreadComplete: true,
+      },
+    ],
+  });
+
+  expect(screen.getByTestId("session-idle-idle")).toBeInTheDocument();
+  expect(screen.getByTestId("session-error-unseen-error")).not.toHaveClass(
+    "is-seen",
+  );
+  expect(screen.getByTestId("session-error-seen-error")).toHaveClass(
+    "is-seen",
+  );
+  expect(screen.queryByTestId("session-unread-seen-error")).toBeNull();
 });
 
 test("the dot names background work when the row has no turn running", () => {
@@ -233,10 +325,11 @@ test("the state marks stand apart from the title so the tags line up under its t
   expect(
     busy.querySelector(".session-row-leading .session-activity-dot"),
   ).toBeNull();
-  // A row without a state mark has no empty column holder to push its title in.
-  expect(
-    screen.getByTestId("session-row-calm").querySelector(".session-row-marks"),
-  ).toBeNull();
+  // The transparent finished ring gives grouped rows the same left anchor as
+  // a busy row without pretending work is still running.
+  const calm = screen.getByTestId("session-row-calm");
+  expect(calm.querySelector(".session-row-marks")).not.toBeNull();
+  expect(screen.getByTestId("session-idle-calm")).toBeInTheDocument();
 });
 
 // --- grouping and the archive ---
