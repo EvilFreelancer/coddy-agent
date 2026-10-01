@@ -673,7 +673,7 @@ func TestPartialStreamClosesToolCallsWhilePreservingAssistantMessage(t *testing.
 
 // --- resume_permission.go --------------------------------------------------
 
-func TestCloseUnexecutedPermissionBatchMovesLateTargetResultIntoBatch(t *testing.T) {
+func TestCloseUnexecutedPermissionBatchDoesNotMoveLateTargetResult(t *testing.T) {
 	st := &session.State{
 		ID:         "sess_resume_late_target",
 		CWD:        t.TempDir(),
@@ -693,23 +693,18 @@ func TestCloseUnexecutedPermissionBatchMovesLateTargetResultIntoBatch(t *testing
 	}
 	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
 
+	before := st.GetMessages()
 	ag.closeUnexecutedPermissionBatch("call_target")
 
 	msgs := st.GetMessages()
 	if len(msgs) != 4 {
-		t.Fatalf("normalized history has %d messages, want 4: %+v", len(msgs), msgs)
+		t.Fatalf("history has %d messages, want original messages plus one skipped sibling: %+v", len(msgs), msgs)
 	}
-	if msgs[0].Role != llm.RoleAssistant || len(msgs[0].ToolCalls) != 2 {
-		t.Fatalf("assistant tool-call batch moved or changed: %+v", msgs[0])
+	if !reflect.DeepEqual(msgs[:len(before)], before) {
+		t.Fatalf("late result handling rewrote existing history: got=%+v want prefix=%+v", msgs, before)
 	}
-	if msgs[1].Role != llm.RoleTool || msgs[1].ToolCallID != "call_target" || msgs[1].Content != "real result" {
-		t.Fatalf("late target result was not moved into the batch: %+v", msgs[1])
-	}
-	if msgs[2].Role != llm.RoleTool || msgs[2].ToolCallID != "call_sibling" || msgs[2].Content != permissionBatchSkippedResult {
-		t.Fatalf("later sibling was not skipped: %+v", msgs[2])
-	}
-	if msgs[3].Role != llm.RoleUser || msgs[3].Content != "continue" {
-		t.Fatalf("user message was not preserved after the normalized batch: %+v", msgs[3])
+	if msgs[3].Role != llm.RoleTool || msgs[3].ToolCallID != "call_sibling" || msgs[3].Content != permissionBatchSkippedResult {
+		t.Fatalf("later sibling was not skipped: %+v", msgs[3])
 	}
 	var targetResults int
 	for _, msg := range msgs {
@@ -718,10 +713,10 @@ func TestCloseUnexecutedPermissionBatchMovesLateTargetResultIntoBatch(t *testing
 		}
 	}
 	if targetResults != 1 {
-		t.Fatalf("target result appears %d times, want exactly once: %+v", targetResults, msgs)
+		t.Fatalf("target result appears %d times, want exactly once without moving it: %+v", targetResults, msgs)
 	}
-	if issues := session.ValidateToolPairing(msgs); len(issues) != 0 {
-		t.Fatalf("normalized history has invalid tool pairing: %+v", issues)
+	if issues := session.ValidateToolPairing(msgs); len(issues) == 0 {
+		t.Fatalf("late result should remain visible as malformed pairing: %+v", msgs)
 	}
 }
 
@@ -820,6 +815,245 @@ func TestResumeAfterPermissionRejectContinuesWithoutExecutingTool(t *testing.T) 
 	}
 	if got := st.GetMessages()[len(st.GetMessages())-1]; got.Role != llm.RoleAssistant || got.Content != "continued" {
 		t.Fatalf("missing continuation assistant message: %+v", got)
+	}
+}
+
+func TestFindPendingToolCallSelectsNewerCallAfterReusedCompletedID(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_a", Name: "read", InputJSON: `{"path":"old.txt"}`}}},
+		{Role: llm.RoleTool, ToolCallID: "call_a", Content: "old result"},
+		{Role: llm.RoleUser, Content: "continue"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_a", Name: "run_command", InputJSON: `{"command":"echo newer"}`}}},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	got, err := ag.findPendingToolCall("call_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "run_command" || got.InputJSON != `{"command":"echo newer"}` {
+		t.Fatalf("selected tool call = %+v, want newer pending call", got)
+	}
+}
+
+func TestFindPendingToolCallKeepsSiblingResultBatchLocal(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+			{ID: "call_target", Name: "read"},
+			{ID: "call_sibling", Name: "write"},
+		}},
+		{Role: llm.RoleTool, ToolCallID: "call_sibling", Content: "done"},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	got, err := ag.findPendingToolCall("call_target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "call_target" {
+		t.Fatalf("selected tool call = %+v, want pending target", got)
+	}
+}
+
+func TestFindPendingToolCallIgnoresPlanDocumentRows(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+			{ID: "call_target", Name: "run_command"},
+			{ID: "call_plan", Name: "plan_write"},
+		}},
+		{Role: llm.RoleAssistant, PlanDocument: &llm.PlanDocumentSnapshot{Slug: "plan"}},
+		{Role: llm.RoleTool, ToolCallID: "call_plan", Content: "saved"},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	got, err := ag.findPendingToolCall("call_target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "call_target" {
+		t.Fatalf("selected tool call = %+v, want pending target", got)
+	}
+}
+
+func TestFindPendingToolCallRejectsNewestAnsweredOccurrence(t *testing.T) {
+	st := &session.State{Messages: []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_a", Name: "read"}}},
+		{Role: llm.RoleUser, Content: "next"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_a", Name: "run_command"}}},
+		{Role: llm.RoleTool, ToolCallID: "call_a", Content: "new result"},
+	}}
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	if _, err := ag.findPendingToolCall("call_a"); err == nil || !strings.Contains(err.Error(), "already has a result") {
+		t.Fatalf("findPendingToolCall error = %v, want already-answered error", err)
+	}
+}
+
+func TestResumeAfterPermissionSettlesStaleAllowAndRejectWithoutRunning(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome string
+		option  string
+	}{
+		{name: "allow", outcome: "selected", option: "allow"},
+		{name: "reject", outcome: "cancelled", option: "reject"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionDir := t.TempDir()
+			st := &session.State{
+				ID:         "sess_stale_permission",
+				CWD:        t.TempDir(),
+				Mode:       session.ModeAgent,
+				SessionDir: sessionDir,
+				Messages: []llm.Message{
+					{Role: llm.RoleUser, Content: "run the command"},
+					{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+						ID:        "call_stale",
+						Name:      "run_command",
+						InputJSON: `{"command":"printf SHOULD_NOT_RUN"}`,
+					}}},
+					{Role: llm.RoleUser, Content: "newer user message"},
+				},
+			}
+			if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+				SessionID: st.ID,
+				ToolCall:  acp.PermissionToolCall{ToolCallID: "call_stale", Status: "pending"},
+			}, "run_command", `{"command":"printf SHOULD_NOT_RUN"}`); err != nil {
+				t.Fatal(err)
+			}
+			before := st.GetMessages()
+			ag := newPairingAgent(&pairingProvider{legacy: true}, st, resumePermissionSender{})
+
+			stop, err := ag.ResumeAfterPermission(context.Background(), "call_stale", &acp.PermissionResult{
+				Outcome:  tc.outcome,
+				OptionID: tc.option,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stop != string(acp.StopReasonCancelled) {
+				t.Fatalf("stop reason %q, want cancelled", stop)
+			}
+			if session.PendingPermissionHeld(sessionDir) {
+				t.Fatal("stale permission gate was not cleared")
+			}
+			meta, err := session.ReadToolCallMeta(sessionDir, "call_stale")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.Status != "cancelled" || meta.Name != "run_command" {
+				t.Fatalf("stale tool metadata = %+v, want cancelled run_command", meta)
+			}
+			if got := st.GetMessages(); !reflect.DeepEqual(got, before) {
+				t.Fatalf("stale resume changed history: got=%+v want=%+v", got, before)
+			}
+		})
+	}
+}
+
+func TestResumeAfterPermissionStaleDoesNotClearAnotherGate(t *testing.T) {
+	sessionDir := t.TempDir()
+	st := &session.State{
+		ID:         "sess_stale_mismatch",
+		CWD:        t.TempDir(),
+		Mode:       session.ModeAgent,
+		SessionDir: sessionDir,
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call_stale", Name: "run_command"}}},
+			{Role: llm.RoleUser, Content: "newer user message"},
+		},
+	}
+	if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+		SessionID: st.ID,
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "call_other", Status: "pending"},
+	}, "run_command", `{"command":"printf OTHER"}`); err != nil {
+		t.Fatal(err)
+	}
+	ag := newPairingAgent(&pairingProvider{legacy: true}, st, resumePermissionSender{})
+
+	stop, err := ag.ResumeAfterPermission(context.Background(), "call_stale", &acp.PermissionResult{
+		Outcome:  "selected",
+		OptionID: "allow",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop != string(acp.StopReasonCancelled) {
+		t.Fatalf("stop reason %q, want cancelled", stop)
+	}
+	pending, err := session.ReadPendingPermission(sessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.ToolCall.ToolCallID != "call_other" {
+		t.Fatalf("pending gate changed to %+v, want call_other", pending.ToolCall)
+	}
+}
+
+func TestSettleStalePermissionKeepsGateWhenMetadataFails(t *testing.T) {
+	sessionDir := t.TempDir()
+	if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+		SessionID: "sess_stale_metadata_failure",
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "call_stale", Status: "pending"},
+	}, "run_command", `{"command":"printf SHOULD_NOT_RUN"}`); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the gate when the separate tool metadata store is unavailable so a
+	// later resume can retry the bookkeeping.
+	if err := os.WriteFile(filepath.Join(sessionDir, "tool_calls"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	settled, err := settleStalePermission(sessionDir, "call_stale", llm.ToolCall{
+		ID:   "call_stale",
+		Name: "run_command",
+	})
+	if settled {
+		t.Fatal("stale permission was reported as settled despite metadata failure")
+	}
+	if err == nil {
+		t.Fatal("metadata write failure was swallowed")
+	}
+	if !session.PendingPermissionHeld(sessionDir) {
+		t.Fatal("stale permission gate was cleared despite metadata failure")
+	}
+}
+
+func TestSettleStalePermissionFinalizesMetadataWithoutToolName(t *testing.T) {
+	sessionDir := t.TempDir()
+	if err := session.MarkToolCallStarted(sessionDir, "call_stale", "", "run_command", "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.WritePendingPermission(sessionDir, acp.PermissionRequestParams{
+		SessionID: "sess_stale_empty_name",
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "call_stale", Status: "pending"},
+	}, "", `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	settled, err := settleStalePermission(sessionDir, "call_stale", llm.ToolCall{ID: "call_stale"})
+	if err != nil || !settled {
+		t.Fatalf("stale permission cleanup = settled %v, err %v", settled, err)
+	}
+	if session.PendingPermissionHeld(sessionDir) {
+		t.Fatal("stale permission gate remained after metadata was finalized")
+	}
+	meta, err := session.ReadToolCallMeta(sessionDir, "call_stale")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != "cancelled" || meta.Kind != "run_command" {
+		t.Fatalf("metadata = %+v, want cancelled status with preserved run_command kind", meta)
+	}
+}
+
+func TestSettleStalePermissionWithoutSessionDirectoryDoesNotReportSettled(t *testing.T) {
+	settled, err := settleStalePermission("", "call_stale", llm.ToolCall{ID: "call_stale", Name: "run_command"})
+	if err != nil {
+		t.Fatalf("settle stale permission error = %v, want nil for an unavailable persisted gate", err)
+	}
+	if settled {
+		t.Fatal("stale permission without a persisted session directory was reported as settled")
 	}
 }
 

@@ -12,3 +12,10 @@ Feature: tool call batches remain paired
     Then the legacy history remains unchanged on disk
     And the resume request has adjacent paired tool history
     And the resumed turn succeeds
+
+  Scenario: stale permission is not executed after a newer user message
+    Given a pending permission followed by a newer user message
+    When the stale permission is allowed
+    Then the stale permission gate is cleared
+    And the newer user message remains in history
+    And the provider receives no resume request

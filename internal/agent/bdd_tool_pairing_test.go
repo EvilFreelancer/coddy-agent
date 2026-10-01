@@ -157,6 +157,60 @@ func (s *toolPairingFeatureState) batch() error {
 	return nil
 }
 
+func (s *toolPairingFeatureState) stalePermission() error {
+	s.provider = &pairingProvider{legacy: true}
+	s.sender = &pairingSender{}
+	s.state = &session.State{
+		ID:         "sess_stale_permission",
+		CWD:        s.cwd,
+		Mode:       session.ModeAgent,
+		SessionDir: s.sessionDir,
+		Messages: []llm.Message{
+			{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+				ID:        "stale-call",
+				Name:      "run_command",
+				InputJSON: `{"command":"printf SHOULD_NOT_RUN"}`,
+			}}},
+			{Role: llm.RoleUser, Content: "newer user message"},
+		},
+	}
+	return session.WritePendingPermission(s.sessionDir, acp.PermissionRequestParams{
+		SessionID: s.state.ID,
+		ToolCall:  acp.PermissionToolCall{ToolCallID: "stale-call", Status: "pending"},
+	}, "run_command", `{"command":"printf SHOULD_NOT_RUN"}`)
+}
+
+func (s *toolPairingFeatureState) allowStalePermission() error {
+	_, err := newPairingAgent(s.provider, s.state, s.sender).ResumeAfterPermission(
+		context.Background(), "stale-call", &acp.PermissionResult{Outcome: "selected", OptionID: "allow"},
+	)
+	return err
+}
+
+func (s *toolPairingFeatureState) staleGateCleared() error {
+	if session.PendingPermissionHeld(s.sessionDir) {
+		return fmt.Errorf("stale permission gate is still held")
+	}
+	return nil
+}
+
+func (s *toolPairingFeatureState) newerUserRemains() error {
+	msgs := s.state.GetMessages()
+	if len(msgs) == 0 || msgs[len(msgs)-1].Role != llm.RoleUser || msgs[len(msgs)-1].Content != "newer user message" {
+		return fmt.Errorf("newer user message was changed: %+v", msgs)
+	}
+	return nil
+}
+
+func (s *toolPairingFeatureState) providerReceivedNoResumeRequest() error {
+	s.provider.mu.Lock()
+	defer s.provider.mu.Unlock()
+	if s.provider.calls != 0 {
+		return fmt.Errorf("provider received %d resume requests", s.provider.calls)
+	}
+	return nil
+}
+
 func (s *toolPairingFeatureState) cancelSecond() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -291,6 +345,11 @@ func initializeToolPairingScenario(sc *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	sc.Step(`^a batch of three shell tool calls$`, s.batch)
+	sc.Step(`^a pending permission followed by a newer user message$`, s.stalePermission)
+	sc.Step(`^the stale permission is allowed$`, s.allowStalePermission)
+	sc.Step(`^the stale permission gate is cleared$`, s.staleGateCleared)
+	sc.Step(`^the newer user message remains in history$`, s.newerUserRemains)
+	sc.Step(`^the provider receives no resume request$`, s.providerReceivedNoResumeRequest)
 	sc.Step(`^the second tool call cancels the turn$`, s.cancelSecond)
 	sc.Step(`^only the first two tool calls execute$`, s.firstTwoExecuted)
 	sc.Step(`^every call in the cancelled batch has exactly one result$`, s.cancelledBatchResults)
