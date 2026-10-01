@@ -212,6 +212,7 @@ func openAPISpec() map[string]interface{} {
 				"get": map[string]interface{}{
 					"summary": "List persisted chat sessions",
 					"description": "Rows are ordered by **session.json** **updatedAt** (newest first), then **id** when timestamps tie. " +
+						"The envelope's **active_count** is the global number of currently active turns in History's normal eligible scope (not the page or active filters), so it excludes archived, scheduler and subagent sessions. " +
 						"**updatedAt** advances when session state is persisted (messages, titles, etc.); loading a snapshot into memory for HTTP does not rewrite it. " +
 						"Bundles created for **scheduler runs** (cron or manual) carry **schedulerRun** metadata and are **hidden** from this list unless **include_scheduler=true**. " +
 						"Child sessions of subagent runs (**subagentRun** metadata, stored inside the parent's bundle) are hidden unless **include_subagents=true**; an included child row carries **subagent** **`{parentSessionId, name, taskId}`** so a client can route back to the parent chat and to the task in its drawer. " +
@@ -280,7 +281,23 @@ func openAPISpec() map[string]interface{} {
 							"that never overrode **`agent.model`**, so a client renders those as unknown rather than as a value. Each row costs one extra small file read.",
 					}),
 					"responses": map[string]interface{}{
-						"200": map[string]interface{}{"description": "Paged session identifiers"},
+						"200": map[string]interface{}{
+							"description": "Paged session identifiers with a global active turn count",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"object":       map[string]string{"type": "string"},
+											"sessions":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
+											"nextCursor":   map[string]interface{}{"type": "string", "nullable": true},
+											"hasMore":      map[string]string{"type": "boolean"},
+											"active_count": map[string]string{"type": "integer", "minimum": "0", "description": "Currently active turns in the normal History scope, independent of pagination and filters."},
+										},
+									},
+								},
+							},
+						},
 						"503": errorResponseRef(),
 					},
 				},

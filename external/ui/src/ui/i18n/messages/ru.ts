@@ -1022,6 +1022,14 @@ export const messagesRu: Record<string, string> = {
   "nav.wideSidebarTooltip": "Широкая панель",
   "nav.history": "История",
   "nav.scheduler": "Планировщик",
+  "nav.activeSessions.one": "{count} активная сессия",
+  "nav.activeSessions.few": "{count} активные сессии",
+  "nav.activeSessions.many": "{count} активных сессий",
+  "nav.activeSessions.other": "{count} активной сессии",
+  "nav.activeRuns.one": "{count} активный запуск",
+  "nav.activeRuns.few": "{count} активных запуска",
+  "nav.activeRuns.many": "{count} активных запусков",
+  "nav.activeRuns.other": "{count} активного запуска",
   "nav.swarm": "Рой",
   "nav.docs": "Документация",
   "nav.schedulerAriaLabel": "Задачи планировщика",
@@ -1164,6 +1172,7 @@ export const messagesRu: Record<string, string> = {
     "Транскрипт субагента {name} доступен только для чтения. Запросы отправляются в родительский чат.",
   "chat.subagentReadOnly.noticeUnnamed":
     "Транскрипт субагента доступен только для чтения. Запросы отправляются в родительский чат.",
+  "chat.subagentReadOnly.model": "Используемая модель: {model}",
   "chat.subagentReadOnly.openParent": "Открыть родительский чат",
   "chat.subagentTitle": "Субагент {name}",
   "chat.subagentTitleUnnamed": "Транскрипт субагента",
@@ -1790,8 +1799,6 @@ export const messagesRu: Record<string, string> = {
   "messages.toolQuestionOwnAnswer": "свой ответ",
   "messages.toolQuestionMirrorHint":
     "Ответьте через карточку «Вопросы» в этом чате. Эта строка только отражает состояние инструмента.",
-  "messages.toolBgTaskOpen": "Открыть в задачах",
-  "messages.toolBgTaskStop": "Остановить",
   "messages.fileType.image": "Изображение",
   "messages.fileType.video": "Видео",
   "messages.fileType.audio": "Аудио",
@@ -1813,6 +1820,10 @@ export const messagesRu: Record<string, string> = {
   "workspace.worktreeInactiveTitle":
     "Переход на другую ветку откроется в отдельном worktree",
   "workspace.recent": "Недавние",
+  "workspace.filterRecent": "Фильтровать недавние папки",
+  "workspace.filterBranches": "Фильтровать ветки",
+  "workspace.noRecentMatch": "Недавних папок нет",
+  "workspace.noBranchesMatch": "Подходящих веток нет",
   "workspace.openFolder": "Открыть папку…",
   "workspace.noBranches": "Веток нет",
 

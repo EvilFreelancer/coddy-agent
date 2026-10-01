@@ -1052,6 +1052,28 @@ body {
   padding: 0;
 }
 
+.rail-nav-hit {
+  position: relative;
+}
+
+.rail-active-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--coddy-on-accent-fg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px var(--coddy-canvas-gradient-top);
+}
+
 .rail-nav-label {
   font-size: 13px;
   font-weight: 600;
@@ -2606,7 +2628,9 @@ a.rail-brand {
   /* Opaque canvas backing: pinned title stays on top while transcript
      scrolls behind it (no see-through bleed). Matches canvas top color so
      the shield is invisible against the page in every theme. */
-  /* background-color: var(--coddy-canvas-gradient-top); */
+  background-color: var(--coddy-canvas-gradient-top);
+  box-shadow: 0 12px 18px -16px
+    color-mix(in srgb, #000 88%, transparent);
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
@@ -2853,8 +2877,19 @@ a.rail-brand {
 }
 
 .subagent-readonly-text {
+  display: block;
+}
+
+.subagent-readonly-copy {
   flex: 1 1 240px;
   min-width: 0;
+}
+
+.subagent-readonly-model {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .subagent-readonly-link {
@@ -3868,7 +3903,8 @@ a.rail-brand {
 }
 
 .coddy-tool-call-body > .tool-result-toggle-row {
-  margin: 0 0 2px;
+  align-self: flex-start;
+  margin: -8px 0 2px;
 }
 
 .coddy-tool-call-body > .tool-call-result-card + .tool-result-toggle-row {
@@ -4800,6 +4836,40 @@ textarea#composer.composer-ta-masked {
 
 textarea#composer.composer-ta-masked::selection {
   background: rgba(147, 51, 234, 0.18);
+}
+
+.composer-code-editing {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, var(--coddy-blend-base));
+}
+
+.composer-code-editing .composer-mirror-inner,
+.composer-code-editing textarea#composer {
+  font-family: var(--mono);
+}
+
+.msg-user-token {
+  display: inline;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  cursor: copy;
+}
+
+.msg-user-token--mention,
+.msg-user-body .coddy-skill-chip {
+  border-radius: 4px;
+  color: var(--coddy-skill-chip-text);
+  background: var(--coddy-skill-chip-bg);
+  box-shadow: 0 0 0 1px var(--coddy-skill-chip-bd);
+}
+
+.msg-user-body .coddy-skill-chip {
+  cursor: copy;
 }
 
 .composer-mirror-inner,
@@ -11788,15 +11858,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 2px;
 }
 
-/* Tab controls hanging off the card above them, like the More / Less row: the
-   body is a flex column with an 8px gap, and these cancel it. */
-.tool-bgtask-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: -8px;
-}
-
 /* ── Background tasks panel (docked inside the session) ────────────────────
    The panel belongs to the chat that started the tasks, so it sits beside the
    transcript rather than floating over the shell like History or Scheduler.
@@ -11833,7 +11894,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
     /* What the panel takes off the end edge: its width and the inset it keeps
        from the viewport (see .bgtasks-panel), plus the gap the column keeps
        from it. */
-    --coddy-tasks-panel-band: calc(min(380px, 100vw - 32px) + 14px + 28px);
+    --coddy-tasks-panel-band: calc(min(380px, 100vw - 32px) + 14px + 12px);
     /* 920px is the transcript stripe (.messages-inner max-width); the stripe is
        centred in what is left, so covering the band costs twice it. */
     --coddy-tasks-reserve: clamp(
@@ -12074,26 +12135,14 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   white-space: pre;
 }
 
-/* The way into the task, on the folded card: an agent run's child conversation,
-   a preview server's address. The run is that conversation and the server is that
-   page, so an operator who had to open a card to find the link was made to take a
-   step on the way to the one move the panel exists for. A card carries at most one
-   of the two, because a task is one kind or the other.
-
-   It takes a row of its own under the status and the usage. The panel is 380px
-   wide: a control sharing that line would be paid for by the model's name, the
-   one thing there that cannot be cut down to something still readable. */
-.bgtask-card-transcript-row,
+/* A running preview server remains reachable from its folded card. */
 .bgtask-card-address-row {
   flex: 1 0 100%;
   display: flex;
   margin-top: 4px;
 }
 
-.bgtask-card-transcript,
 .bgtask-card-link {
-  /* Above the opener stretched over the summary, the way Stop is: it opens the
-     transcript or the page rather than the card it sits on. */
   position: relative;
   z-index: 1;
   padding: 0;
@@ -12106,10 +12155,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   cursor: pointer;
 }
 
-.bgtask-card-transcript {
-  flex: 0 0 auto;
-}
-
 /* An address is as long as it is, and the panel is narrow: it wraps onto a second
    line whole rather than trailing off in an ellipsis that names no port. */
 .bgtask-card-link {
@@ -12118,21 +12163,9 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   overflow-wrap: anywhere;
 }
 
-.bgtask-card-transcript:hover:not(:disabled),
-.bgtask-card-transcript:focus-visible,
 .bgtask-card-link:hover,
 .bgtask-card-link:focus-visible {
   text-decoration: underline;
-}
-
-/* A run whose child session is not known yet - it has only just started. The
-   title says so; the control stays in place so the card does not change shape
-   under the reader when the id arrives. */
-.bgtask-card-transcript:disabled {
-  color: inherit;
-  opacity: 0.55;
-  cursor: not-allowed;
-  text-decoration: none;
 }
 
 .bgtask-card.is-overdue .bgtask-card-meta {
@@ -12217,6 +12250,36 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   min-height: 56px;
   max-height: 260px;
   overflow: auto;
+}
+
+/* The child transcript belongs to an agent task's expanded report. The tab
+   cancels the body's flex gap so it attaches directly below the output. */
+.bgtask-card-transcript {
+  align-self: flex-start;
+  margin-top: -8px;
+  padding: 4px 10px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bgtask-card-transcript:hover:not(:disabled),
+.bgtask-card-transcript:focus-visible {
+  text-decoration: underline;
+}
+
+/* A run whose child session is not known yet keeps the action in place until
+   the child transcript can be opened. */
+.bgtask-card-transcript:disabled {
+  color: inherit;
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 .bgtask-card-foot {
@@ -14834,6 +14897,20 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
 .rail-more-item.is-active {
   color: var(--accent);
+}
+
+.rail-more-active-count {
+  min-width: 18px;
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--coddy-on-accent-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .rail-more-sep {

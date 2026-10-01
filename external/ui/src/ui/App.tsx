@@ -115,6 +115,7 @@ import type { ProviderUsage } from "./chat/providerUsage";
 import type { WorkspaceContext } from "./chat/workspaceContext";
 import { setHostShell } from "./chat/hostShell";
 import { NavRail } from "./nav/NavRail";
+import { shellStackMaxWidthMediaQuery } from "./shellBreakpoint";
 import { SwarmView } from "./swarm/SwarmView";
 import { EnvironmentChip } from "./chat/EnvironmentChip";
 import { probeSwarm } from "./swarm/api";
@@ -376,6 +377,7 @@ type SessionsPage = {
   sessions: SessionRow[];
   nextCursor?: string | null;
   hasMore?: boolean;
+  active_count?: number;
 };
 
 async function fetchJSON<T>(
@@ -423,6 +425,7 @@ export function App() {
     Math.floor(Math.random() * HERO_ACCENT_VERBS.length),
   );
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [historyActiveCount, setHistoryActiveCount] = useState(0);
   const [sessionsCursor, setSessionsCursor] = useState<string | null>(null);
   const sessionsCursorRef = useRef<string | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
@@ -1116,9 +1119,8 @@ export function App() {
   const [tasksOpen, setTasksOpen] = useState(
     () => initialRoute.branch === "session" && initialRoute.tasksOpen,
   );
-  // A card the shell asks the Tasks panel to open ("Open in Tasks" on a transcript
-  // row, a link that names a task). Which cards are open otherwise is the panel's own
-  // business and is not part of the address.
+  // A card the shell asks the Tasks panel to open from a task-targeted link. Which
+  // cards are open otherwise is the panel's own business and is not part of the address.
   //
   // The pointer names its chat and is good for one use. Every session numbers its
   // tasks from bg_1 and the panel unmounts with the drawer, so a pointer that outlived
@@ -1687,8 +1689,9 @@ export function App() {
     [isAppEnvironment],
   );
 
-  // Load the workspace context whenever the viewed session changes; a fresh
-  // home/draft view also drops stale pre-session workspace choices.
+  // Load the workspace context whenever the viewed session changes. A pending
+  // home workspace is already being previewed and must survive the route
+  // change so the next chat starts where the user left off.
   //
   // A folder picked from a History heading is applied here rather than where it
   // was picked: leaving a conversation is asynchronous, and a workspace change
@@ -1696,13 +1699,16 @@ export function App() {
   // It replaces the default probe rather than running beside it - two context
   // fetches in flight would be decided by whichever answered last.
   useEffect(() => {
-    pendingWorkspaceRef.current = null;
     const wanted = newChatWorkspaceRef.current;
     if (newChatWorkspaceIsReady(wanted, sessionId)) {
       newChatWorkspaceRef.current = null;
       void switchWorkspace({ path: String(wanted?.path ?? "") });
       return;
     }
+    if (!sessionId && pendingWorkspaceRef.current?.path) {
+      return;
+    }
+    pendingWorkspaceRef.current = null;
     void refreshWorkspaceContext(sessionId);
   }, [sessionId, refreshWorkspaceContext, newChatWorkspaceEpoch]);
 
@@ -2041,13 +2047,18 @@ export function App() {
   }, [schedulerHttpLinked]);
 
   const openSessionFromRoute = useCallback(
-    (id: string, opts?: { historySidebar?: boolean }) => {
+    (id: string, opts?: { historySidebar?: boolean; tasksOpen?: boolean }) => {
       setActiveDraftId("");
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      const keepTasksOpen = opts?.tasksOpen === true;
+      setTasksOpen(keepTasksOpen);
       viewedSessionIdRef.current = id.trim();
-      setSessionHashInLocation(id, opts);
+      if (keepTasksOpen) {
+        setSessionTasksHash(id, null, opts);
+      } else {
+        setSessionHashInLocation(id, opts);
+      }
       setSessionId(id);
       void markCoddySessionActivityRead(id);
     },
@@ -2619,6 +2630,9 @@ export function App() {
         return null;
       }
       setSessionsError(null);
+      if (typeof res.data.active_count === "number") {
+        setHistoryActiveCount(res.data.active_count);
+      }
       // A listing issued before an archive this tab made had settled still
       // lists the row as it was, and counts it in the offset it hands back.
       const next = overlayArchiveMoves(
@@ -3441,7 +3455,14 @@ export function App() {
     }
     setSessionLoading(true);
     setActiveDraftId("");
-    openSessionFromRoute(id, { historySidebar: sessionsOpen });
+    const keepTasksOpen =
+      tasksOpen &&
+      sessionsOpen &&
+      !window.matchMedia(shellStackMaxWidthMediaQuery).matches;
+    openSessionFromRoute(id, {
+      historySidebar: sessionsOpen,
+      tasksOpen: keepTasksOpen,
+    });
     if (itemsRef.current.length > 0) {
       setSessionFadingOut(true);
       fadeOutTimerRef.current = setTimeout(() => {
@@ -3466,6 +3487,9 @@ export function App() {
 
   function goHome() {
     persistComposerDraftBeforeLeave();
+    if (sessionId && workspaceCtx?.path && !pendingWorkspaceRef.current?.path) {
+      pendingWorkspaceRef.current = { path: workspaceCtx.path };
+    }
     setSessionsOpen(false);
     setSchedulerOpen(false);
     setSchedulerEditor(null);
@@ -5351,20 +5375,6 @@ export function App() {
     }
   }, [sessionId, sessionsOpen]);
 
-  // "Open in Tasks" on a transcript row: the panel opens with that task's card open.
-  const openBackgroundTask = useCallback(
-    (taskId: string) => {
-      const sid = sessionId.trim();
-      if (!sid) {
-        return;
-      }
-      setTasksOpen(true);
-      focusBackgroundTask(sid, taskId);
-      setSessionTasksHash(sid);
-    },
-    [sessionId, focusBackgroundTask],
-  );
-
   /** Opens a session in this tab: the child transcript behind an agent task,
    *  or the parent chat from a read-only notice. Same path as a History pick,
    *  so the panel closes and the hash becomes `#/s/<id>`. */
@@ -5925,10 +5935,6 @@ export function App() {
       setEditingFiles(parseSessionAssetFiles(content));
     },
   );
-  const handleStopBackgroundTask = useStableHandler((id: string) => {
-    void stopBackgroundTaskById(id);
-  });
-
   /**
    * Queue the draft for the turn that is running instead of refusing it.
    *
@@ -6191,10 +6197,12 @@ export function App() {
         onNewChat={atSwarmRoot ? openSwarmFromNav : goHome}
         onOpenHistory={onOpenHistoryFromNav}
         historyOpen={sessionsOpen}
+        historyActiveCount={historyActiveCount}
         showHistory={!atSwarmRoot}
         showScheduler={schedulerHttpLinked === true && !atSwarmRoot}
         onOpenScheduler={openSchedulerFromNav}
         schedulerOpen={schedulerOpen}
+        schedulerActiveCount={schedulerInfo?.runs_active ?? 0}
         showSwarm={isSwarmEnv}
         onOpenSwarm={openSwarmFromNav}
         // On a relay the map is the home screen, so its entry stays lit while
@@ -6427,8 +6435,6 @@ export function App() {
             }}
             backgroundTasksByToolCallId={backgroundTasksByToolCallId}
             backgroundNowMs={backgroundNowMs}
-            onOpenBackgroundTask={openBackgroundTask}
-            onStopBackgroundTask={handleStopBackgroundTask}
             subagentTranscript={subagentTranscript}
             sessionArchived={viewedArchived}
             unarchiving={unarchiving}
@@ -6472,7 +6478,10 @@ export function App() {
             contextBreakdown={contextBreakdown}
             compactionSettings={{
               ...compactionSettings,
-              enabled: compactionSettings.enabled && !subagentTranscript && !viewedArchived,
+              enabled:
+                compactionSettings.enabled &&
+                !subagentTranscript &&
+                !viewedArchived,
             }}
             onContextCompacted={() => {
               const sid = sessionId.trim();

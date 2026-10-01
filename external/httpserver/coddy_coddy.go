@@ -861,6 +861,21 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"order must be \"asc\" or \"desc\""}}`, http.StatusBadRequest)
 		return
 	}
+	// The rail badge is global to History, not to the page or any filter the
+	// reader currently has open. Use the normal list eligibility so archived,
+	// scheduler and subagent sessions do not make it into that count.
+	historyRows, err := fs.ListSnapshotsWith(session.ListOptions{})
+	if err != nil {
+		s.log.Error("coddy sessions active count", "error", err)
+		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
+		return
+	}
+	activeCount := 0
+	for _, row := range historyRows {
+		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
+			activeCount++
+		}
+	}
 	rows, err := fs.ListSnapshotsWith(session.ListOptions{
 		CWD:                  strings.TrimSpace(r.URL.Query().Get("cwd")),
 		IncludeSchedulerRuns: includeScheduler,
@@ -905,10 +920,11 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	start := offset
 	if start >= len(rows) {
 		out := map[string]interface{}{
-			"object":     "coddy.session_list",
-			"sessions":   []interface{}{},
-			"nextCursor": nil,
-			"hasMore":    false,
+			"object":       "coddy.session_list",
+			"sessions":     []interface{}{},
+			"nextCursor":   nil,
+			"hasMore":      false,
+			"active_count": activeCount,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
@@ -1011,10 +1027,11 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		nextCursor = strconv.Itoa(end)
 	}
 	out := map[string]interface{}{
-		"object":     "coddy.session_list",
-		"sessions":   sessions,
-		"nextCursor": nextCursor,
-		"hasMore":    end < len(rows),
+		"object":       "coddy.session_list",
+		"sessions":     sessions,
+		"nextCursor":   nextCursor,
+		"hasMore":      end < len(rows),
+		"active_count": activeCount,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
