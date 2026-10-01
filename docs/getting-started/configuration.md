@@ -656,7 +656,7 @@ YAML split:
 
 ### Provider proxy
 
-**`providers[].proxy`** picks the route of every request a provider row makes: its completions, its model list, its account usage and its sign-in.
+**`providers[].proxy`** picks the route of every request a provider row makes: its completions, model list, account usage, OAuth/device sign-in and token refresh, and sign-out revoke.
 
 - No value, or **`inherit`** (the default): the proxy the environment of the Coddy process names. **`HTTPS_PROXY`** covers **`https://`** addresses, **`HTTP_PROXY`** covers **`http://`** ones, **`NO_PROXY`** lists the hosts that go direct, and a loopback address is never proxied. **`ALL_PROXY`** is not read. Coddy has always behaved this way: an empty value never meant a direct connection, whatever older descriptions of the field said.
 - **`none`**: a direct connection. The row ignores those variables, so a provider that is reachable directly keeps working when the machine's proxy is broken, stale or slow - a corporate proxy that inspects TLS, a local forwarder, a variable left over from another setup.
