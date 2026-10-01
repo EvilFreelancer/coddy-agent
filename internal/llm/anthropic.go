@@ -313,7 +313,9 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, inputMap, tc.Name))
 			}
 			if len(blocks) == 0 {
-				blocks = append(blocks, anthropic.NewTextBlock(m.Content))
+				// Nothing in this assistant turn can be replayed. In particular,
+				// a signature without thinking text cannot form a valid block.
+				continue
 			}
 			result = append(result, anthropic.NewAssistantMessage(blocks...))
 
