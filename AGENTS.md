@@ -95,6 +95,10 @@ Codex code review reads this section and applies it to changed files. Keep entri
 
 - Do not change routes, request or response shapes, or status codes in `external/httpserver/server.go` without updating `external/httpserver/openapi.go` in the same change. The served spec is what `/docs/` and generated clients consume, so drift is a silent API break. Safe path: update both, then reconcile `docs/reference/http-api.md`.
 
+### Provider transport
+
+- Do not add a provider request path that can bypass `providers[].proxy`. Completions, streams, model discovery, usage, OAuth/device sign-in, refresh and revoke all build through `llm.HTTPClientForProviderProxy`; a test-only explicit client may be accepted, but `nil` must return an error rather than fall back to `http.DefaultClient`. When a Settings sign-in starts before Save, apply the form's current proxy after resolving the row. Safe path: extend `features/provider_proxy.feature`, keep `TestProviderProxyGuard` green, and cover the request class through the proxy harness.
+
 ### Build tags
 
 - Do not let a package that builds by default import one that lives behind the `http`, `ui`, `scheduler`, `memory`, or `gateway` tags. Plain `make build` must keep compiling with the lean dependency set. Safe path: put the new code behind the same tag, or invert the dependency into an interface owned by the core package.

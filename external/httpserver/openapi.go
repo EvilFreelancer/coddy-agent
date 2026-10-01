@@ -2118,9 +2118,10 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/providers/{name}/codex-auth/device": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "Start Codex ChatGPT device authorization",
-					"description": "Starts the official ChatGPT device flow. The request must be `Content-Type: application/json` (the body is ignored, send `{}`); any other type is refused with 415 before the issuer is contacted, because a page on another site can send the other types without a preflight. A new start supersedes the provider's previous pending attempt, including one still waiting for the issuer to answer (that one answers 409); a sign-out cancels a pending start the same way. Open `verification_url`, enter `user_code`, then poll the returned `login_id`. The server performs the token exchange and stores credentials with restrictive file permissions.",
+					"description": "Starts the official ChatGPT device flow. The request must be `Content-Type: application/json`; an optional `proxy` is the current unsaved Settings value and overrides the resolved row for this login. A new start supersedes the provider's previous pending attempt, including one still waiting for the issuer to answer (that one answers 409); a sign-out cancels a pending start the same way. Open `verification_url`, enter `user_code`, then poll the returned `login_id`. The server performs the token exchange and stores credentials with restrictive file permissions.",
 					"operationId": "startProviderCodexDeviceAuth",
 					"parameters":  []interface{}{codexProviderNameParameter()},
+					"requestBody": map[string]interface{}{"required": false, "content": map[string]interface{}{"application/json": map[string]interface{}{"schema": map[string]interface{}{"$ref": "#/components/schemas/ProviderSignInProxyRequest"}}}},
 					"responses": map[string]interface{}{
 						"200": jsonSchemaResponse("Device authorization instructions.", "#/components/schemas/CodexAuthDeviceStart"),
 						"400": errorResponseRef(),
@@ -2170,9 +2171,9 @@ func openAPISpec() map[string]interface{} {
 				},
 				"delete": map[string]interface{}{
 					"summary":     "Sign out of NeuralDeep",
-					"description": "Best-effort revokes the key on the hub, then deletes the credential stored under `CODDY_HOME/providers/{name}/neuraldeep-auth.json`.",
+					"description": "Best-effort revokes the key on the hub through the row's route (or optional `proxy` query override), then deletes the credential stored under `CODDY_HOME/providers/{name}/neuraldeep-auth.json`.",
 					"operationId": "deleteProviderNeuralDeepAuth",
-					"parameters":  []interface{}{codexProviderNameParameter()},
+					"parameters":  []interface{}{codexProviderNameParameter(), map[string]interface{}{"name": "proxy", "in": "query", "required": false, "schema": map[string]string{"type": "string"}, "description": "Current unsaved provider proxy. Empty or `inherit` follows the system proxy; `none` connects directly."}},
 					"responses": map[string]interface{}{
 						"200": jsonSchemaResponse("Connection status after sign-out.", "#/components/schemas/NeuralDeepAuthStatus"),
 						"400": errorResponseRef(),
@@ -2183,7 +2184,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/providers/{name}/neuraldeep-auth/device": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "Start NeuralDeep device authorization",
-					"description": "Starts the hub's RFC 8628 device flow for client `coddy`. The request must be `Content-Type: application/json`, the body optional; any other type is refused with 415 before the hub is contacted, because a page on another site can send the other types without a preflight. The hub is the one paired with the deployment: **`api_base`** in the optional JSON body (the endpoint picked in Settings, possibly unsaved) or, when the body is absent, the saved row's `api_base` (none for a row still saved as another type, so the default deployment); a body value that is not one of the official endpoints is refused with 400 before the hub is contacted. A new start supersedes the provider's previous pending attempt, including one still waiting for the hub (that one answers 409); a sign-out cancels a pending start the same way. Open `verification_url` (it carries the pre-filled code), confirm on the hub portal, then poll the returned `login_id`. The server polls the hub and stores the key with restrictive file permissions.",
+					"description": "Starts the hub's RFC 8628 device flow for client `coddy`. The optional JSON body carries the unsaved `api_base` and `proxy` Settings values; `proxy` overrides the row only for this login. A new start supersedes the provider's previous pending attempt, including one still waiting for the hub (that one answers 409); a sign-out cancels a pending start the same way. Open `verification_url` (it carries the pre-filled code), confirm on the hub portal, then poll the returned `login_id`. The server polls the hub and stores the key with restrictive file permissions.",
 					"operationId": "startProviderNeuralDeepDeviceAuth",
 					"parameters":  []interface{}{codexProviderNameParameter()},
 					"requestBody": map[string]interface{}{
@@ -2841,7 +2842,7 @@ func openAPISpec() map[string]interface{} {
 							"type": "array", "items": map[string]string{"type": "string"},
 							"description": "Spawn allowlist from the frontmatter (same pattern syntax as tools): names the child may delegate to, including one level past subagents.max_depth. Honored for builtin and user scope only; a project definition's declaration is shown but ignored.",
 						},
-						"role_bytes":      map[string]string{"type": "integer", "description": "Size of the role body. The body itself is never served: an unapproved file's instructions must not reach a client that would render them."},
+						"role_bytes": map[string]string{"type": "integer", "description": "Size of the role body. The body itself is never served: an unapproved file's instructions must not reach a client that would render them."},
 					},
 					"required": []string{"name", "description", "scope", "builtin", "hidden", "trust", "trusted", "needs_approval"},
 				},
@@ -3119,8 +3120,10 @@ func openAPISpec() map[string]interface{} {
 							"enum":        []string{"https://api.neuraldeep.ru/v1", "https://api.neuraldeep.tech/v1"},
 							"description": "Deployment to sign in against; decides which hub mints the key. Empty or absent: the saved provider row's `api_base`, else the default deployment.",
 						},
+						"proxy": map[string]interface{}{"type": "string", "description": "Current unsaved provider proxy. Absent keeps the resolved row; empty or `inherit` follows the system proxy; `none` connects directly."},
 					},
 				},
+				"ProviderSignInProxyRequest": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"proxy": map[string]interface{}{"type": "string", "description": "Current unsaved provider proxy. Absent keeps the resolved row; empty or `inherit` follows the system proxy; `none` connects directly."}}},
 				"NeuralDeepAuthDeviceStart": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
