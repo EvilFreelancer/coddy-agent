@@ -103,6 +103,7 @@ The core reasoning engine (**`react.go`**):
 ### LLM Provider (`internal/llm`)
 
 Abstracted interface for LLM backends. Configured via `config.yaml`.
+The Anthropic serializer omits an assistant history row when it has no replayable non-whitespace text, tool use, or signed thinking block and a later message follows it. A signature without thinking text cannot be replayed and must not become an empty text block. A trailing unreplayable assistant row, or a tool result immediately after one, is refused before contacting Anthropic: omitting it could turn an earlier assistant answer into a continuation prefix, and the tool result has no replayable tool use to answer. The row remains in the session transcript; this wire projection does not change the agent's recovery or retry allowance.
 
 Every error a provider returns is prefixed with the **`providers[].name`** it came from and the address that request actually reached (**`provider_label.go`**), because the address is not always the one the user has in mind - **`type: openai`** with no **`api_base`** talks to **`https://api.openai.com/v1`**. The label sits outside the resilient wrapper, so retry classification still reads the untouched upstream error, and it wraps rather than replaces the cause, so **`errors.Is`** and **`errors.As`** keep working.
 
