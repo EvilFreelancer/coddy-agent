@@ -14,11 +14,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
+	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
 	"github.com/EvilFreelancer/coddy-agent/internal/prompts"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
@@ -39,6 +41,30 @@ func describeClampWords(s string, maxWords int) string {
 		return strings.Join(w, " ")
 	}
 	return strings.Join(w[:maxWords], " ")
+}
+
+// repoRootCache memoizes gitws.MainCheckoutRoot per session cwd for a short
+// window: the sessions list is polled while History is open, and a
+// `git rev-parse` spawn per distinct cwd per request is measurable for
+// folders outside git.
+var repoRootCache sync.Map // string cwd -> repoRootCacheEntry
+
+type repoRootCacheEntry struct {
+	root    string
+	expires time.Time
+}
+
+// sessionRepoRoot reports the main checkout a session's cwd belongs to, or ""
+// for a folder outside git.
+func sessionRepoRoot(cwd string) string {
+	if v, ok := repoRootCache.Load(cwd); ok {
+		if ent, ok := v.(repoRootCacheEntry); ok && time.Now().Before(ent.expires) {
+			return ent.root
+		}
+	}
+	root := gitws.MainCheckoutRoot(cwd)
+	repoRootCache.Store(cwd, repoRootCacheEntry{root: root, expires: time.Now().Add(30 * time.Second)})
+	return root
 }
 
 func describeStripLineNoise(s string) string {
@@ -901,6 +927,7 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		backgroundRunning = bgtask.Default().RunningCountsBySession()
 	}
 	sessions := make([]map[string]interface{}, 0, len(slice))
+	repoRoots := make(map[string]string)
 	for _, row := range slice {
 		ent := map[string]interface{}{
 			"id": row.SessionID,
@@ -913,6 +940,14 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CWD != "" {
 			ent["cwd"] = row.CWD
+			root, seen := repoRoots[row.CWD]
+			if !seen {
+				root = sessionRepoRoot(row.CWD)
+				repoRoots[row.CWD] = root
+			}
+			if root != "" {
+				ent["repoRoot"] = root
+			}
 		}
 		if len(row.Tags) > 0 {
 			ent["tags"] = row.Tags
@@ -1453,7 +1488,9 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 			out["settings"] = snap
 		}
 	}
-	if u := page.UILog(msgs, st.GetUILog()); len(u) > 0 {
+	// A session saved before only the agent's own settings changes were
+	// noted keeps the notices of the operator's: they are not shown.
+	if u := page.UILog(msgs, session.VisibleUILog(msgs, st.GetUILog())); len(u) > 0 {
 		rows := make([]map[string]interface{}, 0, len(u))
 		for _, e := range u {
 			rows = append(rows, map[string]interface{}{

@@ -378,6 +378,16 @@ func TestReloadClearsTheConnectRecord(t *testing.T) {
 	if first.Generation == 0 {
 		t.Fatal("the first snapshot carries no generation")
 	}
+	// The gated stub writes this marker as soon as it spawns. A spawn still
+	// in flight at teardown lands that write while t.TempDir() removes the
+	// fixture dir and fails the cleanup with "directory not empty". The
+	// connect stays in flight regardless: the stub still waits for release.
+	if !waitUntil(t, 10*time.Second, func() bool {
+		_, err := os.Stat(f.started)
+		return err == nil
+	}) {
+		t.Fatal("the gated server did not start")
+	}
 	f.mgr.ReplaceConfig(reloadTestConfig(reloadTestMCPServer("good")))
 	if _, recorded := f.st.MCPConnectSnapshot(); recorded {
 		t.Fatal("the connect record outlived the reload that replaced the servers")

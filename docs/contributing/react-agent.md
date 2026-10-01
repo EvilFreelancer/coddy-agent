@@ -285,8 +285,9 @@ messages: [
      signed reasoning stays in the transcript. After the budget or nudge limit is exhausted the turn
      ends with **`StopReasonRefused`**.
    - **Provider recovery.** A call that failed because of the provider's lane
-     (**`llm.IsTransientProviderError`**: 5xx, a cut or silent stream, output
-     already emitted or not; a 429 is left to the wrapper and the limit wait)
+     (**`llm.IsTransientProviderError`**: 5xx, a cut or silent stream - an event
+     cut inside its JSON included, a stream frame that is not JSON at all not -
+     output already emitted or not; a 429 is left to the wrapper and the limit wait)
      does not end the turn. The answer text and
      reasoning already streamed are kept as an assistant message without tool
      calls, a **`notice`** row goes to the UI log, and after a pause

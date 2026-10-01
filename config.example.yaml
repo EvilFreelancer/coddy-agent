@@ -175,6 +175,7 @@ sessions:
 # model context window. Manual /compact command plus automatic trigger.
 # compaction:
 #   enable: true             # master switch (manual command and automation)
+#   auto_enable: true        # turn off the threshold trigger but keep manual compaction
 #   threshold_percent: 80    # auto-compact at this percent of the model's context window (1..100)
 #   keep_recent_turns: 2     # last N user turns stay verbatim; 0 summarizes everything
 #   model: ""                # optional models[].model for the summarizer; empty = session model
@@ -262,6 +263,13 @@ mcp:
   # allow: start them automatically (only for workspaces you already trust)
   # deny:  never load project-local servers at all
   project_trust: ask
+  # Every session shares one running copy of a server: a global server is one
+  # process for the whole Coddy process (coddy serve, the console and coddy acp
+  # start them at once and keep them up), a project server one per workspace.
+  # Seconds a server that no session holds any more keeps running before it is
+  # stopped, so the next session finds it up; 0 stops it at once. A server
+  # switched off, no longer approved or removed stops at once either way.
+  idle_timeout_seconds: 300
 
 tools:
   # Controls when the agent asks for user approval before running tools.
@@ -386,7 +394,8 @@ tools:
 #     - "${CWD}/.coddy/agents"       # project scope
 #   project_trust: ask              # ask | allow | deny
 #   max_concurrent: 4               # subagent runs in flight across the whole process
-#   max_depth: 1                    # 1 = children cannot spawn further; 0 = nobody spawns
+#   max_depth: 1                    # 1 = children cannot spawn further (a definition's
+                                   #   `spawns` allowlist excepted); 0 = nobody spawns
 #   default_timeout_seconds: 1800   # hard limit when the definition and the call give none
 #   max_turns: 0                    # 0 follows agent.max_turns
 

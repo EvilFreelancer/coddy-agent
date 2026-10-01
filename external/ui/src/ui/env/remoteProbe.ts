@@ -53,13 +53,21 @@ function isRefusal(status: number): boolean {
 }
 
 /**
- * isRelay asks the public swarm route. It is sent without a token, so it is a
- * simple request and costs no preflight.
+ * isRelay asks the public swarm route. A bare relay answers it without a
+ * token, so when the caller holds none the request stays a simple one and
+ * costs no preflight. A relay reached through its parent's mount sits behind
+ * the parent's client token - there the same route refuses a request that
+ * carries no credential at all - so a held token goes along; the public route
+ * ignores it either way.
  */
-async function isRelay(base: string, timeoutMs: number): Promise<boolean> {
+async function isRelay(
+  base: string,
+  token: string,
+  timeoutMs: number,
+): Promise<boolean> {
   try {
     const res = await localFetch(base + "/swarm/info", {
-      headers: { Accept: "application/json" },
+      headers: { ...authHeaders(token), Accept: "application/json" },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
@@ -122,7 +130,7 @@ export async function probeRemote(
   }
   // A 401 is an agent refusing the token; a 404 is what a relay says to any
   // /v1 request. The public swarm route tells which of the two this is.
-  const relay = await isRelay(base, timeoutMs);
+  const relay = await isRelay(base, token, timeoutMs);
   if (!relay) {
     return { reach: isRefusal(models.status) ? "unauthorized" : "down", relay };
   }

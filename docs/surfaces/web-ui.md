@@ -333,7 +333,8 @@ Session title
 - **Mode**, **Model** and **Reasoning** follow a change made anywhere - a typed command, the permission dialog, the model's **`switch_model`**, a console or an editor on the same session. Every **`POST /v1/responses`** carries **`metadata.settingsVersion`**, the version the tab last applied; the server ignores the tab's **`model`** / **`reasoning`** / mode when a newer snapshot has been published since, so a stale tab cannot undo a change it has not seen.
 - The **permission chip** (**`data-testid="composer-permission"`**) is the last selector of the row, after **Model** and **Reasoning**: **Ask first**, **Accept edits** or **Bypass**, the last in red with a glow, its tooltip naming the configuration's mode the session returns to after a restart. Its menu calls **`PATCH`** **`permissionMode`**. On a new chat the pick is held and sent as a **`/permissions <mode>`** line ahead of the first message.
 - The **overrides line** (**`data-testid="composer-overrides"`**) lists what is changed for the next turns (**`stub/qwen3.8-demo, 2 turns left`**, **`plan this turn`**), with the full list in its tooltip; it shrinks with an ellipsis on narrow shells rather than pushing the send button off the bar.
-- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript, where each change is one **SYSTEM** notice row.
+- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript. The change shows on the selectors and the overrides line, and the transcript gets no row for it.
+- A **SYSTEM** notice row is left only by a change the agent made itself: its **`switch_model`** call, a skill's frontmatter (`Model: stub/qwen3.8-27b for this session`). What the user picks - a selector, a command, the permission dialog, the model and the mode a console or **`coddy -p`** started the session with - is on the selectors already; the rows a session saved by an earlier version holds for such changes are not shown.
 
 ### Settings: reasoning levels for a logical model
 
@@ -357,15 +358,16 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 
 *The inline name row for a new folder*
 
-- A chip row renders at the top of the composer card (**`WorkspaceChips.tsx`**, helpers in **`chat/workspaceContext.ts`**): **folder chip** (workspace basename, full path in tooltip), **branch chip** (current git branch; only when the workspace is a git repository), and a **worktree checkbox**.
+- A chip row renders at the top of the composer card (**`WorkspaceChips.tsx`**, helpers in **`chat/workspaceContext.ts`**): **folder chip** (main project basename and path for a worktree, otherwise the current folder), **branch chip** (current git branch; only when the workspace is a git repository), and a **worktree checkbox**. The session cwd remains inside its worktree.
 - **Wrapping**: the chips share one **`flex-wrap`** row (**`.composer-context-row`**) with the environment chip and the improve-prompt control; **`.composer-context-chips`** is **`display: contents`** so each chip wraps on its own. On a narrow viewport only the overflow moves down (e.g. environment+folder, then branch+worktree), and the worktree checkbox stays beside the branch until the branch name is long enough to push it.
 - Context loads from **`GET /coddy/workspace/context`** with **`X-Coddy-Session-ID`** whenever the viewed session changes; without a session the server default cwd is shown.
 - **Chosen once**: folder + branch + worktree are set before the conversation starts. Once the transcript has messages the chips lock (**`workspaceLocked`** — controls disabled, menus closed) and the server answers **409** to **`POST .../workspace`**, and a turn already in flight answers **409** as well.
 - **Folder chip** opens the **Recent** menu (Claude Desktop style): MRU folders from **`localStorage`** **`coddy_workspace_recents_v1`** (**`chat/workspaceRecents.ts`**), current workspace marked with **✓**, then **`Open folder…`** at the bottom which opens the **folder browser modal** (**`WorkspaceFolderModal.tsx`**) fed by **`GET /coddy/workspace/folders?path=`**: rows navigate into folders, **`..`** goes up, **Open** picks the currently browsed folder, **Cancel** dismisses. The folder list is the dialog's only scrollport: it is the one child allowed to shrink (**`min-height: 0`**), so **Cancel** / **Open** stay reachable on a short browser window instead of being clipped by the dialog's height cap, and a wheel gesture past the last folder stays in the list instead of scrolling the page behind it. Verified in WebKit with **`external/ui/scripts/webkit-scroll-check.mjs`** (see below).
 - **New folder** (footer, left of **Cancel** / **Open**) opens an inline name row **between the path field and the list** - a sibling of the list, not a row inside it, so it never scrolls away under you and it stays whole on a short window where the list itself has shrunk to nothing. **Enter** or **Create folder** posts **`POST /coddy/workspace/folders`** **`{"path": <browsed folder>, "name"}`**; the dialog then shows the listing the server answers with, which is the **new folder**, so **Open** picks it straight away. **Escape** or the row's **×** abandons it; with no row open, **Escape** closes the dialog as **Cancel** does. The button is disabled on the drive level (there is no directory to create in) and while the row is already open; **Create folder** stays disabled until a name is typed. A name that is already taken (**409**) keeps the row open with the typed text and says so, and so does any other failure - nothing is created and the browsed folder does not change.
 - **Leaving the drive (Windows)** — **`..`** from a drive root opens the **drive level** (**`?path=:drives:`**, **`drives:true`** in the response): one row per volume (**`C:`**, **`D:`**, …), no **`..`** above it, and **Open** disabled because it is a place to navigate, not a workspace. The **path row is an editable field** (**`workspace-modal-path`**): typing or pasting a path and pressing **Enter** jumps there, surrounding quotes from Explorer's *Copy as path* are stripped (**`cleanPathInput`**), and while the field holds an unvisited path the primary button reads **Go** instead of **Open**, so a pasted path is never mistaken for the folder being opened. The browser starts at **`pathParent(ctx.path)`**, which keeps the current drive (it used to collapse Windows paths to **`/`**). Picking calls **`POST /coddy/sessions/{id}/workspace`** **`{"path"}`** — the session cwd switches and persists; skills, project rules, slash commands, configured MCP servers (re-dialed for the new workspace through its trust gate, the old workspace's closed) and the SessionStart hook context re-derive from the new cwd.
-- **Branch chip** opens the branch list (current first, marked selected). Picking one posts **`{"branch", "worktree": <checkbox>}`**: in-place checkout by default, a dedicated worktree under **`<repo>/.coddy/worktrees/<branch>/`** when the checkbox is on, or a jump to the worktree that already has the branch checked out (including back to the main checkout).
+- **Branch chip** opens the branch list (current first, marked selected). Picking one posts **`{"branch", "worktree": <checkbox>}`**: in-place checkout by default, or a dedicated feature worktree under **`<repo>/.coddy/worktrees/<branch>/`** when the checkbox is on. Worktree creation fetches `origin`, starts a new branch from the fresh `origin/HEAD` default and refuses the default branch or one tracking it. Without the checkbox, selecting a branch already checked out in another worktree jumps there (including back to the main checkout).
 - **Worktree checkbox** (**`composer-worktree-checkbox`**, real **`input[type=checkbox]`**) is the worktree preference; when the session already runs inside a linked worktree it shows checked and disabled.
+- **History folder grouping** uses the main checkout path returned as `repoRoot` on each git session row. A conversation in `main` and conversations in its worktrees appear under one project heading, while each session keeps its own cwd. See [Git worktrees](../features/worktrees.md).
 - **Pre-session (draft/home)**: picks are stored client-side, previewed via **`GET /coddy/workspace/context?path=`**, and applied to the new session id on first send before **`POST /v1/responses`**. Switching to another session drops pending picks.
 - Errors (missing folder **400**, git conflicts / locked workspace **409**) keep the current chips; the context is re-fetched to stay truthful.
 - Automated checks: **`chat/workspaceContext.test.ts`**, **`chat/workspaceRecents.test.ts`** (helpers), **`chat/WorkspaceChips.test.tsx`** (chips, menus, modal, lock); backend behavior is specified executable in **`features/workspace_switching.feature`** (godog).
@@ -1217,7 +1219,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a relay the swarm map **is** the home screen: no composer, no `ChatScreen`,
   no History entry and no Scheduler entry, because a relay holds no sessions of
   its own. Its header carries the environment selector, which normally lives in
-  the composer.
+  the composer; the selector remains there in the map's empty and error states
+  as well, so an unavailable relay does not remove the way to change environments.
 - **Clicking a node on the map switches to it** and leaves the map open over
   it, the node now ringed; what to do there is the next click. There is no list
   of nodes under the map and no filter chips: from a node, every ordinary screen
@@ -1229,7 +1232,8 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
   as it was.
 - The map rings the node the app is on (on the relay itself, the relay's card)
   and draws the route to it from the attached relay as one connected accent path; everything off that route
-  recedes. Hovering another node previews where a click would take you, and its
+  recedes. Every relay on that route has an outline, and the current relay has
+  the stronger current-node outline. Hovering another node previews where a click would take you, and its
   tooltip names what the drawing shows: what the node is, whether it dials out,
   what it is doing. The map writes words under a node only for trouble
   (*offline*, *no route*) and counts a relay's links on its card; wires carry
@@ -1247,6 +1251,21 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a phone (below 1200 px) the screen opens under the top bar and above the
   dimmed backdrop, so taps reach the map, the search and the nodes; tapping the
   top bar's own entries still leaves it.
+- **Tree** is the default canvas layout. **Graph** is a deterministic rooted
+  top-down graph for rings and cross-links, rooted at the relay or, when drawn,
+  at the local computer that starts the connection. It follows route depth
+  softly rather than with rigid hop rows, and uses smooth links. Selecting Tree
+  or Graph is browser-only state in localStorage key `coddy_swarm_layout`; a
+  saved legacy `star` value migrates to Graph, and an absent, blocked or invalid
+  value selects Tree. No server configuration changes.
+- The canvas starts fitted. Its Tree/Graph selector and **Zoom out**, **Fit
+  graph**, and **Zoom in** controls are usable with 40px targets on the stacked
+  shell. Wheel zoom follows the pointer, drag pans in both axes even when fitted,
+  two-finger pinch zooms, and drag/pinch gestures do not open nodes. When
+  focused, **`+`** / **`=`**, **`-`** and **`0`** zoom in, zoom out and fit. Fit,
+  a relay change, or a layout change resets the camera; polling refits only an
+  untouched camera and otherwise preserves the operator's pan and zoom within
+  changed bounds.
 - Built with `-tags "swarm ui"` the relay serves this SPA at its own address;
   without the `ui` tag its root explains how to rebuild.
 - The environment selector in the map header opens **downward**, because on a

@@ -183,7 +183,8 @@ type HTTPHeaderJSON struct {
 // ToolsJSON mirrors Tools for JSON APIs.
 // MCPJSON mirrors MCP for JSON APIs.
 type MCPJSON struct {
-	ProjectTrust string `json:"project_trust,omitempty"`
+	ProjectTrust       string `json:"project_trust,omitempty"`
+	IdleTimeoutSeconds *int   `json:"idle_timeout_seconds,omitempty"`
 }
 
 type ToolsJSON struct {
@@ -284,6 +285,7 @@ type SessionsJSON struct {
 // distinction (enabled defaults to true, keep_recent_turns to 2).
 type CompactionJSON struct {
 	Enabled          *bool              `json:"enable,omitempty"`
+	AutoEnabled      *bool              `json:"auto_enable,omitempty"`
 	ThresholdPercent int                `json:"threshold_percent,omitempty"`
 	KeepRecentTurns  *int               `json:"keep_recent_turns,omitempty"`
 	Model            string             `json:"model,omitempty"`
@@ -522,7 +524,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		}
 		out.MCPServers = append(out.MCPServers, mj)
 	}
-	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust()}
+	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust(), IdleTimeoutSeconds: cloneIntPtr(c.MCP.IdleTimeoutSeconds)}
 	out.Tools = ToolsJSON{
 		PermissionMode:    c.Tools.ResolvedPermMode(),
 		CommandAllowlist:  append([]string(nil), c.Tools.CommandAllowlist...),
@@ -567,6 +569,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Sessions = SessionsJSON{Dir: c.Sessions.Dir}
 	out.Compaction = CompactionJSON{
 		Enabled:          cloneBoolPtr(c.Compaction.Enabled),
+		AutoEnabled:      cloneBoolPtr(c.Compaction.AutoEnabled),
 		ThresholdPercent: c.Compaction.ThresholdPercent,
 		KeepRecentTurns:  cloneIntPtr(c.Compaction.KeepRecentTurns),
 		Model:            c.Compaction.Model,
@@ -751,7 +754,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		}
 		cfg.MCPServers = append(cfg.MCPServers, mc)
 	}
-	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust}
+	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust, IdleTimeoutSeconds: cloneIntPtr(j.MCP.IdleTimeoutSeconds)}
 	cfg.Tools = Tools{
 		PermissionMode:    j.Tools.PermissionMode,
 		CommandAllowlist:  append([]string(nil), j.Tools.CommandAllowlist...),
@@ -798,6 +801,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Sessions = Sessions{Dir: j.Sessions.Dir}
 	cfg.Compaction = Compaction{
 		Enabled:          cloneBoolPtr(j.Compaction.Enabled),
+		AutoEnabled:      cloneBoolPtr(j.Compaction.AutoEnabled),
 		ThresholdPercent: j.Compaction.ThresholdPercent,
 		KeepRecentTurns:  cloneIntPtr(j.Compaction.KeepRecentTurns),
 		Model:            j.Compaction.Model,

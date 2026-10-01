@@ -57,6 +57,23 @@ afterEach(() => {
 });
 
 describe("WorkspaceChips", () => {
+  it("shows the parent project and the worktree branch", () => {
+    renderChips({
+      context: {
+        ...gitCtx,
+        path: "/repos/coddy-agent/.coddy/worktrees/feature-login",
+        name: "feature-login",
+        branch: "feature/login",
+        is_worktree: true,
+      },
+    });
+    expect(screen.getByTestId("composer-workspace-chip").textContent).toContain(
+      "coddy-agent",
+    );
+    expect(screen.getByTestId("composer-branch-chip").textContent).toContain(
+      "feature/login",
+    );
+  });
   it("renders nothing without a context", () => {
     const { container } = renderChips({ context: null });
     expect(container.querySelector(".composer-context-chips")).toBeNull();

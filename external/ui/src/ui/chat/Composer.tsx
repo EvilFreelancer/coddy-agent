@@ -392,6 +392,8 @@ export function Composer(props: {
   contextPct?: number;
   maxContextTokens?: number;
   contextBreakdown?: ContextBreakdown | null;
+  compactionSettings?: { enabled: boolean; autoEnabled: boolean; threshold: number } | undefined;
+  onContextCompacted?: (() => void) | undefined;
   /** Fired when the user opens the context breakdown popover (refresh stats). */
   onContextRingOpen?: () => void;
   /** Known skill names from the catalog — chips confirmed `/name` tokens in the mirror overlay. */
@@ -3303,6 +3305,11 @@ export function Composer(props: {
           contextPct={pct}
           maxContextTokens={maxCtx}
           breakdown={props.contextBreakdown}
+          sessionId={props.sessionId}
+          compactAvailable={props.compactionSettings?.enabled}
+          compactAutoEnabled={props.compactionSettings?.autoEnabled}
+          compactThreshold={props.compactionSettings?.threshold}
+          onCompacted={props.onContextCompacted}
           usage={props.providerUsage ?? null}
           modelId={llmVal || ""}
         />

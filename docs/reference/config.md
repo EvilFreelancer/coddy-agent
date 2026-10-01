@@ -162,6 +162,7 @@ MCP settings that are not tied to a single server entry.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `mcp.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for the project-local <cwd>/.coddy/mcp.json, which travels with the checkout: "ask" keeps its servers cold until the operator approves that exact declaration for that workspace; "allow" starts them automatically (trusted workspaces only); "deny" never loads them. |
+| `mcp.idle_timeout_seconds` | integer or null | 300 | Seconds an MCP server that no session holds any more keeps running before Coddy stops it: a project server once the last session of its workspace let it go, a server an ACP client sent once the last session that sent it closed. A session that takes the server in the meantime finds it running. The global servers that coddy serve, the console and coddy acp start with the process are not affected, and a server switched off, no longer approved, removed or declared differently stops at once. 0 stops a server as soon as the last session lets it go. |
 
 ### `tools`
 
@@ -264,6 +265,7 @@ Summarizes older conversation history so long sessions keep fitting the model co
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `compaction.enable` | boolean or null | true | Master switch for compaction (manual command and automatic trigger). Defaults to true. |
+| `compaction.auto_enable` | boolean or null | true | Enable automatic compaction at threshold_percent. Set false to keep manual /compact and the Context popover action available without automatic compaction. Defaults to true. |
 | `compaction.threshold_percent` | integer | 80 | Auto-compaction fires when the estimated context usage reaches this percent of the effective model's context window (1..100): its max_context_tokens, else the window its provider's model listing reports, else 128000 - the window the web UI context ring shows. |
 | `compaction.keep_recent_turns` | integer or null | 2 | How many most recent user turns (each with the agent replies and tool activity after it) stay verbatim; only history before that boundary is summarized. 0 summarizes the whole window. When the window holds no more user turns than this, a compaction keeps fewer: the automatic trigger down to the prompt being answered, the manual command down to none. |
 | `compaction.model` | string | "" | Optional models[].model used for the summarization call. Empty uses the session's effective model. |

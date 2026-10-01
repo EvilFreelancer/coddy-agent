@@ -85,6 +85,10 @@ type SubagentSpec struct {
 	Role string
 	// Tools is the effective tool set the child may call.
 	Tools []string
+	// Spawns is the spawn allowlist of the child's definition (already
+	// scope-filtered by the runtime): the names the child itself may
+	// delegate to, including one level past subagents.max_depth.
+	Spawns []string
 	// Depth is the child's nesting level.
 	Depth int
 	// MaxTurns caps the child's ReAct rounds; 0 uses the configured default.
@@ -232,6 +236,7 @@ func (m *Manager) CreateSubagentSession(ctx context.Context, spec SubagentSpec) 
 		MaxTurns:        spec.MaxTurns,
 		Role:            spec.Role,
 		Tools:           spec.Tools,
+		Spawns:          spec.Spawns,
 		Kind:            strings.TrimSpace(spec.Kind),
 		PromptTemplate:  spec.PromptTemplate,
 		MaxTokens:       spec.MaxTokens,
