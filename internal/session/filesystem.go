@@ -14,6 +14,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/todo"
 )
 
@@ -26,6 +27,7 @@ const (
 	messagesFile         = MessagesFileName
 	uiLogFile            = "ui_log.json"
 	permissionGrantsFile = "permission_grants.json"
+	sessionWriteLockFile = ".coddy-session.lock"
 	todosDirName         = "todos"
 	todosArchiveName     = "archive"
 	activeTodoFile       = "active.md"
@@ -174,6 +176,24 @@ func (f *FileStore) pathMutex(path string) *sync.Mutex {
 	return m
 }
 
+// lockSessionBundle serializes all session metadata/history writers in this
+// process and across processes. The lock file is separate from the files it
+// protects because Save writes more than one file as one logical update.
+func (f *FileStore) lockSessionBundle(dir string) (func(), error) {
+	path := filepath.Join(dir, sessionWriteLockFile)
+	mu := f.pathMutex(path)
+	mu.Lock()
+	unlockFile, err := platform.LockFile(path)
+	if err != nil {
+		mu.Unlock()
+		return nil, err
+	}
+	return func() {
+		unlockFile()
+		mu.Unlock()
+	}, nil
+}
+
 // SessionPath returns the directory for a session id: Root/<id> for a session
 // somebody started themselves, and the nested bundle under its parent for one
 // a spawn_agent call started.
@@ -315,6 +335,14 @@ func (f *FileStore) EnsureLayout(sessionID string) (dir string, err error) {
 	// the sessions root for an id another process has already stored inside a
 	// parent. It runs once per session, not once per request.
 	dir = f.sessionPath(sessionID, true)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return dir, err
+	}
+	unlock, err := f.lockSessionBundle(dir)
+	if err != nil {
+		return dir, err
+	}
+	defer unlock()
 	return dir, f.ensureLayoutAt(sessionID, dir)
 }
 
@@ -415,6 +443,8 @@ type SessionMeta struct {
 	ActivitySeq uint64 `json:"activitySeq,omitempty"`
 	// ReadActivitySeq tracks the last activity generation the user marked as read.
 	ReadActivitySeq uint64 `json:"readActivitySeq,omitempty"`
+	// LastErrorSeq records the activity generation of the latest real failure.
+	LastErrorSeq uint64 `json:"lastErrorSeq,omitempty"`
 	// PermissionMode records the mode a subagent child ran with, narrowed from
 	// its parent's: part of the child's record, never read back. An ordinary
 	// session's override is not written - it lasts as long as the process and
@@ -576,21 +606,82 @@ func (f *FileStore) readSnapshotAt(dir, sessionID string) (*LoadedSnapshot, erro
 	}, nil
 }
 
-// ReadDiskActivity returns activitySeq and readActivitySeq from session.json only.
-func (f *FileStore) ReadDiskActivity(sessionID string) (activitySeq, readActivitySeq uint64, err error) {
+// ReadDiskActivity returns activity counters from session.json only.
+func (f *FileStore) ReadDiskActivity(sessionID string) (activitySeq, readActivitySeq, lastErrorSeq uint64, err error) {
 	if f == nil || f.Root == "" {
-		return 0, 0, nil
+		return 0, 0, 0, nil
 	}
 	metaPath := filepath.Join(f.SessionPath(sessionID), sessionMetaFile)
 	b, err := os.ReadFile(metaPath)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	var meta SessionMeta
 	if err := json.Unmarshal(b, &meta); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return meta.ActivitySeq, meta.ReadActivitySeq, nil
+	return meta.ActivitySeq, meta.ReadActivitySeq, meta.LastErrorSeq, nil
+}
+
+// mergeActivityMeta keeps the newest activity generation and read cursor when
+// a stale State saves after another writer. lastErrorSeq belongs to the state
+// with the newest activity generation; equal generations retain a non-zero
+// error marker rather than allowing a stale success snapshot to clear it.
+func mergeActivityMeta(meta *SessionMeta, activitySeq, readActivitySeq, lastErrorSeq uint64) {
+	if meta.ActivitySeq > activitySeq {
+		activitySeq = meta.ActivitySeq
+		lastErrorSeq = meta.LastErrorSeq
+	} else if meta.ActivitySeq == activitySeq && meta.LastErrorSeq > lastErrorSeq {
+		lastErrorSeq = meta.LastErrorSeq
+	}
+	if meta.ReadActivitySeq > readActivitySeq {
+		readActivitySeq = meta.ReadActivitySeq
+	}
+	if readActivitySeq > activitySeq {
+		readActivitySeq = activitySeq
+	}
+	meta.ActivitySeq = activitySeq
+	meta.ReadActivitySeq = readActivitySeq
+	meta.LastErrorSeq = lastErrorSeq
+}
+
+// MarkSessionActivityRead advances the persisted read cursor to the current
+// activity generation. An optional live state lets the HTTP path merge a turn
+// that finished in memory after the disk snapshot was read, rather than
+// returning or persisting that older snapshot.
+func (f *FileStore) MarkSessionActivityRead(sessionID string, live ...*State) (activitySeq, readActivitySeq, lastErrorSeq uint64, err error) {
+	if f == nil || f.Root == "" {
+		return 0, 0, 0, nil
+	}
+	dir := f.SessionPath(sessionID)
+	path := filepath.Join(dir, sessionMetaFile)
+	unlock, err := f.lockSessionBundle(dir)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer unlock()
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	var meta SessionMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return 0, 0, 0, fmt.Errorf("session.json: %w", err)
+	}
+	if len(live) > 0 && live[0] != nil {
+		mergeActivityMeta(
+			&meta,
+			live[0].GetActivitySeq(),
+			live[0].GetReadActivitySeq(),
+			live[0].GetLastErrorSeq(),
+		)
+	}
+	meta.ReadActivitySeq = meta.ActivitySeq
+	if err := writeJSONAtomic(path, meta); err != nil {
+		return 0, 0, 0, err
+	}
+	return meta.ActivitySeq, meta.ReadActivitySeq, meta.LastErrorSeq, nil
 }
 
 // SessionListEntry describes one row for CLI or session/list (subset of ACP SessionInfo).
@@ -849,13 +940,18 @@ func (f *FileStore) Save(state *State) error {
 	metaPath := filepath.Join(dir, sessionMetaFile)
 	msgPath := filepath.Join(dir, messagesFile)
 
-	// The lock comes before the snapshot, not after. Two saves of one session
-	// overlap, and a snapshot taken outside it can be written after a newer one
-	// has already landed - putting an older history on disk and leaving the
-	// cache describing it, which the next append would then splice onto.
+	// Keep the messages mutex as the first in-process gate: besides protecting
+	// the cache, existing callers use it to hold a save before its state
+	// snapshot is taken. The bundle lock then extends that critical section to
+	// metadata writers and other processes.
 	msgMu := f.pathMutex(msgPath)
 	msgMu.Lock()
 	defer msgMu.Unlock()
+	unlock, err := f.lockSessionBundle(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	// A state another one took over (a resumed child replacing the copy a
 	// surface loaded) owns nothing on disk any more. Checked under the lock
@@ -877,6 +973,11 @@ func (f *FileStore) Save(state *State) error {
 
 	newActivitySeq := state.GetActivitySeq()
 	newReadSeq := state.GetReadActivitySeq()
+	newLastErrorSeq := state.GetLastErrorSeq()
+	mergeActivityMeta(&prevMeta, newActivitySeq, newReadSeq, newLastErrorSeq)
+	newActivitySeq = prevMeta.ActivitySeq
+	newReadSeq = prevMeta.ReadActivitySeq
+	newLastErrorSeq = prevMeta.LastErrorSeq
 
 	// What was last written is remembered rather than read back and compared:
 	// the old code encoded the history a second time only to diff it against
@@ -980,6 +1081,7 @@ func (f *FileStore) Save(state *State) error {
 	}
 	meta.ActivitySeq = newActivitySeq
 	meta.ReadActivitySeq = newReadSeq
+	meta.LastErrorSeq = newLastErrorSeq
 	if state.IsSubagentRun() {
 		meta.PermissionMode = state.GetPermissionMode()
 	}
@@ -1059,7 +1161,7 @@ func (f *FileStore) Save(state *State) error {
 	return SyncActiveTodoFile(dir, state.GetPlan())
 }
 
-// PatchSessionMetaActivitySync writes only activitySeq and readActivitySeq into session.json,
+// PatchSessionMetaActivitySync writes only activity counters into session.json,
 // preserving updatedAt and all other meta fields. It does not write messages.json.
 func (f *FileStore) PatchSessionMetaActivitySync(st *State) error {
 	if f == nil || st == nil || st.superseded.Load() {
@@ -1071,11 +1173,13 @@ func (f *FileStore) PatchSessionMetaActivitySync(st *State) error {
 	}
 	path := filepath.Join(dir, sessionMetaFile)
 
-	// Serialize the whole read-modify-write against concurrent patchers of the
-	// same file (e.g. markActivityRead from parallel UI tabs).
-	mu := f.pathMutex(path)
-	mu.Lock()
-	defer mu.Unlock()
+	// Serialize the whole read-modify-write against Save and other metadata
+	// patchers, including writers in another process.
+	unlock, err := f.lockSessionBundle(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	// Again under the lock: a state superseded while it waited here must not
 	// put its older activity counters over the new owner's.
 	if st.superseded.Load() {
@@ -1090,8 +1194,7 @@ func (f *FileStore) PatchSessionMetaActivitySync(st *State) error {
 	if err := json.Unmarshal(b, &meta); err != nil {
 		return fmt.Errorf("session.json: %w", err)
 	}
-	meta.ActivitySeq = st.GetActivitySeq()
-	meta.ReadActivitySeq = st.GetReadActivitySeq()
+	meta.ReadActivitySeq = meta.ActivitySeq
 	return writeJSONAtomic(path, meta)
 }
 

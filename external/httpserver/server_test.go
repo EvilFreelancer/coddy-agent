@@ -952,7 +952,6 @@ func TestCoddySessionActivityGet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -973,6 +972,7 @@ func TestCoddySessionActivityGet(t *testing.T) {
 		TurnActive      bool   `json:"turnActive"`
 		ActivitySeq     uint64 `json:"activitySeq"`
 		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
 		UnreadComplete  bool   `json:"unreadComplete"`
 	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
@@ -986,6 +986,9 @@ func TestCoddySessionActivityGet(t *testing.T) {
 	}
 	if parsed.ActivitySeq < 1 {
 		t.Fatalf("want activitySeq>=1 got %d", parsed.ActivitySeq)
+	}
+	if parsed.LastErrorSeq != 0 {
+		t.Fatalf("successful turn lastErrorSeq = %d, want 0", parsed.LastErrorSeq)
 	}
 	if !parsed.UnreadComplete {
 		t.Fatal("expected unreadComplete true after a completed turn with read cursor at zero")
@@ -1058,6 +1061,161 @@ func TestCoddySessionPatchMarkActivityRead(t *testing.T) {
 	}
 }
 
+func TestCoddySessionPatchMarkActivityReadMergesNewerDiskActivity(t *testing.T) {
+	mgr, srv, sessRoot := testHTTPServerPersist(t)
+	store := &session.FileStore{Root: sessRoot}
+	ctx := context.Background()
+	res, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := res.SessionID
+	if _, err := mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt := snap.Meta.UpdatedAt
+	snap.Meta.ActivitySeq = 7
+	snap.Meta.ReadActivitySeq = 2
+	snap.Meta.LastErrorSeq = 7
+	metaPath := filepath.Join(store.SessionPath(sid), "session.json")
+	metaBytes, err := json.MarshalIndent(snap.Meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := os.WriteFile(metaPath, metaBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(sid), strings.NewReader(`{"markActivityRead":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	resHTTP, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(resHTTP.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resHTTP.StatusCode != http.StatusOK {
+		t.Fatalf("status %d %s", resHTTP.StatusCode, body)
+	}
+	var parsed struct {
+		ActivitySeq     uint64 `json:"activitySeq"`
+		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ActivitySeq != 7 || parsed.ReadActivitySeq != 7 || parsed.LastErrorSeq != 7 {
+		t.Fatalf("PATCH returned stale activity counters: %+v", parsed)
+	}
+	snap, err = store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Meta.ActivitySeq != 7 || snap.Meta.ReadActivitySeq != 7 || snap.Meta.LastErrorSeq != 7 {
+		t.Fatalf("PATCH changed disk activity counters incorrectly: %+v", snap.Meta)
+	}
+	if snap.Meta.UpdatedAt != updatedAt {
+		t.Fatalf("PATCH changed updatedAt: before %q after %q", updatedAt, snap.Meta.UpdatedAt)
+	}
+}
+
+func TestCoddySessionPatchMarkActivityReadDoesNotRestoreStaleDiskActivity(t *testing.T) {
+	mgr, srv, sessRoot := testHTTPServerPersist(t)
+	store := &session.FileStore{Root: sessRoot}
+	ctx := context.Background()
+	res, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := res.SessionID
+	if _, err := mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	live := mgr.SessionByID(sid)
+	if live == nil {
+		t.Fatal("session was not retained by manager")
+	}
+	live.RestoreActivityFromSnapshot(9, 6, 9)
+	snap, err := store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Meta.ActivitySeq = 4
+	snap.Meta.ReadActivitySeq = 1
+	snap.Meta.LastErrorSeq = 4
+	metaPath := filepath.Join(store.SessionPath(sid), "session.json")
+	metaBytes, err := json.MarshalIndent(snap.Meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(sid), strings.NewReader(`{"markActivityRead":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	resHTTP, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(resHTTP.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resHTTP.StatusCode != http.StatusOK {
+		t.Fatalf("status %d %s", resHTTP.StatusCode, body)
+	}
+	var parsed struct {
+		ActivitySeq     uint64 `json:"activitySeq"`
+		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ActivitySeq != 9 || parsed.ReadActivitySeq != 9 || parsed.LastErrorSeq != 9 {
+		t.Fatalf("PATCH restored stale disk activity in response: %+v", parsed)
+	}
+	if got := [3]uint64{live.GetActivitySeq(), live.GetReadActivitySeq(), live.GetLastErrorSeq()}; got != [3]uint64{9, 9, 9} {
+		t.Fatalf("PATCH restored stale disk activity in memory: %v", got)
+	}
+	snap, err = store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Meta.ActivitySeq != 9 || snap.Meta.ReadActivitySeq != 9 || snap.Meta.LastErrorSeq != 9 {
+		t.Fatalf("PATCH left stale disk activity: %+v", snap.Meta)
+	}
+}
+
 func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	mgr, srv, _ := testHTTPServerPersist(t)
 	ctx := context.Background()
@@ -1072,6 +1230,8 @@ func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	registerQuestionWait(sid, "q-list")
+	defer unregisterQuestionWait(sid, "q-list")
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -1108,6 +1268,14 @@ func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	}
 	if _, ok := hit["activitySeq"]; !ok {
 		t.Fatalf("missing activitySeq")
+	}
+	if value, ok := hit["lastErrorSeq"]; !ok {
+		t.Fatalf("missing lastErrorSeq")
+	} else if value != float64(0) {
+		t.Fatalf("successful turn lastErrorSeq = %v, want 0", value)
+	}
+	if value, ok := hit["questionPending"].(bool); !ok || !value {
+		t.Fatalf("questionPending = %v, want true", hit["questionPending"])
 	}
 	if _, ok := hit["backgroundRunning"]; !ok {
 		t.Fatalf("missing backgroundRunning in %+v", hit)

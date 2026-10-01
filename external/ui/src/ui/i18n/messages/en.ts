@@ -1020,6 +1020,8 @@ export const messagesEn: Record<string, string> = {
   "sessions.turnRunning": "Turn running",
   "sessions.backgroundRunning": "Background tasks running",
   "sessions.unreadCompletion": "Unread completion",
+  "sessions.stateFinished": "Finished",
+  "sessions.stateError": "Last turn ended with an error",
   "sessions.newChatFallback": "New chat",
   "sessions.deleteConversation": "Delete conversation",
   "sessions.delete": "Delete",

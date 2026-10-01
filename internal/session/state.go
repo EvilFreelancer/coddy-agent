@@ -267,8 +267,11 @@ type State struct {
 
 	// activitySeq increments when an agent turn finishes (persisted in session.json).
 	// readActivitySeq is advanced when the user marks the session read (PATCH markActivityRead).
+	// lastErrorSeq is the activity generation of the latest real failure, or zero
+	// when the latest outcome was not an error.
 	activitySeq     uint64
 	readActivitySeq uint64
+	lastErrorSeq    uint64
 
 	// persist is invoked after persisted fields change (set by Manager; may be nil).
 	persist func()
@@ -1867,11 +1870,29 @@ func (s *State) RestorePermissionGrantsWithoutPersist(commands, writes, httpKeys
 	s.mu.Unlock()
 }
 
-// RestoreActivityFromSnapshot restores activitySeq/readActivitySeq from disk (session/load).
-func (s *State) RestoreActivityFromSnapshot(activitySeq, readActivitySeq uint64) {
+// RestoreActivityFromSnapshot merges activity counters from disk (session/load).
+// A disk read can be older than a live turn that finished while the read was in
+// flight, so restoring is deliberately monotonic and never rolls counters back.
+// The optional third argument keeps older in-process callers source compatible;
+// snapshots without the field restore a zero error generation.
+func (s *State) RestoreActivityFromSnapshot(activitySeq, readActivitySeq uint64, lastError ...uint64) {
+	lastErrorSeq := uint64(0)
+	if len(lastError) > 0 {
+		lastErrorSeq = lastError[0]
+	}
 	s.mu.Lock()
-	s.activitySeq = activitySeq
-	s.readActivitySeq = readActivitySeq
+	if activitySeq > s.activitySeq {
+		s.activitySeq = activitySeq
+		s.lastErrorSeq = lastErrorSeq
+	} else if activitySeq == s.activitySeq && lastErrorSeq > s.lastErrorSeq {
+		s.lastErrorSeq = lastErrorSeq
+	}
+	if readActivitySeq > s.readActivitySeq {
+		s.readActivitySeq = readActivitySeq
+	}
+	if s.readActivitySeq > s.activitySeq {
+		s.readActivitySeq = s.activitySeq
+	}
 	s.mu.Unlock()
 }
 
@@ -1889,12 +1910,44 @@ func (s *State) GetReadActivitySeq() uint64 {
 	return s.readActivitySeq
 }
 
-// BumpActivitySeq increments the activity counter after a completed agent turn and persists.
-func (s *State) BumpActivitySeq() {
+// GetLastErrorSeq returns the activity generation of the latest real failure.
+func (s *State) GetLastErrorSeq() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastErrorSeq
+}
+
+// ActivityOutcome describes how an admitted agent turn ended.
+type ActivityOutcome uint8
+
+const (
+	ActivityOutcomeSuccess ActivityOutcome = iota
+	ActivityOutcomeFailure
+	ActivityOutcomeCanceled
+)
+
+// RecordActivityOutcome atomically advances the activity generation and records
+// the outcome before persistence is invoked. Cancellation deliberately keeps
+// the previous error marker while retaining the existing activity increment.
+func (s *State) RecordActivityOutcome(outcome ActivityOutcome) {
 	s.mu.Lock()
 	s.activitySeq++
+	switch outcome {
+	case ActivityOutcomeFailure:
+		s.lastErrorSeq = s.activitySeq
+	case ActivityOutcomeSuccess:
+		s.lastErrorSeq = 0
+	case ActivityOutcomeCanceled:
+		// Preserve the previous failure marker.
+	}
 	s.mu.Unlock()
 	s.touchPersist()
+}
+
+// BumpActivitySeq increments the activity counter after a completed agent turn and persists.
+// It is kept for callers that only know about the historical success operation.
+func (s *State) BumpActivitySeq() {
+	s.RecordActivityOutcome(ActivityOutcomeSuccess)
 }
 
 // MarkActivityReadSynced sets readActivitySeq to the current activitySeq in memory.

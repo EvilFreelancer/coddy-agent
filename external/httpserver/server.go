@@ -665,7 +665,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			// The caller reads the strict OpenAI contract; the relay keeps the
 			// whole coddy stream for whoever watches this turn.
 			client := newOpenAIStreamFilter(w, model, req.includeUsage())
-			bridge = NewSender(s.activeCfg(), &teeSSEWriter{ResponseWriter: client, relay: rel}, true, model)
+			bridge = s.configureSender(NewSender(s.activeCfg(), &teeSSEWriter{ResponseWriter: client, relay: rel}, true, model))
 		} else {
 			bridge = NewRelaySender(s.activeCfg(), rel, model)
 		}
@@ -737,7 +737,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream {
 		writeSSEHeaders(w)
-		bridge = NewSender(s.activeCfg(), newOpenAIStreamFilter(w, model, req.includeUsage()), true, model)
+		bridge = s.configureSender(NewSender(s.activeCfg(), newOpenAIStreamFilter(w, model, req.includeUsage()), true, model))
 	} else {
 		bridge = NewSender(s.activeCfg(), nil, false, model)
 	}
@@ -1235,7 +1235,7 @@ func (s *Server) handleResponsesCreate(w http.ResponseWriter, r *http.Request) {
 		defer s.endComposerRelay(sid, rel)
 		if body.Stream {
 			writeSSEHeaders(w)
-			bridge = NewSender(s.activeCfg(), &teeSSEWriter{ResponseWriter: w, relay: rel}, true, model)
+			bridge = s.configureSender(NewSender(s.activeCfg(), &teeSSEWriter{ResponseWriter: w, relay: rel}, true, model))
 		} else {
 			bridge = NewRelaySender(s.activeCfg(), rel, model)
 		}
@@ -1315,7 +1315,7 @@ func (s *Server) handleResponsesCreate(w http.ResponseWriter, r *http.Request) {
 	var bridge *Sender
 	if body.Stream {
 		writeSSEHeaders(w)
-		bridge = NewSender(s.activeCfg(), w, true, model)
+		bridge = s.configureSender(NewSender(s.activeCfg(), w, true, model))
 	} else {
 		bridge = NewSender(s.activeCfg(), nil, false, model)
 	}

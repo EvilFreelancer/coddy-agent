@@ -1040,6 +1040,8 @@ export const messagesRu: Record<string, string> = {
   "sessions.turnRunning": "Идёт ход",
   "sessions.backgroundRunning": "Идут фоновые задачи",
   "sessions.unreadCompletion": "Непрочитанное завершение",
+  "sessions.stateFinished": "Завершена",
+  "sessions.stateError": "Последний ход завершился ошибкой",
   "sessions.newChatFallback": "Новый чат",
   "sessions.deleteConversation": "Удалить диалог",
   "sessions.delete": "Удалить",

@@ -989,12 +989,14 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		if includeActivity {
 			dir := fs.SessionPath(row.SessionID)
 			turnActive := s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(dir)
-			actSeq, readSeq, _ := fs.ReadDiskActivity(row.SessionID)
+			actSeq, readSeq, lastErrorSeq, _ := fs.ReadDiskActivity(row.SessionID)
 			ent["turnActive"] = turnActive
 			ent["activitySeq"] = actSeq
 			ent["readActivitySeq"] = readSeq
+			ent["lastErrorSeq"] = lastErrorSeq
 			ent["unreadComplete"] = actSeq > readSeq && !turnActive
 			ent["permissionPending"] = session.PendingPermissionHeld(dir)
+			ent["questionPending"] = QuestionPending(row.SessionID)
 			// Detached work outlives the turn that started it, so a session
 			// with no turn in flight is still not idle while a task runs.
 			// The count is the pool's own, which already leaves out the
@@ -1054,7 +1056,7 @@ func (s *Server) coddySessionActivityGet(w http.ResponseWriter, r *http.Request)
 	}
 	dir := fs.SessionPath(id)
 	turnActive := s.mgr.SessionTurnActiveInProcess(id) || session.TurnLockHeld(dir)
-	actSeq, readSeq, err := fs.ReadDiskActivity(id)
+	actSeq, readSeq, lastErrorSeq, err := fs.ReadDiskActivity(id)
 	if err != nil {
 		s.log.Error("coddy session activity", "error", err)
 		http.Error(w, `{"error":{"message":"read failed"}}`, http.StatusInternalServerError)
@@ -1066,7 +1068,9 @@ func (s *Server) coddySessionActivityGet(w http.ResponseWriter, r *http.Request)
 		"turnActive":      turnActive,
 		"activitySeq":     actSeq,
 		"readActivitySeq": readSeq,
+		"lastErrorSeq":    lastErrorSeq,
 		"unreadComplete":  actSeq > readSeq && !turnActive,
+		"questionPending": QuestionPending(id),
 	}
 	s.addTurnProgress(out, id)
 	w.Header().Set("Content-Type", "application/json")
@@ -1615,15 +1619,21 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.MarkActivityRead {
-		st.MarkActivityReadSynced()
 		did = true
+		if fs != nil {
+			activitySeq, readActivitySeq, lastErrorSeq, err := fs.MarkSessionActivityRead(id, st)
+			if err != nil {
+				s.log.Warn("patch session meta activity", "id", id, "error", err)
+				st.MarkActivityReadSynced()
+			} else {
+				st.RestoreActivityFromSnapshot(activitySeq, readActivitySeq, lastErrorSeq)
+			}
+		} else {
+			st.MarkActivityReadSynced()
+		}
 		resp["activitySeq"] = st.GetActivitySeq()
 		resp["readActivitySeq"] = st.GetReadActivitySeq()
-		if fs != nil {
-			if err := fs.PatchSessionMetaActivitySync(st); err != nil {
-				s.log.Warn("patch session meta activity", "id", id, "error", err)
-			}
-		}
+		resp["lastErrorSeq"] = st.GetLastErrorSeq()
 	}
 	// The same folding and the same limit the agent's session_describe writes
 	// through: a title is a row of a list whichever surface typed it, and two

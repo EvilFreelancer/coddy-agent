@@ -537,7 +537,7 @@ func restoreChildTranscript(st *State, snap *LoadedSnapshot) {
 	st.ReplaceMessagesWithoutPersist(closeInterruptedToolCalls(snap.Messages))
 	st.SetPlanWithoutPersist(snap.Plan)
 	st.RestoreUILogWithoutPersist(snap.UILog)
-	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq)
+	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq, snap.Meta.LastErrorSeq)
 	st.RestoreHookContextWithoutPersist(snap.Meta.HookContext)
 	st.SetTagsWithoutPersist(snap.Meta.Tags)
 	st.SetOriginWithoutPersist(snap.Meta.Origin)
