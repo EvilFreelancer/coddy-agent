@@ -312,7 +312,7 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 			if p.thinkingEnabled() && m.ReasoningSignature != "" && m.Reasoning != "" {
 				blocks = append(blocks, anthropic.NewThinkingBlock(m.ReasoningSignature, m.Reasoning))
 			}
-			if m.Content != "" {
+			if strings.TrimSpace(m.Content) != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(m.Content))
 			}
 			for _, tc := range m.ToolCalls {
@@ -330,6 +330,9 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 			skippedTrailingAssistant = false
 
 		case RoleTool:
+			if skippedTrailingAssistant {
+				return "", nil, fmt.Errorf("anthropic: tool result follows an assistant turn with no replayable content")
+			}
 			result = append(result, anthropic.NewUserMessage(
 				anthropic.NewToolResultBlock(m.ToolCallID, m.Content, false),
 			))
