@@ -630,6 +630,8 @@ export function App() {
   const relayAbortBySidRef = useRef<Map<string, AbortController>>(new Map());
   const pendingPostBySidRef = useRef(new Map<string, AbortController>());
   const streamGenerationBySidRef = useRef(new Map<string, number>());
+
+  const activatedMCPSelectionsRef = useRef(new Set<string>());
   const relayAttachPendingRef = useRef(new Set<string>());
   const stopPendingBySidRef = useRef(
     new Map<string, { superseded: boolean }>(),
@@ -3011,6 +3013,15 @@ export function App() {
     // that lands after this client's archive PATCH may carry the flag from
     // before the write, and the write is what must stay on screen.
     const issuedAt = Date.now();
+    const activateMCP =
+      request.kind === "tail" &&
+      sid === sessionId &&
+      !activatedMCPSelectionsRef.current.has(sid);
+    if (activateMCP) activatedMCPSelectionsRef.current.add(sid);
+    const pageQuery = transcriptPageQuery(request);
+    const activationQuery = activateMCP
+      ? `${pageQuery}${pageQuery ? "&" : "?"}activate_mcp=1`
+      : pageQuery;
     const res = await fetchJSON<{
       window?: unknown;
       messages: Array<any>;
@@ -3034,7 +3045,7 @@ export function App() {
         createdAt?: string;
       }>;
     }>(
-      `/coddy/sessions/${encodeURIComponent(sid)}/messages${transcriptPageQuery(request)}`,
+      `/coddy/sessions/${encodeURIComponent(sid)}/messages${activationQuery}`,
       {
         headers: sid === sessionId ? headers : { [HDR]: sid },
       },

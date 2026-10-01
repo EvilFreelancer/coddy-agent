@@ -59,6 +59,16 @@ Feature: Workspace switching
     Then the context reports a git repository on branch "main"
     And the context reports the session is not in a worktree
 
+  Scenario: A removed managed worktree falls back to its parent checkout
+    Given a workspace git repository "repo" with branches "main, feature/login"
+    And a session rooted at folder "repo"
+    And the session switched to branch "feature/login" in a worktree
+    When Git removes the session worktree
+    And I reopen the session transcript
+    Then the context path points to folder "repo"
+    And the session list names "repo" as its main checkout
+    And the persisted session cwd remains the removed worktree
+
   Scenario: Workspace is locked once the conversation starts
     Given a workspace folder "alpha" without git
     And a workspace folder "beta" without git
