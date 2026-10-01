@@ -82,7 +82,7 @@ const scheduler = {
   dir: "/tmp/jobs",
   timeout: "30m",
   max_queue: 4,
-  runs_active: 0,
+  runs_active: 3,
   retain_sessions: 10,
 };
 
@@ -117,14 +117,14 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       registry_warming: false,
     });
   }
-  if (path === "/coddy/scheduler/jobs") return json({ scheduler, jobs: [job] });
   if (path.startsWith("/coddy/scheduler/jobs/nightly")) return json(job);
+  if (path.startsWith("/coddy/scheduler/jobs")) return json({ scheduler, jobs: [job] });
   if (path === "/coddy/docs") return json(docsContents);
   if (path.startsWith("/coddy/docs/page")) return json(docsPage);
   if (path === "/coddy/config/schema") return json(configSchema);
   if (path === "/coddy/config") return json({ models: [{ model: "fake/alpha" }] });
   if (path.startsWith("/coddy/sessions?")) {
-    return json({ sessions: [{ id: SID, title: "A chat" }] });
+    return json({ active_count: 2, sessions: [{ id: SID, title: "A chat" }] });
   }
   if (path.startsWith(`/coddy/sessions/${SID}/messages`)) {
     return json({ session_id: SID, messages: [] });

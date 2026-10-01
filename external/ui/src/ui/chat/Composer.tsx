@@ -36,6 +36,7 @@ import {
 } from "../skills/draftAtRange";
 import {
   draftExtendsFailedSlashPrefix,
+  inMarkdownFenceBeforeCaret,
   slashMenuDraftAtCaret,
 } from "../skills/draftSlash";
 import { filterCommandRows } from "../skills/commandRows";
@@ -101,6 +102,24 @@ function clamp01(x: number): number {
   if (x < 0) return 0;
   if (x > 1) return 1;
   return x;
+}
+
+function expandCodeFenceAtCaret(
+  value: string,
+  start: number,
+  end: number,
+): { text: string; caret: number } | null {
+  if (start !== end) return null;
+  const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+  const lineEndAt = value.indexOf("\n", start);
+  const lineEnd = lineEndAt < 0 ? value.length : lineEndAt;
+  const line = value.slice(lineStart, lineEnd);
+  if (line.trim() !== "```") return null;
+  const indent = line.match(/^[ \t]*/)?.[0] ?? "";
+  return {
+    text: `${value.slice(0, lineEnd)}\n\n${indent}\`\`\`${value.slice(lineEnd)}`,
+    caret: lineEnd + 1,
+  };
 }
 
 function fmtInt(n: number | undefined): string {
@@ -1558,6 +1577,7 @@ export function Composer(props: {
   }, [props.value, props.sessionId]);
 
   const maskComposerText = props.value.length > 0;
+  const codeFenceEditing = inMarkdownFenceBeforeCaret(props.value, caretPos);
   const composerSegments = useMemo(
     () =>
       segmentComposerMirrorSpans(
@@ -2713,7 +2733,7 @@ export function Composer(props: {
             </div>
           ) : null}
           <div className="composer-field-wrap" ref={composerFieldWrapRef}>
-            <div className="composer-stack">
+            <div className={`composer-stack${codeFenceEditing ? " composer-code-editing" : ""}`}>
               {maskComposerText ? (
                 <div className="composer-mirror" aria-hidden="true">
                   <div
@@ -3004,7 +3024,9 @@ export function Composer(props: {
                     const el = ev.currentTarget;
                     const start = el.selectionStart ?? props.value.length;
                     const end = el.selectionEnd ?? start;
-                    const next = insertNewline(props.value, start, end);
+                    const next =
+                      expandCodeFenceAtCaret(props.value, start, end) ??
+                      insertNewline(props.value, start, end);
                     setCaretPos(next.caret);
                     preEnhanceRef.current = null;
                     setEnhanceErr(null);

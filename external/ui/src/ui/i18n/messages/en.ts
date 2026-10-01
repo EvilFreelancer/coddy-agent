@@ -1003,6 +1003,10 @@ export const messagesEn: Record<string, string> = {
   "nav.wideSidebarTooltip": "Wide sidebar",
   "nav.history": "History",
   "nav.scheduler": "Scheduler",
+  "nav.activeSessions.one": "{count} active session",
+  "nav.activeSessions.other": "{count} active sessions",
+  "nav.activeRuns.one": "{count} active run",
+  "nav.activeRuns.other": "{count} active runs",
   "nav.swarm": "Swarm",
   "nav.docs": "Docs",
   "nav.schedulerAriaLabel": "Scheduler jobs",
@@ -1141,6 +1145,7 @@ export const messagesEn: Record<string, string> = {
     "Read-only transcript of subagent {name}. Prompts go to the parent chat.",
   "chat.subagentReadOnly.noticeUnnamed":
     "Read-only subagent transcript. Prompts go to the parent chat.",
+  "chat.subagentReadOnly.model": "Effective model: {model}",
   "chat.subagentReadOnly.openParent": "Open parent chat",
   "chat.subagentTitle": "Subagent {name}",
   "chat.subagentTitleUnnamed": "Subagent transcript",
@@ -1754,8 +1759,6 @@ export const messagesEn: Record<string, string> = {
   "messages.toolQuestionOwnAnswer": "an answer of their own",
   "messages.toolQuestionMirrorHint":
     "Answer using the Questions card in this chat. This row only mirrors the tool state.",
-  "messages.toolBgTaskOpen": "Open in Tasks",
-  "messages.toolBgTaskStop": "Stop",
   "messages.fileType.image": "Image",
   "messages.fileType.video": "Video",
   "messages.fileType.audio": "Audio",
@@ -1777,6 +1780,10 @@ export const messagesEn: Record<string, string> = {
   "workspace.worktreeInactiveTitle":
     "Open branch switches in a dedicated worktree",
   "workspace.recent": "Recent",
+  "workspace.filterRecent": "Filter recent folders",
+  "workspace.filterBranches": "Filter branches",
+  "workspace.noRecentMatch": "No recent folders match",
+  "workspace.noBranchesMatch": "No branches match",
   "workspace.openFolder": "Open folder…",
   "workspace.noBranches": "No branches",
 

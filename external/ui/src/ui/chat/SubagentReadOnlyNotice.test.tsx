@@ -23,6 +23,18 @@ test("names the subagent and links back to the parent chat", () => {
   expect(onOpenSession).toHaveBeenCalledWith("s_parent");
 });
 
+test("states the child session's effective model", () => {
+  render(
+    <SubagentReadOnlyNotice
+      meta={{ ...meta, model: "neuraldeep/qwen3.8-27b" }}
+    />,
+  );
+
+  expect(screen.getByTestId("subagent-readonly-notice")).toHaveTextContent(
+    "Effective model: neuraldeep/qwen3.8-27b",
+  );
+});
+
 test("a modifier click falls through to the href", () => {
   const onOpenSession = vi.fn();
   render(<SubagentReadOnlyNotice meta={meta} onOpenSession={onOpenSession} />);

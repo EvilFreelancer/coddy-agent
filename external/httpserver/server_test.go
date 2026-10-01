@@ -938,6 +938,84 @@ func TestCoddySessionsList(t *testing.T) {
 	}
 }
 
+func TestCoddySessionsListReportsGlobalActiveCount(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	runner := func(_ context.Context, _ *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		close(started)
+		<-release
+		return string(acp.StopReasonEndTurn), nil
+	}
+	mgr, srv, _ := testHTTPServerPersistWithRunner(t, runner)
+	ctx := context.Background()
+	active, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	patch, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(archived.SessionID), strings.NewReader(`{"archived":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch.Header.Set("Content-Type", "application/json")
+	patched, err := http.DefaultClient.Do(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched.StatusCode != http.StatusOK {
+		body, _ := ioReadAllClose(patched.Body)
+		t.Fatalf("archive session: status %d body %s", patched.StatusCode, body)
+	}
+	_ = patched.Body.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+			SessionID: active.SessionID,
+			Prompt:    []acp.ContentBlock{{Type: "text", Text: "hold"}},
+		})
+	}()
+	<-started
+	t.Cleanup(func() {
+		close(release)
+		wg.Wait()
+	})
+
+	res, err := http.Get(ts.URL + "/coddy/sessions?limit=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", res.StatusCode, body)
+	}
+	var got struct {
+		ActiveCount int `json:"active_count"`
+		Sessions    []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ActiveCount != 1 {
+		t.Fatalf("active_count = %d, want 1: %s", got.ActiveCount, body)
+	}
+	if len(got.Sessions) != 1 || got.Sessions[0].ID != active.SessionID {
+		t.Fatalf("limit=1 sessions = %+v, want only active session %s", got.Sessions, active.SessionID)
+	}
+}
+
 func TestCoddySessionActivityGet(t *testing.T) {
 	mgr, srv, _ := testHTTPServerPersist(t)
 	ctx := context.Background()

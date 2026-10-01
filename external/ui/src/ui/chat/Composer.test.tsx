@@ -1062,6 +1062,18 @@ test("Ctrl+Enter replaces a selection with the newline", () => {
   vi.unstubAllGlobals();
 });
 
+test("Ctrl+Enter expands a fence marker into an editable monospace code block", () => {
+  stubViewport({ narrow: false, touchOnly: false });
+  const { onSend, onChange, ta } = renderEnterComposer("before\n```");
+  ta.setSelectionRange("before\n```".length, "before\n```".length);
+  fireEvent.keyDown(ta, { key: "Enter", ctrlKey: true });
+
+  expect(onSend).not.toHaveBeenCalled();
+  expect(onChange).toHaveBeenCalledWith("before\n```\n\n```");
+  expect(ta.closest(".composer-stack")).toHaveClass("composer-code-editing");
+  vi.unstubAllGlobals();
+});
+
 test("Shift+Enter leaves the newline to the browser and does not send", () => {
   stubViewport({ narrow: false, touchOnly: false });
   const { onSend, onChange, ta } = renderEnterComposer();

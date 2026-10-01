@@ -257,8 +257,6 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
   backgroundTask?: BackgroundTask | undefined;
   /** Shared clock from the shell so every ticker advances together. */
   backgroundNowMs?: number | undefined;
-  onOpenBackgroundTask?: ((taskId: string) => void) | undefined;
-  onStopBackgroundTask?: ((taskId: string) => void) | undefined;
   /** Roots this session works in - its own directory, then its worktrees -
    *  deepest match first when the row spells a path. */
   pathRoots?: readonly string[] | undefined;
@@ -298,7 +296,8 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
 
   const rawNameLower = rawName.toLowerCase();
   const kindLower = (props.kind || "").trim().toLowerCase();
-  const isSpawnAgentTool = rawNameLower === "spawn_agent" || kindLower === "spawn_agent";
+  const isSpawnAgentTool =
+    rawNameLower === "spawn_agent" || kindLower === "spawn_agent";
   const spawnAgent = useMemo(
     () => (isSpawnAgentTool ? parseSpawnAgentArgs(props.argsText) : null),
     [isSpawnAgentTool, props.argsText],
@@ -685,7 +684,8 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
       (toolPreview.kind === "todo" || toolPreview.kind === "plan_exit")
     ) &&
     !!(resultBody && resultBody.length > 0);
-  const hasConnectedResult = (showToolPreview || !!spawnAgent) && (showPatchResult || showResult);
+  const hasConnectedResult =
+    (showToolPreview || !!spawnAgent) && (showPatchResult || showResult);
   const hasBody =
     !!schedulerCard ||
     structuredCard ||
@@ -694,8 +694,7 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
     showToolPreview ||
     showPatchResult ||
     showResult ||
-    !!toggleButton ||
-    !!backgroundTask;
+    !!toggleButton;
 
   // What trails the label on the summary row: the target, the failure marker and
   // the duration. They travel together (.thinking-trail), so a label that leaves no
@@ -876,39 +875,6 @@ export const ToolCallMessage = memo(function ToolCallMessage(props: {
                     <pre className="tool-result-pre">{resultBody}</pre>
                   )}
                 </div>
-              </div>
-            ) : null}
-            {backgroundTask ? (
-              <div
-                className="tool-bgtask-actions"
-                data-testid={`tool-bgtask-actions-${backgroundTask.id}`}
-              >
-                {props.onOpenBackgroundTask ? (
-                  <button
-                    type="button"
-                    className="tool-overflow-toggle"
-                    data-testid={`tool-bgtask-open-${backgroundTask.id}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      props.onOpenBackgroundTask?.(backgroundTask.id);
-                    }}
-                  >
-                    {t("messages.toolBgTaskOpen")}
-                  </button>
-                ) : null}
-                {backgroundTask.running && props.onStopBackgroundTask ? (
-                  <button
-                    type="button"
-                    className="tool-overflow-toggle"
-                    data-testid={`tool-bgtask-stop-${backgroundTask.id}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      props.onStopBackgroundTask?.(backgroundTask.id);
-                    }}
-                  >
-                    {t("messages.toolBgTaskStop")}
-                  </button>
-                ) : null}
               </div>
             ) : null}
             {toggleButton ? (

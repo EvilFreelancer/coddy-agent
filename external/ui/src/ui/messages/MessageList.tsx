@@ -75,8 +75,6 @@ export function MessageList(props: {
   /** Background tasks of this session keyed by the tool call that started them. */
   backgroundTasksByToolCallId?: Map<string, BackgroundTask>;
   backgroundNowMs?: number;
-  onOpenBackgroundTask?: (taskId: string) => void;
-  onStopBackgroundTask?: (taskId: string) => void;
   /** Roots this session works in - its own directory, then its worktrees -
    *  which tool rows spell paths against. */
   pathRoots?: readonly string[];
@@ -339,12 +337,6 @@ export function MessageList(props: {
               : {})}
             {...(rowBackgroundTask && props.backgroundNowMs !== undefined
               ? { backgroundNowMs: props.backgroundNowMs }
-              : {})}
-            {...(props.onOpenBackgroundTask
-              ? { onOpenBackgroundTask: props.onOpenBackgroundTask }
-              : {})}
-            {...(props.onStopBackgroundTask
-              ? { onStopBackgroundTask: props.onStopBackgroundTask }
               : {})}
             {...(it.title !== undefined ? { title: it.title } : {})}
             {...(it.kind !== undefined ? { kind: it.kind } : {})}
