@@ -1729,25 +1729,6 @@ func (s *State) ReplaceMessagesWithoutPersist(msgs []llm.Message) {
 	s.mu.Unlock()
 }
 
-// ReplaceMessages replaces conversation history and persists the edited
-// transcript. It is intended for recovery that must restore provider-valid
-// ordering without appending a result after a later user message.
-func (s *State) ReplaceMessages(msgs []llm.Message) {
-	owned := make([]llm.Message, len(msgs))
-	copy(owned, msgs)
-	for i := range owned {
-		if pd := owned[i].PlanDocument; pd != nil {
-			snapshot := *pd
-			owned[i].PlanDocument = &snapshot
-		}
-	}
-	s.mu.Lock()
-	s.Messages = owned
-	s.markMessagesEdited()
-	s.mu.Unlock()
-	s.touchPersist()
-}
-
 // RestoreMetaWithoutPersist restores mode, model/reasoning and memory from disk
 // (no persistence callback). The permission-mode override is never restored:
 // it lasts as long as the process.

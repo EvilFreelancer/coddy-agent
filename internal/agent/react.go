@@ -44,7 +44,6 @@ type SessionState interface {
 	EffectiveReasoning(cfg *config.Config) string
 	AddMessage(msg llm.Message)
 	GetMessages() []llm.Message
-	ReplaceMessages(msgs []llm.Message)
 	InsertCompactionSummary(idx int, msg llm.Message)
 	GetMCPClients() []*mcp.Client
 	GetMCPToolFilter() func(server, tool string) bool
