@@ -2633,8 +2633,6 @@ a.rail-brand {
   z-index: 4;
   flex-shrink: 0;
   padding: 0 0 16px;
-  background-color: var(--coddy-canvas-gradient-top);
-  box-shadow: 0 8px 16px -16px color-mix(in srgb, var(--text) 72%, transparent);
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
