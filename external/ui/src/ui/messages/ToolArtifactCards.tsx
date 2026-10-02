@@ -95,7 +95,7 @@ export function ArtifactCard(props: { artifact: ToolArtifact; inline?: boolean; 
         <button role="menuitem" type="button" disabled={unavailable || downloading} onClick={() => action(async () => { setDownloading(true); try { await downloadToolArtifact(artifact); } finally { setDownloading(false); } })}>{downloading ? t("messages.artifactDownloading") : t("messages.downloadArtifactButton")}</button>
         <button role="menuitem" type="button" disabled={!artifact.revealUrl} title={!artifact.revealUrl ? t("messages.artifactRevealUnavailable") : undefined} onClick={() => action(reveal)}>{t("messages.artifactReveal")}</button>
       </div> : null}
-      {lightbox && artifact.previewUrl ? <ApiImageLightbox src={artifact.url || artifact.previewUrl} alt={artifact.name} onClose={() => setLightbox(false)} /> : null}
+      {lightbox && artifact.previewUrl ? <ApiImageLightbox src={artifact.previewUrl} alt={artifact.name} onClose={() => setLightbox(false)} /> : null}
     </article>
   );
 }

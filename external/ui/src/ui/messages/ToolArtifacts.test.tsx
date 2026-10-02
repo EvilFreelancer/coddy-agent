@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { setEnv } from "../env/remoteEnv";
 import { parseToolArtifacts } from "../chat/toolArtifacts";
 import { ToolCallMessage } from "./ToolCallMessage";
+import { ArtifactCard } from "./ToolArtifactCards";
 
 const artifact = {
   id: "artifact-1",
@@ -82,6 +83,28 @@ test("marks an artifact without a URL as unavailable", () => {
   expect(screen.getByText("Download unavailable")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Actions for release-notes.pdf" }));
   expect(screen.getByRole("menuitem", { name: "Download" })).toBeDisabled();
+});
+
+test("opens an inline image artifact in the shared lightbox", () => {
+  render(
+    <ArtifactCard
+      inline
+      artifact={{
+        ...artifact,
+        name: "release-overview.png",
+        previewUrl: "/coddy/sessions/s1/artifacts/artifact-1/preview",
+      }}
+    />,
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open release-overview.png" }),
+  );
+  expect(screen.getByRole("dialog")).toHaveTextContent("release-overview.png");
+  expect(screen.getByRole("img", { name: "release-overview.png" })).toHaveAttribute(
+    "src",
+    "/coddy/sessions/s1/artifacts/artifact-1/preview",
+  );
 });
 
 test("downloads a local artifact through a direct anchor without fetching", () => {

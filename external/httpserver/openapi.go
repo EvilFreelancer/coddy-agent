@@ -1881,6 +1881,14 @@ func openAPISpec() map[string]interface{} {
 					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Artifact bytes", "content": map[string]interface{}{"application/octet-stream": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef(), "405": errorResponseRef()},
 				},
 			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}/preview": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Read a shared image artifact inline",
+					"description": "Returns a manifest-registered artifact only when its first 512 bytes sniff as an **`image/*`** media type. The filename is not trusted, so a text file called `preview.png` is still **404**. This route is for an inline preview; download uses the artifact route. Answers with the sniffed content type, `X-Content-Type-Options: nosniff`, and private immutable cache headers.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Original image bytes", "content": map[string]interface{}{"image/*": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef()},
+				},
+			},
 			"/coddy/sessions/{id}/artifacts/{artifactID}/reveal": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "Reveal a shared artifact source",

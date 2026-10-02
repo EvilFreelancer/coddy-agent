@@ -54,6 +54,19 @@ func artifactServer(t *testing.T) (*httptest.Server, *session.Manager, string, s
 	srv := New(cfg, mgr, slog.Default(), cwd)
 	return httptest.NewServer(srv.Handler()), mgr, one.SessionID, two.SessionID, a
 }
+
+func artifactBMPBytes() []byte {
+	return []byte{
+		0x42, 0x4d, 0x3a, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x36, 0x00, 0x00, 0x00, 0x28, 0x00,
+		0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
+		0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00,
+	}
+}
+
 func TestSessionArtifactDownloadGuardsAndDTOs(t *testing.T) {
 	ts, mgr, id, other, a := artifactServer(t)
 	defer ts.Close()
@@ -143,6 +156,87 @@ func TestSessionArtifactDownloadGuardsAndDTOs(t *testing.T) {
 	}
 }
 
+func TestSessionArtifactPreviewServesOnlyImages(t *testing.T) {
+	ts, mgr, id, _, report := artifactServer(t)
+	defer ts.Close()
+	st := mgr.SessionByID(id)
+	if st == nil {
+		t.Fatal("session missing")
+	}
+	imagePath := filepath.Join(st.GetCWD(), "preview.png")
+	if err := os.WriteFile(imagePath, pngBytes(t), 0644); err != nil {
+		t.Fatal(err)
+	}
+	image, err := session.CaptureArtifact(st.GetPersistedSessionDir(), st.GetCWD(), "preview.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageDTO := artifactDTOs(id, []llm.Artifact{{ID: image.ID, Name: image.Name}})
+	if got := imageDTO[0]["previewUrl"]; got != "/coddy/sessions/"+id+"/artifacts/"+image.ID+"/preview" {
+		t.Fatalf("image artifact preview URL = %#v", got)
+	}
+	reportDTO := artifactDTOs(id, []llm.Artifact{{ID: report.ID, Name: report.Name}})
+	if _, ok := reportDTO[0]["previewUrl"]; ok {
+		t.Fatalf("non-image artifact unexpectedly has a preview URL: %#v", reportDTO[0])
+	}
+	bmpPath := filepath.Join(st.GetCWD(), "preview.bmp")
+	if err := os.WriteFile(bmpPath, artifactBMPBytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bmp, err := session.CaptureArtifact(st.GetPersistedSessionDir(), st.GetCWD(), "preview.bmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bmpDTO := artifactDTOs(id, []llm.Artifact{{ID: bmp.ID, Name: bmp.Name}})
+	if got := bmpDTO[0]["previewUrl"]; got != "/coddy/sessions/"+id+"/artifacts/"+bmp.ID+"/preview" {
+		t.Fatalf("BMP artifact preview URL = %#v", got)
+	}
+	client := ts.Client()
+	imageResponse, err := client.Get(ts.URL + "/coddy/sessions/" + id + "/artifacts/" + image.ID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = imageResponse.Body.Close() }()
+	if imageResponse.StatusCode != http.StatusOK || imageResponse.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("image preview status=%d type=%q", imageResponse.StatusCode, imageResponse.Header.Get("Content-Type"))
+	}
+	reportResponse, err := client.Get(ts.URL + "/coddy/sessions/" + id + "/artifacts/" + report.ID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reportResponse.Body.Close() }()
+	if reportResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("text artifact preview status=%d", reportResponse.StatusCode)
+	}
+	bmpResponse, err := client.Get(ts.URL + "/coddy/sessions/" + id + "/artifacts/" + bmp.ID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = bmpResponse.Body.Close() }()
+	if bmpResponse.StatusCode != http.StatusOK || bmpResponse.Header.Get("Content-Type") != "image/bmp" {
+		t.Fatalf("BMP preview status=%d type=%q", bmpResponse.StatusCode, bmpResponse.Header.Get("Content-Type"))
+	}
+	imageArtifactPath := session.ArtifactPath(st.GetPersistedSessionDir(), image.SHA256)
+	if err := os.Chmod(imageArtifactPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		imageArtifactPath,
+		[]byte("tampered"),
+		0644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	tamperedResponse, err := client.Get(ts.URL + "/coddy/sessions/" + id + "/artifacts/" + image.ID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tamperedResponse.Body.Close() }()
+	if tamperedResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("tampered image preview status=%d", tamperedResponse.StatusCode)
+	}
+}
+
 func TestSessionArtifactRevealIsScopedToStoredArtifactSource(t *testing.T) {
 	ts, _, id, other, a := artifactServer(t)
 	defer ts.Close()
@@ -176,6 +270,7 @@ func TestOpenAPISessionArtifactPathIsSeparateFromAssets(t *testing.T) {
 		t.Fatal("OpenAPI paths missing")
 	}
 	const artifactPath = "/coddy/sessions/{id}/artifacts/{artifactID}"
+	const previewPath = "/coddy/sessions/{id}/artifacts/{artifactID}/preview"
 	const revealPath = "/coddy/sessions/{id}/artifacts/{artifactID}/reveal"
 	const assetPath = "/coddy/sessions/{id}/assets/{name}"
 	artifact, ok := paths[artifactPath].(map[string]interface{})
@@ -188,6 +283,10 @@ func TestOpenAPISessionArtifactPathIsSeparateFromAssets(t *testing.T) {
 	}
 	if _, nested := assets[artifactPath]; nested {
 		t.Fatalf("artifact path is incorrectly nested under assets: %#v", assets)
+	}
+	preview, ok := paths[previewPath].(map[string]interface{})
+	if !ok || preview["get"] == nil {
+		t.Fatalf("artifact preview path missing or has no GET operation: %#v", preview)
 	}
 	reveal, ok := paths[revealPath].(map[string]interface{})
 	if !ok || reveal["post"] == nil {

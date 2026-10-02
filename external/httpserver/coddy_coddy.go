@@ -207,6 +207,7 @@ func (s *Server) registerCoddyRoutes() {
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/messages", s.coddySessionMessagesGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}", s.coddySessionAssetGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}", s.coddySessionArtifactGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}/preview", s.coddySessionArtifactPreviewGet)
 	s.mux.HandleFunc("POST /coddy/sessions/{id}/artifacts/{artifactID}/reveal", s.coddySessionArtifactRevealPost)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}/thumbnail", s.coddySessionAssetThumbnailGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/composer-stream", s.coddySessionComposerStream)
@@ -287,6 +288,62 @@ func (s *Server) coddySessionArtifactGet(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	if _, err := io.Copy(w, f); err != nil {
 		s.log.Warn("stream session artifact", "error", err)
+	}
+}
+
+// coddySessionArtifactPreviewGet serves only a verified image artifact inline.
+// Non-image files remain download-only through the artifact route.
+func (s *Server) coddySessionArtifactPreviewGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType := http.DetectContentType(buf[:n])
+	if !strings.HasPrefix(mimeType, "image/") {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact preview", "error", err)
 	}
 }
 
@@ -566,9 +623,18 @@ func artifactDTOs(sessionID string, artifacts []llm.Artifact) []map[string]inter
 		if a.ID == "" {
 			continue
 		}
-		out = append(out, map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "sourcePath": a.SourcePath, "relativePath": a.SourceRelativePath, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID), "revealUrl": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/reveal"})
+		row := map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "sourcePath": a.SourcePath, "relativePath": a.SourceRelativePath, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID), "revealUrl": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/reveal"}
+		if artifactImageName(a.Name) {
+			row["previewUrl"] = "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/preview"
+		}
+		out = append(out, row)
 	}
 	return out
+}
+
+func artifactImageName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") || strings.HasSuffix(lower, ".gif") || strings.HasSuffix(lower, ".webp") || strings.HasSuffix(lower, ".bmp")
 }
 
 func previewText(s string, max int) string {
