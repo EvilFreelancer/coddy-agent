@@ -59,7 +59,7 @@ const listResponse = {
 };
 
 function stubFetch() {
-  const calls: Array<{ url: string; method: string }> = [];
+	const calls: Array<{ url: string; method: string }> = [];
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -67,8 +67,27 @@ function stubFetch() {
       return Promise.resolve({ ok: true, json: async () => listResponse });
     }),
   );
-  return calls;
+	return calls;
 }
+
+test("lists MCP servers for the selected session workspace", async () => {
+  const calls: Array<{ url: string; headers: HeadersInit | undefined }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: init?.headers });
+      return Promise.resolve({ ok: true, json: async () => listResponse });
+    }),
+  );
+
+  render(<MCPSection activeSessionId="sess_workspace" />);
+
+  await waitFor(() => expect(screen.getByTestId("mcp-list")).toBeTruthy());
+  expect(calls[0]).toEqual({
+    url: "/coddy/mcp",
+    headers: { "X-Coddy-Session-ID": "sess_workspace" },
+  });
+});
 
 test("renders merged servers with scope badges and per-origin locks", async () => {
   stubFetch();

@@ -861,33 +861,38 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"order must be \"asc\" or \"desc\""}}`, http.StatusBadRequest)
 		return
 	}
-	// The rail badge is global to History, not to the page or any filter the
-	// reader currently has open. Use the normal list eligibility so archived,
-	// scheduler and subagent sessions do not make it into that count.
-	historyRows, err := fs.ListSnapshotsWith(session.ListOptions{})
-	if err != nil {
-		s.log.Error("coddy sessions active count", "error", err)
-		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
-		return
-	}
-	activeCount := 0
-	for _, row := range historyRows {
-		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
-			activeCount++
-		}
-	}
-	rows, err := fs.ListSnapshotsWith(session.ListOptions{
+	listOpts := session.ListOptions{
 		CWD:                  strings.TrimSpace(r.URL.Query().Get("cwd")),
 		IncludeSchedulerRuns: includeScheduler,
 		IncludeSubagents:     includeSubagents,
 		Archived:             archived,
 		Tags:                 session.ParseTagList(r.URL.Query().Get("tags")),
 		Origin:               origin,
-	})
+	}
+	rows, err := fs.ListSnapshotsWith(listOpts)
 	if err != nil {
 		s.log.Error("coddy sessions list", "error", err)
 		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
 		return
+	}
+	// The rail badge is global to History, not to the page or any filter the
+	// reader currently has open. A normal History request already has exactly
+	// that scope, so its metadata scan supplies both the badge and rows instead
+	// of scanning every bundle a second time.
+	historyRows := rows
+	if !isNormalHistoryList(listOpts) {
+		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{})
+		if err != nil {
+			s.log.Error("coddy sessions active count", "error", err)
+			http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	activeCount := 0
+	for _, row := range historyRows {
+		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
+			activeCount++
+		}
 	}
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		rows, err = fs.FilterSnapshotListForSearch(rows, q)
@@ -914,6 +919,12 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 			return total
 		}
 	}
+	if sortKey == session.SortMessages {
+		// A message sort compares every candidate, so legacy/stale count
+		// metadata is enriched before the whole-list sort. Default History
+		// never calls this and therefore never opens transcripts for counts.
+		fs.EnrichMessageCounts(rows)
+	}
 	session.SortSessionList(rows, sortKey, sortOrder, tokensOf)
 
 	limit, offset := parseLimitCursor(r.URL.Query())
@@ -937,6 +948,11 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	slice := rows[start:end]
 	includeActivity := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_activity")), "true")
 	includeStats := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_stats")), "true")
+	if includeStats {
+		// Statistics are emitted for page rows only, so legacy/stale transcript
+		// counts are decoded only after sorting and paging have selected them.
+		fs.EnrichMessageCounts(slice)
+	}
 	// One walk of the task pool for the whole listing, rather than one per row.
 	var backgroundRunning map[string]int
 	if includeActivity {
@@ -1035,6 +1051,18 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// isNormalHistoryList reports whether opts are the unfiltered working History
+// scope used by active_count. Keeping it here makes the single-scan path
+// explicit without changing the badge semantics for filtered requests.
+func isNormalHistoryList(opts session.ListOptions) bool {
+	return strings.TrimSpace(opts.CWD) == "" &&
+		!opts.IncludeSchedulerRuns &&
+		!opts.IncludeSubagents &&
+		opts.Archived == session.ArchiveExclude &&
+		len(opts.Tags) == 0 &&
+		opts.Origin == session.OriginAny
 }
 
 // coddySessionTokenUsage reads the provider token totals a session accumulated.
@@ -1446,12 +1474,41 @@ func writePageQueryError(w http.ResponseWriter, err error) {
 	http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 }
 
+// messageMCPActivationRequested recognizes the single transcript read the
+// SPA uses when it selects a session. Activation is deliberately unavailable
+// to older or rebased history reads and requires the session header to bind the request
+// to the selected chat rather than merely its URL path.
+func messageMCPActivationRequested(r *http.Request, id string) (bool, error) {
+	q := r.URL.Query()
+	raw, present := q["activate_mcp"]
+	if !present {
+		return false, nil
+	}
+	if len(raw) != 1 || raw[0] != "1" {
+		return false, errors.New("activate_mcp must be 1")
+	}
+	for _, name := range []string{"before", "from"} {
+		if _, paged := q[name]; paged {
+			return false, errors.New("activate_mcp is only valid on an initial transcript read")
+		}
+	}
+	if strings.TrimSpace(r.Header.Get("X-Coddy-Session-ID")) != id {
+		return false, errors.New("activate_mcp requires X-Coddy-Session-ID matching the path id")
+	}
+	return true, nil
+}
+
 func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
+	activateMCP, err := messageMCPActivationRequested(r, id)
+	if err != nil {
+		writePageQueryError(w, err)
+		return
+	}
 	query, err := messagePageQuery(r)
 	if err != nil {
 		writePageQueryError(w, err)
@@ -1460,6 +1517,12 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 	st := s.coddyEnsureLoaded(w, r, id)
 	if st == nil {
 		return
+	}
+	if activateMCP {
+		if err := s.mgr.ActivateDeferredMCP(r.Context(), id); err != nil {
+			s.log.Warn("deferred MCP activation did not start with transcript read",
+				"session", id, "error", err)
+		}
 	}
 	msgs, rev := st.MessagesWithRev()
 	page := session.PageMessages(msgs, query)
