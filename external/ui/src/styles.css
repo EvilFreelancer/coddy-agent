@@ -3874,9 +3874,26 @@ a.rail-brand {
 }
 
 .inline-artifact-card .tool-artifact-info { padding-top: 22px; }
-.inline-artifact-extension { position: absolute; top: 9px; left: 10px; color: var(--accent); font-size: 10px; font-weight: 700; }
+.inline-artifact-extension {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--coddy-blend-base));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
 .inline-artifact-image { position: absolute; inset: 0; padding: 0; overflow: hidden; border: 0; background: transparent; cursor: zoom-in; }
-.inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
+.inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .inline-artifact-card:has(.inline-artifact-image) .tool-artifact-info { position: relative; z-index: 1; padding: 32px 0 0; pointer-events: none; text-shadow: 0 1px 2px #000; }
 .inline-artifact-card:has(.inline-artifact-image) .tool-artifact-meta { padding: 4px; margin: 0 -4px -4px; border-radius: 5px; background: color-mix(in srgb, #000 56%, transparent); }
 .inline-artifact-menu-trigger { position: absolute; z-index: 2; top: 5px; right: 5px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--bg) 74%, transparent); color: var(--text); cursor: pointer; opacity: 0; }

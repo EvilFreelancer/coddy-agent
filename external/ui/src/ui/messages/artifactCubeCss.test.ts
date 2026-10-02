@@ -31,3 +31,14 @@ test("inline artifact groups are block rows with breathing room after files", ()
   expect(block(".inline-artifacts")).toMatch(/margin:\s*12px 0 16px/);
   expect(block(".inline-artifacts")).toMatch(/max-width:\s*100%/);
 });
+
+test("image artifacts use a square extension badge and centered cover preview", () => {
+  const badge = block(".inline-artifact-extension");
+  expect(badge).toMatch(/display:\s*grid/);
+  expect(badge).toMatch(/place-items:\s*center/);
+  expect(badge).toMatch(/width:\s*28px/);
+  expect(badge).toMatch(/height:\s*28px/);
+  expect(badge).toMatch(/border-radius:\s*6px/);
+  expect(block(".inline-artifact-thumb")).toMatch(/object-fit:\s*cover/);
+  expect(block(".inline-artifact-thumb")).toMatch(/object-position:\s*center/);
+});
