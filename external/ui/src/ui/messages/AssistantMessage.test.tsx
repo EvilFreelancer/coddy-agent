@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { AssistantMessage } from "./AssistantMessage";
 
@@ -28,4 +28,26 @@ test("assistant shows copy after stream and copies raw markdown", async () => {
   expect(copyBtn).toHaveAttribute("title", "Copy message");
   copyBtn.click();
   expect(writeText).toHaveBeenCalledWith("# Title");
+});
+
+test("renders only a verified file marker as an inline artifact card with actions", () => {
+  const artifact = {
+    id: "artifact-1",
+    name: "report.pdf",
+    sha256: "a".repeat(64),
+    size: 1024,
+    url: "/coddy/sessions/s1/artifacts/artifact-1",
+    relativePath: "out/report.pdf",
+  };
+  render(
+    <AssistantMessage
+      content={'Ready.\n\n<coddy_file id="artifact-1"/>\n\n<coddy_file id="invented"/>'}
+      artifacts={new Map([[artifact.id, artifact]])}
+    />,
+  );
+  expect(screen.getByTestId("inline-artifact-card-artifact-1")).toBeVisible();
+  expect(screen.getByText('<coddy_file id="invented"/>')).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
+  expect(screen.getByRole("menu")).toBeVisible();
+  expect(screen.getByRole("menuitem", { name: "Mention source" })).toBeEnabled();
 });

@@ -1376,6 +1376,14 @@ func (a *Agent) runReActLoop(
 		}
 		messages = append(messages, assistantMsg)
 		a.state.AddMessage(assistantMsg)
+		if stored := a.state.GetMessages(); len(stored) > 0 {
+			if markers := session.ArtifactMarkers(stored[len(stored)-1].Artifacts); markers != "" {
+				_ = a.server.SendSessionUpdate(sessionID, acp.MessageChunkUpdate{
+					SessionUpdate: acp.UpdateTypeAgentMessageChunk,
+					Content:       acp.ContentBlock{Type: acp.ContentTypeText, Text: "\n\n" + markers},
+				})
+			}
+		}
 		a.refreshConversationContextUsage(true)
 		if strings.TrimSpace(response.Content) != "" {
 			turnHadVisibleText = true
@@ -2109,7 +2117,8 @@ func (a *Agent) finishToolCall(sessionDir, sessionID string, tc llm.ToolCall, re
 				}
 				previewMeta["artifacts"] = []map[string]interface{}{{
 					"id": artifact.ID, "name": artifact.Name, "sha256": artifact.SHA256,
-					"size": artifact.Size, "url": session.ArtifactRoute(sessionID, artifact.ID),
+					"size": artifact.Size, "sourcePath": artifact.SourcePath, "relativePath": artifact.SourceRelativePath,
+					"url": session.ArtifactRoute(sessionID, artifact.ID), "revealUrl": session.ArtifactRoute(sessionID, artifact.ID) + "/reveal",
 				}}
 			}
 		}
@@ -2254,6 +2263,9 @@ func (a *Agent) buildMessages(systemPrompt string) []llm.Message {
 	filtered := make([]llm.Message, 0, len(history))
 	for _, m := range history {
 		if isLLMHistoryMessage(m) {
+			if m.Role == llm.RoleAssistant {
+				m.Content = session.StripArtifactMarkers(m.Content)
+			}
 			filtered = append(filtered, m)
 		}
 	}

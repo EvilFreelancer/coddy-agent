@@ -18,12 +18,16 @@ const (
 	ArtifactSessionMaxBytes int64 = 100 << 20
 )
 
+var ErrArtifactSourceUnavailable = errors.New("artifact source is unavailable")
+
 type Artifact struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	SHA256    string `json:"sha256"`
-	Size      int64  `json:"size"`
-	CreatedAt string `json:"createdAt"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	SHA256             string `json:"sha256"`
+	Size               int64  `json:"size"`
+	CreatedAt          string `json:"createdAt"`
+	SourcePath         string `json:"sourcePath"`
+	SourceRelativePath string `json:"sourceRelativePath"`
 }
 type artifactManifest struct {
 	Artifacts []Artifact `json:"artifacts"`
@@ -121,7 +125,11 @@ func CaptureArtifact(sessionDir, cwd, requested string) (Artifact, error) {
 		if err := os.Rename(tmpName, dest); err != nil {
 			return Artifact{}, err
 		}
-		a := Artifact{ID: d[:24], Name: filepath.Base(candidate), SHA256: d, Size: n, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
+		rel, err := filepath.Rel(root, candidate)
+		if err != nil || rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return Artifact{}, errors.New("shared path escapes workspace")
+		}
+		a := Artifact{ID: d[:24], Name: filepath.Base(candidate), SHA256: d, Size: n, CreatedAt: time.Now().UTC().Format(time.RFC3339), SourcePath: candidate, SourceRelativePath: rel}
 		m.Artifacts = append(m.Artifacts, a)
 		if err := writeArtifactManifest(sd, m); err != nil {
 			_ = os.Remove(dest)
@@ -269,4 +277,44 @@ func ReadArtifact(sd, id string) (Artifact, string, error) {
 		return a, p, nil
 	}
 	return Artifact{}, "", os.ErrNotExist
+}
+
+// ArtifactSourcePath returns the original workspace path recorded while an
+// artifact was verified. Both persisted path forms must still agree with cwd;
+// callers receive no path supplied by an HTTP client.
+func ArtifactSourcePath(sessionDir, cwd, id string) (string, error) {
+	m, err := readArtifactManifest(sessionDir)
+	if err != nil {
+		return "", err
+	}
+	for _, artifact := range m.Artifacts {
+		if artifact.ID != id {
+			continue
+		}
+		root, err := canonicalDir(cwd)
+		if err != nil {
+			return "", err
+		}
+		path := strings.TrimSpace(artifact.SourcePath)
+		rel := strings.TrimSpace(artifact.SourceRelativePath)
+		if path == "" || rel == "" || !filepath.IsAbs(path) || filepath.IsAbs(rel) {
+			return "", os.ErrNotExist
+		}
+		want, err := filepath.Rel(root, path)
+		if err != nil || want != rel || want == "." || strings.HasPrefix(want, ".."+string(filepath.Separator)) {
+			return "", os.ErrNotExist
+		}
+		if err := noSymlinkPath(root, path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ErrArtifactSourceUnavailable
+			}
+			return "", os.ErrNotExist
+		}
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", ErrArtifactSourceUnavailable
+		}
+		return path, nil
+	}
+	return "", os.ErrNotExist
 }

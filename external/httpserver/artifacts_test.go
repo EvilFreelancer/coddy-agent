@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
@@ -44,7 +45,8 @@ func artifactServer(t *testing.T) (*httptest.Server, *session.Manager, string, s
 		t.Fatal(err)
 	}
 	st.AddMessage(llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "share", Name: "share_file", InputJSON: `{"path":"report.txt"}`}}})
-	st.AddMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "share", Content: `{"artifact":{"id":"` + a.ID + `"}}`, Artifacts: []llm.Artifact{{ID: a.ID, Name: a.Name, SHA256: a.SHA256, Size: a.Size}}})
+	st.AddMessage(llm.Message{Role: llm.RoleTool, ToolCallID: "share", Content: `{"artifact":{"id":"` + a.ID + `"}}`, Artifacts: []llm.Artifact{{ID: a.ID, Name: a.Name, SHA256: a.SHA256, Size: a.Size, SourcePath: a.SourcePath, SourceRelativePath: a.SourceRelativePath}}})
+	st.AddMessage(llm.Message{Role: llm.RoleAssistant, Content: "The report is ready."})
 	two, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: cwd})
 	if err != nil {
 		t.Fatal(err)
@@ -100,9 +102,31 @@ func TestSessionArtifactDownloadGuardsAndDTOs(t *testing.T) {
 		}
 		_ = x.Body.Close()
 		raw, _ := json.Marshal(v)
-		if !bytes.Contains(raw, []byte(`"artifacts"`)) || !bytes.Contains(raw, []byte(a.ID)) {
+		if !bytes.Contains(raw, []byte(`"artifacts"`)) || !bytes.Contains(raw, []byte(a.ID)) || !bytes.Contains(raw, []byte(`"sourcePath"`)) || !bytes.Contains(raw, []byte(`"relativePath"`)) {
 			t.Errorf("%s lacks artifact dto: %s", u, raw)
 		}
+	}
+	response := get("GET", "/coddy/sessions/"+id+"/messages", nil)
+	messageBody, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	var messages struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(messageBody, &messages); err != nil {
+		t.Fatal(err)
+	}
+	foundPlacement := false
+	for _, message := range messages.Messages {
+		if message.Role == string(llm.RoleAssistant) && strings.Contains(message.Content, `<coddy_file id="`+a.ID+`"/>`) {
+			foundPlacement = true
+			break
+		}
+	}
+	if !foundPlacement {
+		t.Fatalf("messages API lost assistant artifact placement: %s", messageBody)
 	}
 	// HTTP streaming hashes the immutable copy rather than trusting its name.
 	p := session.ArtifactPath(mgr.SessionByID(id).GetPersistedSessionDir(), a.SHA256)
@@ -119,12 +143,40 @@ func TestSessionArtifactDownloadGuardsAndDTOs(t *testing.T) {
 	}
 }
 
+func TestSessionArtifactRevealIsScopedToStoredArtifactSource(t *testing.T) {
+	ts, _, id, other, a := artifactServer(t)
+	defer ts.Close()
+	post := func(path string) int {
+		r, err := ts.Client().Post(ts.URL+path, "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.Body.Close() }()
+		return r.StatusCode
+	}
+
+	path := "/coddy/sessions/" + id + "/artifacts/" + a.ID + "/reveal"
+	if got := post(path); got != http.StatusNoContent && got != http.StatusServiceUnavailable {
+		t.Fatalf("reveal status = %d, want accepted or clear unavailable", got)
+	}
+	for _, path := range []string{
+		"/coddy/sessions/" + other + "/artifacts/" + a.ID + "/reveal",
+		"/coddy/sessions/" + id + "/artifacts/unknown/reveal",
+		"/coddy/sessions/" + id + "/artifacts/..%2Fmanifest.json/reveal",
+	} {
+		if got := post(path); got != http.StatusNotFound {
+			t.Errorf("POST %s = %d, want 404", path, got)
+		}
+	}
+}
+
 func TestOpenAPISessionArtifactPathIsSeparateFromAssets(t *testing.T) {
 	paths, ok := openAPISpec()["paths"].(map[string]interface{})
 	if !ok {
 		t.Fatal("OpenAPI paths missing")
 	}
 	const artifactPath = "/coddy/sessions/{id}/artifacts/{artifactID}"
+	const revealPath = "/coddy/sessions/{id}/artifacts/{artifactID}/reveal"
 	const assetPath = "/coddy/sessions/{id}/assets/{name}"
 	artifact, ok := paths[artifactPath].(map[string]interface{})
 	if !ok || artifact["get"] == nil {
@@ -136,5 +188,9 @@ func TestOpenAPISessionArtifactPathIsSeparateFromAssets(t *testing.T) {
 	}
 	if _, nested := assets[artifactPath]; nested {
 		t.Fatalf("artifact path is incorrectly nested under assets: %#v", assets)
+	}
+	reveal, ok := paths[revealPath].(map[string]interface{})
+	if !ok || reveal["post"] == nil {
+		t.Fatalf("artifact reveal path missing or has no POST operation: %#v", reveal)
 	}
 }

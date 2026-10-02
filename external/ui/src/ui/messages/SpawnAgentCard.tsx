@@ -51,28 +51,6 @@ export function SpawnAgentCard(props: {
             </div>
           ) : null}
         </div>
-        {props.details.timeoutSeconds !== undefined ? (
-          <span
-            className="spawn-agent-timeout"
-            title={t("messages.spawnAgentTimeoutHint")}
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="8" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-            {t("messages.spawnAgentTimeout", {
-              seconds: props.details.timeoutSeconds,
-            })}
-          </span>
-        ) : null}
       </div>
       <div
         ref={promptRef}
@@ -103,6 +81,32 @@ export function SpawnAgentCard(props: {
       >
         {promptExpanded ? t("messages.toolLess") : t("messages.toolMore")}
       </button>
+      {props.details.model || props.details.timeoutSeconds !== undefined ? (
+        <div className="spawn-agent-meta" data-testid="spawn-agent-meta">
+          {props.details.model ? (
+            <div className="spawn-agent-model">{props.details.model}</div>
+          ) : null}
+          {props.details.model && props.details.reasoning ? (
+            <div className="spawn-agent-reasoning">
+              {t("messages.spawnAgentReasoning", {
+                reasoning:
+                  props.details.reasoning.charAt(0).toUpperCase() +
+                  props.details.reasoning.slice(1),
+              })}
+            </div>
+          ) : null}
+          {props.details.timeoutSeconds !== undefined ? (
+            <div
+              className="spawn-agent-timeout"
+              title={t("messages.spawnAgentTimeoutHint")}
+            >
+              {t("messages.spawnAgentTimeout", {
+                seconds: props.details.timeoutSeconds,
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {props.backgroundTask ? (
         <button
           type="button"

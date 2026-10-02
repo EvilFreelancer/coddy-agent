@@ -7,6 +7,9 @@ import {
   formatUtcToLocalHM,
 } from "./formatMessageTime";
 import { MessageCopyIconButton } from "./MessageCopyIconButton";
+import { ToolArtifactCards } from "./ToolArtifactCards";
+import { tokenizeAssistantArtifacts } from "../chat/inlineArtifacts";
+import type { ToolArtifact } from "../chat/toolArtifacts";
 
 export const AssistantMessage = memo(function AssistantMessage(props: {
   content: string;
@@ -19,6 +22,8 @@ export const AssistantMessage = memo(function AssistantMessage(props: {
    *  turn leaves behind between tool calls would stack the same copy button and the
    *  same minute over and over, which reads as chrome rather than as information. */
   showFoot?: boolean;
+  artifacts?: ReadonlyMap<string, ToolArtifact>;
+  onMentionArtifact?: (path: string) => void;
 }) {
   const { t } = useT();
   const showFoot =
@@ -35,7 +40,11 @@ export const AssistantMessage = memo(function AssistantMessage(props: {
   return (
     <div className="msg-assistant-stack" data-row-id={props.rowId}>
       <div className="msg msg-assistant">
-        <Markdown text={props.content} />
+        {(props.artifacts ? tokenizeAssistantArtifacts(props.content, props.artifacts) : [{ type: "markdown" as const, text: props.content }]).map((token, index) =>
+          token.type === "artifact" ? (
+            <ToolArtifactCards key={`${token.artifact.id}-${index}`} artifacts={[token.artifact]} inline {...(props.onMentionArtifact ? { onMention: props.onMentionArtifact } : {})} />
+          ) : token.text ? <Markdown key={index} text={token.text} /> : null,
+        )}
         {showFoot ? (
           <div className="msg-assistant-foot">
             <MessageCopyIconButton

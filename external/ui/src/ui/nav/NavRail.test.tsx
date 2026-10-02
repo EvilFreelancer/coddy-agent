@@ -129,7 +129,7 @@ test("nav shows localized active counts on History and Scheduler icons", () => {
   );
 });
 
-test("wide rail places active counts beside the History and Scheduler labels", () => {
+test("wide rail keeps active counts over the History and Scheduler icons", () => {
   render(
     <NavRail
       onNewChat={() => {}}
@@ -147,15 +147,13 @@ test("wide rail places active counts beside the History and Scheduler labels", (
     />,
   );
 
-  const historyLabel = screen.getByText("History", { selector: ".rail-nav-label" });
   const historyCount = screen.getByTestId("nav-history-active-count");
-  expect(historyLabel.nextElementSibling).toBe(historyCount);
-  expect(historyCount).toHaveClass("rail-active-count--inline");
+  expect(historyCount).not.toHaveClass("rail-active-count--inline");
+  expect(screen.getByTestId("nav-history").children[1]).toBe(historyCount);
 
-  const schedulerLabel = screen.getByText("Scheduler", { selector: ".rail-nav-label" });
   const schedulerCount = screen.getByTestId("nav-scheduler-active-count");
-  expect(schedulerLabel.nextElementSibling).toBe(schedulerCount);
-  expect(schedulerCount).toHaveClass("rail-active-count--inline");
+  expect(schedulerCount).not.toHaveClass("rail-active-count--inline");
+  expect(screen.getByTestId("nav-scheduler").children[1]).toBe(schedulerCount);
 });
 
 test("the rail no longer carries a Tasks entry", () => {

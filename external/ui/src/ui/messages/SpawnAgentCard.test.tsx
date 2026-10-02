@@ -19,6 +19,8 @@ const args = JSON.stringify({
   agent: "explore",
   description: "Investigate tests and agents",
   prompt: "Inspect the project.\n1. Find tests.\n2. Describe the agents.",
+  model: "neuraldeep/qwen3.8-27b",
+  reasoning: "high",
   timeout_seconds: 120,
 });
 
@@ -41,7 +43,7 @@ function agentTask(over: Partial<BackgroundTask> = {}): BackgroundTask {
   };
 }
 
-test("spawn_agent displays agent identity, description, prompt and timeout", () => {
+test("spawn_agent displays identity and bottom model/reasoning/timeout metadata", () => {
   render(
     <ToolCallMessage
       toolCallId="spawn-1"
@@ -64,7 +66,11 @@ test("spawn_agent displays agent identity, description, prompt and timeout", () 
   expect(screen.getByLabelText("Agent prompt").textContent).toBe(
     JSON.parse(args).prompt,
   );
-  expect(screen.getByText("Timeout 120s")).toBeInTheDocument();
+  const meta = screen.getByTestId("spawn-agent-meta");
+  expect(meta).toHaveTextContent("neuraldeep/qwen3.8-27b");
+  expect(meta).toHaveTextContent("High");
+  expect(meta).toHaveTextContent("Timeout 120s");
+  expect(meta.querySelector("svg")).toBeNull();
   expect(screen.queryByTestId("permission-preview-viewport")).toBeNull();
   expect(screen.getByLabelText("Tool result")).toHaveTextContent(
     "Found 12 tests.",

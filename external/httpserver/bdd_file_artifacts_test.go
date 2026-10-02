@@ -16,6 +16,7 @@ type artifactFeatureState struct {
 	t                            *testing.T
 	tsURL, sessionID, artifactID string
 	body                         string
+	status                       int
 	close                        func()
 }
 
@@ -25,6 +26,24 @@ func (s *artifactFeatureState) reset() error {
 	}
 	s.tsURL = ""
 	s.body = ""
+	s.status = 0
+	return nil
+}
+
+func (s *artifactFeatureState) reveal() error {
+	r, e := http.Post(s.tsURL+"/coddy/sessions/"+s.sessionID+"/artifacts/"+s.artifactID+"/reveal", "application/json", nil)
+	if e != nil {
+		return e
+	}
+	defer func() { _ = r.Body.Close() }()
+	s.status = r.StatusCode
+	return nil
+}
+
+func (s *artifactFeatureState) revealAcceptedOrUnavailable() error {
+	if s.status != http.StatusNoContent && s.status != http.StatusServiceUnavailable {
+		return fmt.Errorf("reveal status %d", s.status)
+	}
 	return nil
 }
 func (s *artifactFeatureState) shared(name string) error {
@@ -68,6 +87,8 @@ func TestFileArtifactsFeature(t *testing.T) {
 		sc.Step(`^a deterministic session has shared "([^"]*)"$`, s.shared)
 		sc.Step(`^the client downloads the shared artifact$`, s.download)
 		sc.Step(`^the artifact download contains "([^"]*)"$`, s.contains)
+		sc.Step(`^the client asks the server to reveal the shared artifact$`, s.reveal)
+		sc.Step(`^the artifact reveal is accepted or reports that this server cannot reveal files$`, s.revealAcceptedOrUnavailable)
 	}, Options: &godog.Options{Format: "pretty", Paths: []string{"../../features/file_artifacts.feature"}, TestingT: t, Strict: true}}
 	if suite.Run() != 0 {
 		t.Fatal("file artifact feature failed")

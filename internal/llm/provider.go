@@ -83,10 +83,12 @@ type Message struct {
 }
 
 type Artifact struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	SHA256             string `json:"sha256"`
+	Size               int64  `json:"size"`
+	SourcePath         string `json:"source_path,omitempty"`
+	SourceRelativePath string `json:"source_relative_path,omitempty"`
 }
 
 // PlanDocumentSnapshot is a persisted design plan row in the session transcript.

@@ -8,6 +8,11 @@ export type ToolArtifact = {
   size: number;
   /** Missing when the server can no longer provide the artifact bytes. */
   url?: string;
+  /** Optional richer metadata supplied by newer servers. */
+  previewUrl?: string;
+  sourcePath?: string;
+  relativePath?: string;
+  revealUrl?: string;
 };
 
 const SHA256 = /^[a-f0-9]{64}$/i;
@@ -38,7 +43,23 @@ export function parseToolArtifacts(raw: unknown): ToolArtifact[] {
       continue;
     }
     const url = typeof row.url === "string" ? row.url.trim() : "";
-    artifacts.push({ id, name, sha256, size, ...(url ? { url } : {}) });
+    const text = (value: unknown) =>
+      typeof value === "string" && value.trim() ? value.trim() : undefined;
+    const previewUrl = text(row.preview_url ?? row.previewUrl);
+    const sourcePath = text(row.source_path ?? row.sourcePath);
+    const relativePath = text(row.relative_path ?? row.relativePath);
+    const revealUrl = text(row.reveal_url ?? row.revealUrl);
+    artifacts.push({
+      id,
+      name,
+      sha256,
+      size,
+      ...(url ? { url } : {}),
+      ...(previewUrl ? { previewUrl } : {}),
+      ...(sourcePath ? { sourcePath } : {}),
+      ...(relativePath ? { relativePath } : {}),
+      ...(revealUrl ? { revealUrl } : {}),
+    });
   }
   return artifacts;
 }

@@ -493,20 +493,7 @@ export function NavRail(props: {
                 onClick={(ev) => sameTabInAppNavClick(ev, props.onOpenHistory)}
               >
                 <IconBook className="rail-svg rail-nav-hit-svg" />
-                {pillWide ? (
-                  <>
-                    <span className="rail-nav-label">{t("nav.history")}</span>
-                    {historyActiveCount > 0 ? (
-                      <span
-                        className="rail-active-count rail-active-count--inline"
-                        data-testid="nav-history-active-count"
-                        aria-hidden
-                      >
-                        {historyActiveCount}
-                      </span>
-                    ) : null}
-                  </>
-                ) : historyActiveCount > 0 ? (
+                {historyActiveCount > 0 ? (
                   <span
                     className="rail-active-count"
                     data-testid="nav-history-active-count"
@@ -515,6 +502,7 @@ export function NavRail(props: {
                     {historyActiveCount}
                   </span>
                 ) : null}
+                {pillWide ? <span className="rail-nav-label">{t("nav.history")}</span> : null}
               </a>
               {!pillWide && !props.historyOpen ? (
                 <span className="rail-tip" role="tooltip">
@@ -537,20 +525,7 @@ export function NavRail(props: {
                 }
               >
                 <IconScheduler className="rail-svg rail-nav-hit-svg" />
-                {pillWide ? (
-                  <>
-                    <span className="rail-nav-label">{t("nav.scheduler")}</span>
-                    {schedulerActiveCount > 0 ? (
-                      <span
-                        className="rail-active-count rail-active-count--inline"
-                        data-testid="nav-scheduler-active-count"
-                        aria-hidden
-                      >
-                        {schedulerActiveCount}
-                      </span>
-                    ) : null}
-                  </>
-                ) : schedulerActiveCount > 0 ? (
+                {schedulerActiveCount > 0 ? (
                   <span
                     className="rail-active-count"
                     data-testid="nav-scheduler-active-count"
@@ -559,6 +534,7 @@ export function NavRail(props: {
                     {schedulerActiveCount}
                   </span>
                 ) : null}
+                {pillWide ? <span className="rail-nav-label">{t("nav.scheduler")}</span> : null}
               </a>
               {!pillWide && !props.schedulerOpen ? (
                 <span className="rail-tip" role="tooltip">

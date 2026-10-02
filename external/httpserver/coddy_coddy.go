@@ -24,6 +24,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 	"github.com/EvilFreelancer/coddy-agent/internal/prompts"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/todo"
@@ -206,6 +207,7 @@ func (s *Server) registerCoddyRoutes() {
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/messages", s.coddySessionMessagesGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}", s.coddySessionAssetGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}", s.coddySessionArtifactGet)
+	s.mux.HandleFunc("POST /coddy/sessions/{id}/artifacts/{artifactID}/reveal", s.coddySessionArtifactRevealPost)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}/thumbnail", s.coddySessionAssetThumbnailGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/composer-stream", s.coddySessionComposerStream)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/tool-calls", s.coddyToolCallsList)
@@ -286,6 +288,41 @@ func (s *Server) coddySessionArtifactGet(w http.ResponseWriter, r *http.Request)
 	if _, err := io.Copy(w, f); err != nil {
 		s.log.Warn("stream session artifact", "error", err)
 	}
+}
+
+// coddySessionArtifactRevealPost asks the host desktop to reveal only the
+// verified source path stored for this session artifact. The client supplies
+// neither a path nor a command.
+func (s *Server) coddySessionArtifactRevealPost(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	path, err := session.ArtifactSourcePath(st.GetPersistedSessionDir(), st.GetCWD(), artifactID)
+	if err != nil {
+		if errors.Is(err, session.ErrArtifactSourceUnavailable) {
+			http.Error(w, `{"error":{"message":"artifact source is unavailable"}}`, http.StatusGone)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if err := platform.RevealFile(path); err != nil {
+		if errors.Is(err, platform.ErrRevealHeadless) || errors.Is(err, platform.ErrRevealUnsupported) {
+			http.Error(w, `{"error":{"message":"artifact reveal is unavailable on this server"}}`, http.StatusServiceUnavailable)
+			return
+		}
+		s.log.Warn("reveal session artifact", "error", err)
+		http.Error(w, `{"error":{"message":"artifact reveal could not be started"}}`, http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) coddySessionCancelGeneration(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +566,7 @@ func artifactDTOs(sessionID string, artifacts []llm.Artifact) []map[string]inter
 		if a.ID == "" {
 			continue
 		}
-		out = append(out, map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID)})
+		out = append(out, map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "sourcePath": a.SourcePath, "relativePath": a.SourceRelativePath, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID), "revealUrl": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/reveal"})
 	}
 	return out
 }

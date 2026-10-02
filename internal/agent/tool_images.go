@@ -127,7 +127,7 @@ func sharedArtifact(sessionDir, result string) (llm.Artifact, bool) {
 	if err != nil {
 		return llm.Artifact{}, false
 	}
-	return llm.Artifact{ID: a.ID, Name: a.Name, SHA256: a.SHA256, Size: a.Size}, true
+	return llm.Artifact{ID: a.ID, Name: a.Name, SHA256: a.SHA256, Size: a.Size, SourcePath: a.SourcePath, SourceRelativePath: a.SourceRelativePath}, true
 }
 
 // toolImagesForSurfaces describes the pictures of a finished call for the
