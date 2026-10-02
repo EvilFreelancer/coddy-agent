@@ -73,26 +73,26 @@ export function ArtifactCard(props: { artifact: ToolArtifact; inline?: boolean; 
     <article
       className={["tool-artifact-card", props.inline && "inline-artifact-card"].filter(Boolean).join(" ")}
       data-testid={`${props.inline ? "inline" : "tool"}-artifact-card-${artifact.id}`}
+      title={artifact.sourcePath || artifact.name}
       onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
     >
       {image && artifact.previewUrl ? (
         <button type="button" className="inline-artifact-image" onClick={() => setLightbox(true)} aria-label={t("messages.openArtifactImage", { fileName: artifact.name })}>
           <ApiImage className="inline-artifact-thumb" src={artifact.previewUrl} alt="" data-testid="inline-artifact-thumb" />
         </button>
-      ) : <span className="tool-artifact-icon" aria-hidden="true">{fileTypeIcon("", artifact.name).svg}</span>}
+      ) : null}
       <span className="tool-artifact-info">
         <span className="inline-artifact-extension" aria-hidden="true">{extension}</span>
         <span className="tool-artifact-name" title={artifact.name}>{artifact.name}</span>
         <span className={unavailable ? "tool-artifact-meta tool-artifact-meta--error" : "tool-artifact-meta"}>{unavailable ? t("messages.artifactUnavailable") : props.inline ? formatBytes(artifact.size) : `${typeLabel} · ${formatBytes(artifact.size)}`}</span>
       </span>
-      <button type="button" className="tool-artifact-download" aria-label={t("messages.downloadArtifact", { fileName: artifact.name })} disabled={unavailable || downloading} onClick={() => action(async () => { setDownloading(true); try { await downloadToolArtifact(artifact); } finally { setDownloading(false); } })}>{downloading ? t("messages.artifactDownloading") : t("messages.downloadArtifactButton")}</button>
       <button type="button" className="inline-artifact-menu-trigger" aria-label={t("messages.artifactActions", { fileName: artifact.name })} aria-expanded={menu} onClick={() => setMenu((open) => !open)}>⋮</button>
       {menu ? <div ref={menuRef} className="inline-artifact-menu" role="menu" onKeyDown={(event) => { if (event.key === "Escape") setMenu(false); }}>
         <button role="menuitem" type="button" disabled={!artifact.sourcePath && !artifact.relativePath} onClick={() => action(() => props.onMention?.(relative))}>{t("messages.artifactMention")}</button>
         <button role="menuitem" type="button" onClick={() => action(() => copy(artifact.name))}>{t("messages.artifactCopyName")}</button>
         <button role="menuitem" type="button" onClick={() => action(() => copy(relative))}>{t("messages.artifactCopyRelative")}</button>
         <button role="menuitem" type="button" disabled={!artifact.sourcePath} onClick={() => action(() => copy(artifact.sourcePath!))}>{t("messages.artifactCopyAbsolute")}</button>
-        <button role="menuitem" type="button" disabled={unavailable} onClick={() => action(() => downloadToolArtifact(artifact))}>{t("messages.downloadArtifactButton")}</button>
+        <button role="menuitem" type="button" disabled={unavailable || downloading} onClick={() => action(async () => { setDownloading(true); try { await downloadToolArtifact(artifact); } finally { setDownloading(false); } })}>{downloading ? t("messages.artifactDownloading") : t("messages.downloadArtifactButton")}</button>
         <button role="menuitem" type="button" disabled={!artifact.revealUrl} title={!artifact.revealUrl ? t("messages.artifactRevealUnavailable") : undefined} onClick={() => action(reveal)}>{t("messages.artifactReveal")}</button>
       </div> : null}
       {lightbox && artifact.previewUrl ? <ApiImageLightbox src={artifact.url || artifact.previewUrl} alt={artifact.name} onClose={() => setLightbox(false)} /> : null}

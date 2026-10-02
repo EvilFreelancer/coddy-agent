@@ -258,17 +258,15 @@ export function ContextBreakdownPopover(props: {
         <span className="context-breakdown-title">
           {t("chat.contextTitle")}
         </span>
-        {!useSheet ? (
-          <button
-            type="button"
-            className="sessions-close context-breakdown-close"
-            aria-label={t("chat.contextClose")}
-            data-testid="context-breakdown-close"
-            onClick={() => props.onClose()}
-          >
-            ×
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="sessions-close context-breakdown-close"
+          aria-label={t("chat.contextClose")}
+          data-testid="context-breakdown-close"
+          onClick={() => props.onClose()}
+        >
+          ×
+        </button>
       </div>
       <div className="context-breakdown-usage-row" data-testid="context-breakdown-usage-row">
         <span className="context-breakdown-used">
@@ -276,23 +274,21 @@ export function ContextBreakdownPopover(props: {
             percent: idle ? "0.0" : fillPct.toFixed(1),
           })}
         </span>
-        {props.sessionId && props.compactAvailable === true ? (
-          <button
-            type="button"
-            className="context-breakdown-compact"
-            onClick={() => void compactNow()}
-            disabled={compacting}
-            data-testid="context-breakdown-compact"
-          >
-            {compacting
-              ? t("chat.contextCompacting")
-              : props.compactAutoEnabled === false
-                ? t("chat.contextCompactNow")
-                : t("chat.contextCompactAt", {
-                    percent: String(props.compactThreshold || 80),
-                  })}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="context-breakdown-compact"
+          onClick={() => void compactNow()}
+          disabled={compacting || !props.sessionId || props.compactAvailable !== true}
+          data-testid="context-breakdown-compact"
+        >
+          {compacting
+            ? t("chat.contextCompacting")
+            : props.compactAutoEnabled === false
+              ? t("chat.contextCompactNow")
+              : t("chat.contextCompactAt", {
+                  percent: String(props.compactThreshold || 80),
+                })}
+        </button>
       </div>
       {compactState === "error" ? (
         <p role="alert" className="context-breakdown-error">

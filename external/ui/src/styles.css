@@ -3790,30 +3790,31 @@ a.rail-brand {
   border-radius: inherit;
 }
 
-/* Files shared by share_file are deliberately download cards, never image
-   previews: an image-named artifact must not imply it is safe to display. */
+/* Verified shared files render as compact cubes in assistant answers. */
 .tool-artifacts {
-  display: grid;
-  gap: 6px;
-  margin: 6px 0 0 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0 14px;
   min-width: 0;
 }
 
 .tool-artifact-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 8px 10px;
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  width: 190px;
+  height: 190px;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 14px;
   border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
-  border-radius: 10px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--text) 5%, var(--coddy-blend-base));
 }
 
 .tool-artifact-icon {
   display: grid;
-  flex: 0 0 auto;
   place-items: center;
   color: color-mix(in srgb, var(--text) 68%, var(--coddy-blend-base));
 }
@@ -3821,22 +3822,25 @@ a.rail-brand {
 .tool-artifact-info {
   display: grid;
   min-width: 0;
-  flex: 1 1 auto;
-  gap: 1px;
+  grid-row: 1 / -1;
+  grid-template-rows: 1fr auto;
 }
 
 .tool-artifact-name {
+  align-self: center;
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .tool-artifact-meta {
-  overflow-wrap: anywhere;
+  align-self: end;
   color: color-mix(in srgb, var(--text) 58%, var(--coddy-blend-base));
   font-size: 11px;
   line-height: 1.35;
@@ -3846,55 +3850,33 @@ a.rail-brand {
   color: var(--coddy-danger, #ef4444);
 }
 
-.tool-artifact-download {
-  flex: 0 0 auto;
-  min-height: 28px;
-  padding: 4px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 64%, var(--coddy-blend-base));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--coddy-blend-base));
-  color: var(--text);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.tool-artifact-download:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 .inline-artifacts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
-  margin: 8px 0;
+  margin: 8px 0 0;
 }
 
 .inline-artifact-card {
-  position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 88px;
-  align-items: stretch;
 }
 
-.inline-artifact-card .tool-artifact-info { padding-right: 24px; }
-.inline-artifact-extension { position: absolute; top: 7px; right: 8px; color: var(--accent); font-size: 9px; font-weight: 700; }
-.inline-artifact-image { width: 62px; margin: -8px 0 -8px -10px; padding: 0; overflow: hidden; border: 0; border-radius: 9px 0 0 9px; background: transparent; cursor: zoom-in; }
+.inline-artifact-card .tool-artifact-info { padding-top: 22px; }
+.inline-artifact-extension { position: absolute; top: 9px; left: 10px; color: var(--accent); font-size: 10px; font-weight: 700; }
+.inline-artifact-image { position: absolute; inset: 0; padding: 0; overflow: hidden; border: 0; background: transparent; cursor: zoom-in; }
 .inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
-.inline-artifact-menu-trigger { position: absolute; top: 4px; right: 3px; border: 0; background: transparent; color: var(--text); cursor: pointer; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-info { position: relative; z-index: 1; padding: 32px 0 0; text-shadow: 0 1px 2px #000; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-meta { padding: 4px; margin: 0 -4px -4px; border-radius: 5px; background: color-mix(in srgb, #000 56%, transparent); }
+.inline-artifact-menu-trigger { position: absolute; z-index: 2; top: 5px; right: 5px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--bg) 74%, transparent); color: var(--text); cursor: pointer; opacity: 0; }
+.inline-artifact-menu-trigger:focus-visible, .inline-artifact-menu-trigger[aria-expanded="true"] { opacity: 1; }
 .inline-artifact-menu { position: absolute; z-index: 1000; top: calc(100% + 4px); right: 0; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--coddy-glass-panel-border); border-radius: 10px; background: var(--coddy-tip-bg); box-shadow: var(--coddy-tip-shadow); }
 .inline-artifact-menu button { padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 12px; }
 .inline-artifact-menu button:hover:not(:disabled), .inline-artifact-menu button:focus-visible { background: color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base)); }
 
 @media (max-width: 599px) {
   .tool-artifact-card {
-    align-items: flex-start;
-  }
-
-  .tool-artifact-download {
-    min-height: 32px;
+    width: 168px;
+    height: 168px;
   }
 }
 
@@ -6437,7 +6419,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .context-breakdown-menu-scroll {
   position: relative;
   z-index: 1;
-  padding: 12px 14px 16px;
+  padding: 0 12px 12px;
   min-height: 0;
 }
 
@@ -6453,7 +6435,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   right: 0;
   bottom: 0;
   margin: 0 auto;
-  max-width: min(560px, 100vw);
+  max-width: min(520px, calc(100vw - 28px));
   border-radius: var(--coddy-glass-panel-radius) var(--coddy-glass-panel-radius)
     0 0;
   z-index: 41;
@@ -6504,7 +6486,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 }
 
 .context-breakdown-head {
-  padding: 12px 14px 10px;
+  padding: 10px 12px;
 }
 
 .context-breakdown-title {
@@ -6517,7 +6499,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px 0;
+  padding: 10px 12px 0;
 }
 
 .context-breakdown-used {

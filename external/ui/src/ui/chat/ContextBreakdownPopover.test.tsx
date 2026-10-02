@@ -84,6 +84,22 @@ test("context action says compact now when automation is disabled", () => {
   );
 });
 
+test("idle sheet keeps close and disabled compact controls visible", () => {
+  render(
+    <ContextBreakdownPopover
+      open
+      onClose={() => {}}
+      useSheet
+      maxContextTokens={128000}
+      compactThreshold={80}
+    />,
+  );
+  expect(screen.getByTestId("context-breakdown-close")).toBeVisible();
+  const compact = screen.getByTestId("context-breakdown-compact");
+  expect(compact).toHaveTextContent("Compact at 80%");
+  expect(compact).toBeDisabled();
+});
+
 test("context popover uses modal head chrome and keeps usage and compaction in one row", () => {
   render(
     <ContextBreakdownPopover

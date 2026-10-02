@@ -42,7 +42,8 @@ test("renders completed share_file artifacts below the closed disclosure", () =>
   expect(screen.getByTestId("tool-artifact-card-artifact-1")).toBeVisible();
   expect(screen.getByText("release-notes.pdf")).toBeVisible();
   expect(screen.getByText("PDF · 2.0 KB")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Download release-notes.pdf" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Download release-notes.pdf" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Actions for release-notes.pdf" })).toBeVisible();
   expect(screen.getByTestId("tool-details-share-1")).not.toHaveAttribute("open");
 });
 
@@ -79,7 +80,8 @@ test("marks an artifact without a URL as unavailable", () => {
   );
 
   expect(screen.getByText("Download unavailable")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Download release-notes.pdf" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Actions for release-notes.pdf" }));
+  expect(screen.getByRole("menuitem", { name: "Download" })).toBeDisabled();
 });
 
 test("downloads a local artifact through a direct anchor without fetching", () => {
@@ -94,7 +96,8 @@ test("downloads a local artifact through a direct anchor without fetching", () =
     />,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Download release-notes.pdf" }));
+  fireEvent.click(screen.getByRole("button", { name: "Actions for release-notes.pdf" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Download" }));
   expect(click).toHaveBeenCalledTimes(1);
   expect(fetchSpy).not.toHaveBeenCalled();
 });
@@ -117,7 +120,8 @@ test("downloads a remote artifact through the environment request and releases i
       artifacts={[artifact]}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download release-notes.pdf" }));
+  fireEvent.click(screen.getByRole("button", { name: "Actions for release-notes.pdf" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Download" }));
 
   await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
   expect(fetchSpy.mock.calls[0]?.[0]).toBe("https://remote.example" + artifact.url);
