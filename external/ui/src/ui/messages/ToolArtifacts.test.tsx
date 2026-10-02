@@ -86,7 +86,7 @@ test("marks an artifact without a URL as unavailable", () => {
 });
 
 test("opens an inline image artifact in the shared lightbox", () => {
-  render(
+  const { container } = render(
     <ArtifactCard
       inline
       artifact={{
@@ -104,6 +104,9 @@ test("opens an inline image artifact in the shared lightbox", () => {
   expect(screen.getByRole("img", { name: "release-overview.png" })).toHaveAttribute(
     "src",
     "/coddy/sessions/s1/artifacts/artifact-1/preview",
+  );
+  expect(container.querySelector(".inline-artifact-extension")?.parentElement).toHaveClass(
+    "tool-artifact-card",
   );
 });
 

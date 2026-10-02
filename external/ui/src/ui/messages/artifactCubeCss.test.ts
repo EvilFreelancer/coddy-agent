@@ -39,6 +39,7 @@ test("image artifacts use a square extension badge and centered cover preview", 
   expect(badge).toMatch(/width:\s*28px/);
   expect(badge).toMatch(/height:\s*28px/);
   expect(badge).toMatch(/border-radius:\s*6px/);
+  expect(badge).toMatch(/pointer-events:\s*none/);
   expect(block(".inline-artifact-thumb")).toMatch(/object-fit:\s*cover/);
   expect(block(".inline-artifact-thumb")).toMatch(/object-position:\s*center/);
 });

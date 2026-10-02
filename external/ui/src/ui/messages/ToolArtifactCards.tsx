@@ -81,8 +81,8 @@ export function ArtifactCard(props: { artifact: ToolArtifact; inline?: boolean; 
           <ApiImage className="inline-artifact-thumb" src={artifact.previewUrl} alt="" data-testid="inline-artifact-thumb" />
         </button>
       ) : null}
+      <span className="inline-artifact-extension" aria-hidden="true">{extension}</span>
       <span className="tool-artifact-info">
-        <span className="inline-artifact-extension" aria-hidden="true">{extension}</span>
         <span className="tool-artifact-name" title={artifact.name}>{artifact.name}</span>
         <span className={unavailable ? "tool-artifact-meta tool-artifact-meta--error" : "tool-artifact-meta"}>{unavailable ? t("messages.artifactUnavailable") : props.inline ? formatBytes(artifact.size) : `${typeLabel} · ${formatBytes(artifact.size)}`}</span>
       </span>

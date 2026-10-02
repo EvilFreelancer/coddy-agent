@@ -3891,6 +3891,7 @@ a.rail-brand {
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1;
+  pointer-events: none;
 }
 .inline-artifact-image { position: absolute; inset: 0; padding: 0; overflow: hidden; border: 0; background: transparent; cursor: zoom-in; }
 .inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
