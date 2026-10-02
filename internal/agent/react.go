@@ -2102,6 +2102,17 @@ func (a *Agent) finishToolCall(sessionDir, sessionID string, tc llm.ToolCall, re
 		coddyMeta["todoPlan"] = todoPlanSnapshot
 	}
 	if status == "completed" && execErr == nil {
+		if tc.Name == tools.ShareFileToolName {
+			if artifact, ok := sharedArtifact(sessionDir, result); ok {
+				if previewMeta == nil {
+					previewMeta = map[string]interface{}{}
+				}
+				previewMeta["artifacts"] = []map[string]interface{}{{
+					"id": artifact.ID, "name": artifact.Name, "sha256": artifact.SHA256,
+					"size": artifact.Size, "url": session.ArtifactRoute(sessionID, artifact.ID),
+				}}
+			}
+		}
 		// The pictures the call showed the model (read on an image file), for
 		// the surfaces that preview them: the web UI on the call's row, a
 		// Telegram chat as photos. After a reload they come from the result
@@ -2194,6 +2205,13 @@ func (a *Agent) currentToolDefinitions(mode string) []llm.ToolDefinition {
 		defs = append(defs, mcpToolDefinitions(a.state.GetMCPClients(), a.state.GetMCPToolFilter())...)
 	}
 	if a.subagent != nil {
+		filtered := defs[:0]
+		for _, def := range defs {
+			if def.Name != tools.ShareFileToolName {
+				filtered = append(filtered, def)
+			}
+		}
+		defs = filtered
 		// An empty effective set means no tools at all, not "unrestricted" as
 		// the nil ToolSet would read; the spawn refuses such a set up front,
 		// this keeps a replayed or restored child honest too.

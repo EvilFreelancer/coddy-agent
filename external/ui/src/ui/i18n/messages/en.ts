@@ -1141,10 +1141,8 @@ export const messagesEn: Record<string, string> = {
   "chat.archived.notice":
     "This conversation is archived. Take it out of the archive to keep working in it.",
   "chat.archived.unarchive": "Unarchive",
-  "chat.subagentReadOnly.notice":
-    "Read-only transcript of subagent {name}. Prompts go to the parent chat.",
-  "chat.subagentReadOnly.noticeUnnamed":
-    "Read-only subagent transcript. Prompts go to the parent chat.",
+  "chat.subagentReadOnly.notice": "Read-only transcript of subagent {name}.",
+  "chat.subagentReadOnly.noticeUnnamed": "Read-only subagent transcript.",
   "chat.subagentReadOnly.model": "Effective model: {model}",
   "chat.subagentReadOnly.openParent": "Open parent chat",
   "chat.subagentTitle": "Subagent {name}",
@@ -1978,4 +1976,9 @@ export const messagesEn: Record<string, string> = {
   "status.waitingStuck": "Still no response from the server",
   "status.turnTokens.one": "{shown} token",
   "status.turnTokens.other": "{shown} tokens",
+  "messages.toolArtifacts": "Shared files",
+  "messages.downloadArtifact": "Download {fileName}",
+  "messages.downloadArtifactButton": "Download",
+  "messages.artifactDownloading": "Downloading…",
+  "messages.artifactUnavailable": "Download unavailable",
 };

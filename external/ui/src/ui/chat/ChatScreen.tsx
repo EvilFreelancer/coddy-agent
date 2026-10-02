@@ -557,6 +557,7 @@ export function ChatScreen(props: {
     ...(props.backgroundNowMs !== undefined
       ? { backgroundNowMs: props.backgroundNowMs }
       : {}),
+    ...(props.onOpenSession ? { onOpenSession: props.onOpenSession } : {}),
   };
 
   const mainClassName = [

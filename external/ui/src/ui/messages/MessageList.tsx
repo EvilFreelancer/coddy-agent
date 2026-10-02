@@ -75,6 +75,8 @@ export function MessageList(props: {
   /** Background tasks of this session keyed by the tool call that started them. */
   backgroundTasksByToolCallId?: Map<string, BackgroundTask>;
   backgroundNowMs?: number;
+  /** Opens a child transcript in the current SPA shell. */
+  onOpenSession?: (sessionId: string) => void;
   /** Roots this session works in - its own directory, then its worktrees -
    *  which tool rows spell paths against. */
   pathRoots?: readonly string[];
@@ -338,6 +340,9 @@ export function MessageList(props: {
             {...(rowBackgroundTask && props.backgroundNowMs !== undefined
               ? { backgroundNowMs: props.backgroundNowMs }
               : {})}
+            {...(props.onOpenSession
+              ? { onOpenSession: props.onOpenSession }
+              : {})}
             {...(it.title !== undefined ? { title: it.title } : {})}
             {...(it.kind !== undefined ? { kind: it.kind } : {})}
             {...(it.argsText !== undefined ? { argsText: it.argsText } : {})}
@@ -352,6 +357,7 @@ export function MessageList(props: {
               : {})}
             {...(it.todoPlan !== undefined ? { todoPlan: it.todoPlan } : {})}
             {...(it.images !== undefined ? { images: it.images } : {})}
+            {...(it.artifacts !== undefined ? { artifacts: it.artifacts } : {})}
             {...(typeof it.durationMs === "number"
               ? { durationMs: it.durationMs }
               : {})}

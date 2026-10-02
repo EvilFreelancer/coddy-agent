@@ -3,6 +3,8 @@
 package httpserver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -203,6 +205,7 @@ func (s *Server) registerCoddyRoutes() {
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/activity", s.coddySessionActivityGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/messages", s.coddySessionMessagesGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}", s.coddySessionAssetGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}", s.coddySessionArtifactGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}/thumbnail", s.coddySessionAssetThumbnailGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/composer-stream", s.coddySessionComposerStream)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/tool-calls", s.coddyToolCallsList)
@@ -229,6 +232,60 @@ func (s *Server) registerCoddyRoutes() {
 	s.registerRewindRoute()
 	s.registerSkillsManagementRoutes()
 	s.registerMCPManagementRoutes()
+}
+
+// coddySessionArtifactGet streams only a manifest-registered immutable artifact.
+func (s *Server) coddySessionArtifactGet(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Range") != "" || r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":{"message":"artifact ranges are not supported"}}`, http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.ReplaceAll(strings.ReplaceAll(a.Name, "\r", "_"), "\n", "_")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact", "error", err)
+	}
 }
 
 func (s *Server) coddySessionCancelGeneration(w http.ResponseWriter, r *http.Request) {
@@ -449,17 +506,32 @@ func (s *Server) coddyDescribePost(w http.ResponseWriter, r *http.Request) {
 }
 
 type coddyToolCallRow struct {
-	ToolCallID             string          `json:"toolCallId"`
-	Name                   string          `json:"name,omitempty"`
-	Kind                   string          `json:"kind,omitempty"`
-	Status                 string          `json:"status,omitempty"`
-	StartedAt              string          `json:"startedAt,omitempty"`
-	FinishedAt             string          `json:"finishedAt,omitempty"`
-	ArgsPreview            string          `json:"argsPreview,omitempty"`
-	ResultPreview          string          `json:"resultPreview,omitempty"`
-	ResultPreviewTruncated bool            `json:"resultPreviewTruncated,omitempty"`
-	ResultTotalLines       int             `json:"resultTotalLines,omitempty"`
-	PlanSnapshot           []acp.PlanEntry `json:"planSnapshot,omitempty"`
+	ToolCallID             string                   `json:"toolCallId"`
+	Name                   string                   `json:"name,omitempty"`
+	Kind                   string                   `json:"kind,omitempty"`
+	Status                 string                   `json:"status,omitempty"`
+	StartedAt              string                   `json:"startedAt,omitempty"`
+	FinishedAt             string                   `json:"finishedAt,omitempty"`
+	ArgsPreview            string                   `json:"argsPreview,omitempty"`
+	ResultPreview          string                   `json:"resultPreview,omitempty"`
+	ResultPreviewTruncated bool                     `json:"resultPreviewTruncated,omitempty"`
+	ResultTotalLines       int                      `json:"resultTotalLines,omitempty"`
+	PlanSnapshot           []acp.PlanEntry          `json:"planSnapshot,omitempty"`
+	Artifacts              []map[string]interface{} `json:"artifacts,omitempty"`
+}
+
+func artifactDTOs(sessionID string, artifacts []llm.Artifact) []map[string]interface{} {
+	if sessionID == "" || len(artifacts) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(artifacts))
+	for _, a := range artifacts {
+		if a.ID == "" {
+			continue
+		}
+		out = append(out, map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID)})
+	}
+	return out
 }
 
 func previewText(s string, max int) string {
@@ -623,6 +695,7 @@ func (s *Server) coddyToolCallsList(w http.ResponseWriter, r *http.Request) {
 			}
 			ordered[i].row.Status = "completed"
 			coddyApplyResultPreview(&ordered[i].row, m.Content)
+			ordered[i].row.Artifacts = artifactDTOs(id, m.Artifacts)
 		}
 	}
 
@@ -687,6 +760,12 @@ func (s *Server) coddyToolCallGet(w http.ResponseWriter, r *http.Request) {
 		"meta":       meta,
 		"args":       args,
 		"result":     full,
+	}
+	for _, m := range st.GetMessages() {
+		if m.Role == llm.RoleTool && m.ToolCallID == toolCallID {
+			payload["artifacts"] = artifactDTOs(id, m.Artifacts)
+			break
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -876,12 +955,11 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The rail badge is global to History, not to the page or any filter the
-	// reader currently has open. A normal History request already has exactly
-	// that scope, so its metadata scan supplies both the badge and rows instead
-	// of scanning every bundle a second time.
+	// reader currently has open. Active child sessions contribute even though
+	// History itself keeps their rows hidden.
 	historyRows := rows
-	if !isNormalHistoryList(listOpts) {
-		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{})
+	if !isNormalHistoryList(listOpts) || !listOpts.IncludeSubagents {
+		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{IncludeSubagents: true})
 		if err != nil {
 			s.log.Error("coddy sessions active count", "error", err)
 			http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
@@ -1195,6 +1273,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 		}
 		if m.Role == llm.RoleTool && m.ToolCallID != "" {
 			item["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.Artifacts) > 0 {
+			item["artifacts"] = artifactDTOs(sessionID, m.Artifacts)
 		}
 		if len(m.ToolCalls) > 0 {
 			tc := make([]map[string]interface{}, 0, len(m.ToolCalls))

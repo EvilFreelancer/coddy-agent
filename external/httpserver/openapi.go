@@ -1856,6 +1856,14 @@ func openAPISpec() map[string]interface{} {
 					},
 				},
 			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Download a session artifact",
+					"description": "Downloads one immutable artifact published by the agent through **share_file**. The id is resolved only through this session's manifest; unregistered ids, traversal, symlinks and digest mismatches are not served. HEAD and Range requests are refused. The response is an attachment with a sandbox CSP and nosniff.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Artifact bytes", "content": map[string]interface{}{"application/octet-stream": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef(), "405": errorResponseRef()},
+				},
+			},
 			"/coddy/sessions/{id}/assets/{name}": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary": "Read a persisted session image at its original size",

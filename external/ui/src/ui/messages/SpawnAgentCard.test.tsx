@@ -1,7 +1,14 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { ToolCallMessage } from "./ToolCallMessage";
 import { initLocale } from "../i18n/i18n";
+import type { BackgroundTask } from "../tasks/types";
 
 afterEach(() => {
   cleanup();
@@ -14,6 +21,25 @@ const args = JSON.stringify({
   prompt: "Inspect the project.\n1. Find tests.\n2. Describe the agents.",
   timeout_seconds: 120,
 });
+
+function agentTask(over: Partial<BackgroundTask> = {}): BackgroundTask {
+  return {
+    id: "bg_spawn",
+    session_id: "parent",
+    kind: "agent",
+    label: "agent explore: inspect the project",
+    agent: { name: "explore" },
+    status: "running",
+    started_at: "2026-10-01T12:00:00Z",
+    timeout_seconds: 120,
+    output_bytes: 0,
+    output_truncated: false,
+    elapsed_seconds: 0,
+    overdue: false,
+    running: true,
+    ...over,
+  };
+}
 
 test("spawn_agent displays agent identity, description, prompt and timeout", () => {
   render(
@@ -28,7 +54,9 @@ test("spawn_agent displays agent identity, description, prompt and timeout", () 
   );
   expect(screen.getByLabelText("Agent details")).toBeInTheDocument();
   // The agent is named twice on purpose: on the collapsed summary row and on the card.
-  expect(screen.getByTestId("tool-summary-target")).toHaveTextContent("explore");
+  expect(screen.getByTestId("tool-summary-target")).toHaveTextContent(
+    "explore",
+  );
   expect(
     screen.getByLabelText("Agent details").querySelector(".spawn-agent-name"),
   ).toHaveTextContent("explore");
@@ -41,6 +69,86 @@ test("spawn_agent displays agent identity, description, prompt and timeout", () 
   expect(screen.getByLabelText("Tool result")).toHaveTextContent(
     "Found 12 tests.",
   );
+});
+
+test("spawn agent prompt expands through the shared localized overflow control", () => {
+  render(
+    <ToolCallMessage
+      toolCallId="spawn-prompt"
+      title="spawn_agent"
+      status="completed"
+      argsText={JSON.stringify({
+        agent: "explore",
+        prompt: "First line\n".repeat(40),
+      })}
+    />,
+  );
+
+  const prompt = screen.getByLabelText("Agent prompt");
+  expect(prompt).toHaveClass("spawn-agent-prompt--collapsed");
+  expect(screen.getByRole("button", { name: "More…" })).toHaveClass(
+    "tool-overflow-toggle",
+  );
+  expect(prompt).toHaveAttribute("aria-expanded", "false");
+
+  fireEvent.click(screen.getByRole("button", { name: "More…" }));
+  expect(prompt).toHaveClass("spawn-agent-prompt--scroll");
+  expect(prompt).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "Less" })).toHaveClass(
+    "tool-overflow-toggle",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Less" }));
+  expect(prompt).toHaveClass("spawn-agent-prompt--collapsed");
+  expect(prompt).toHaveAttribute("aria-expanded", "false");
+});
+
+test("spawn agent transcript action follows the mapped task child session", () => {
+  const onOpenSession = vi.fn();
+  const { rerender } = render(
+    <ToolCallMessage
+      toolCallId="spawn-transcript"
+      title="spawn_agent"
+      status="completed"
+      argsText={args}
+      onOpenSession={onOpenSession}
+    />,
+  );
+  expect(screen.queryByTestId("spawn-agent-open-transcript")).toBeNull();
+
+  rerender(
+    <ToolCallMessage
+      toolCallId="spawn-transcript"
+      title="spawn_agent"
+      status="completed"
+      argsText={args}
+      backgroundTask={agentTask()}
+      onOpenSession={onOpenSession}
+    />,
+  );
+  const pending = screen.getByTestId("spawn-agent-open-transcript");
+  expect(pending).toBeDisabled();
+  expect(pending).toHaveAttribute(
+    "title",
+    "The child session is not known yet",
+  );
+
+  rerender(
+    <ToolCallMessage
+      toolCallId="spawn-transcript"
+      title="spawn_agent"
+      status="completed"
+      argsText={args}
+      backgroundTask={agentTask({
+        agent: { name: "explore", session_id: "sess_child" },
+      })}
+      onOpenSession={onOpenSession}
+    />,
+  );
+  const ready = screen.getByTestId("spawn-agent-open-transcript");
+  expect(ready).toBeEnabled();
+  fireEvent.click(ready);
+  expect(onOpenSession).toHaveBeenCalledWith("sess_child");
 });
 
 test("restored truncated spawn args are fetched once and replaced with the card", async () => {

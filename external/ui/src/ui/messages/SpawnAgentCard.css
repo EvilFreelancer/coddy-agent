@@ -80,6 +80,38 @@
   overflow-wrap: anywhere;
 }
 
+.spawn-agent-prompt--collapsed {
+  max-height: 5.2em;
+  overflow: hidden;
+}
+
+.spawn-agent-prompt--scroll {
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.spawn-agent-prompt-toggle {
+  margin-left: 0;
+}
+
+.spawn-agent-transcript {
+  display: inline-flex;
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.spawn-agent-transcript:disabled {
+  color: color-mix(in srgb, var(--text) 42%, var(--coddy-blend-base));
+  cursor: not-allowed;
+}
+
 .coddy-tool-call-body--connected-result > .spawn-agent-card {
   border-radius: 12px 12px 0 0;
 }

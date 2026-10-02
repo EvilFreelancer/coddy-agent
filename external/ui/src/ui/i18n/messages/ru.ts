@@ -1169,9 +1169,9 @@ export const messagesRu: Record<string, string> = {
     "Этот диалог в архиве. Разархивируйте его, чтобы продолжить работу.",
   "chat.archived.unarchive": "Разархивировать",
   "chat.subagentReadOnly.notice":
-    "Транскрипт субагента {name} доступен только для чтения. Запросы отправляются в родительский чат.",
+    "Только для чтения: транскрипт субагента {name}.",
   "chat.subagentReadOnly.noticeUnnamed":
-    "Транскрипт субагента доступен только для чтения. Запросы отправляются в родительский чат.",
+    "Только для чтения: транскрипт субагента.",
   "chat.subagentReadOnly.model": "Используемая модель: {model}",
   "chat.subagentReadOnly.openParent": "Открыть родительский чат",
   "chat.subagentTitle": "Субагент {name}",
@@ -2045,4 +2045,9 @@ export const messagesRu: Record<string, string> = {
   "status.turnTokens.few": "{shown} токена",
   "status.turnTokens.many": "{shown} токенов",
   "status.turnTokens.other": "{shown} токена",
+  "messages.toolArtifacts": "Переданные файлы",
+  "messages.downloadArtifact": "Скачать {fileName}",
+  "messages.downloadArtifactButton": "Скачать",
+  "messages.artifactDownloading": "Скачивание…",
+  "messages.artifactUnavailable": "Скачивание недоступно",
 };

@@ -1074,6 +1074,14 @@ body {
   box-shadow: 0 0 0 1px var(--coddy-canvas-gradient-top);
 }
 
+.rail-active-count--inline {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+}
+
 .rail-nav-label {
   font-size: 13px;
   font-weight: 600;
@@ -2625,6 +2633,8 @@ a.rail-brand {
   z-index: 4;
   flex-shrink: 0;
   padding: 0 0 16px;
+  background-color: var(--coddy-canvas-gradient-top);
+  box-shadow: 0 8px 16px -16px color-mix(in srgb, var(--text) 72%, transparent);
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
@@ -3788,6 +3798,90 @@ a.rail-brand {
   height: 100%;
   object-fit: cover;
   border-radius: inherit;
+}
+
+/* Files shared by share_file are deliberately download cards, never image
+   previews: an image-named artifact must not imply it is safe to display. */
+.tool-artifacts {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0 14px;
+  min-width: 0;
+}
+
+.tool-artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 5%, var(--coddy-blend-base));
+}
+
+.tool-artifact-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: color-mix(in srgb, var(--text) 68%, var(--coddy-blend-base));
+}
+
+.tool-artifact-info {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
+}
+
+.tool-artifact-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-artifact-meta {
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--text) 58%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tool-artifact-meta--error {
+  color: var(--coddy-danger, #ef4444);
+}
+
+.tool-artifact-download {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 64%, var(--coddy-blend-base));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--coddy-blend-base));
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tool-artifact-download:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 599px) {
+  .tool-artifact-card {
+    align-items: flex-start;
+  }
+
+  .tool-artifact-download {
+    min-height: 32px;
+  }
 }
 
 .coddy-tool-call-body {
@@ -9152,7 +9246,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .mcp-list {
   /* Where a server row's name starts: the chevron, its gap, the status dot
      and its gap. The tools and the trust note under a row start there too. */
-  --mcp-row-inset: calc(22px + 8px + 9px + 8px);
+  --mcp-switch-inset: calc(22px + 8px);
+  --mcp-row-inset: calc(var(--mcp-switch-inset) + 38px + 8px + 9px + 8px);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -9161,8 +9256,6 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 .mcp-list-item {
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
   padding: 4px 0;
 }
 
@@ -9448,8 +9541,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* Expanded per-tool rows, under the server's name. */
 .mcp-tools {
   list-style: none;
-  margin: 0 0 6px;
-  padding: 0 0 0 var(--mcp-row-inset);
+  margin: 0;
+  padding: 0 0 0 var(--mcp-switch-inset);
   display: flex;
   flex-direction: column;
 }
@@ -9461,6 +9554,10 @@ html:not([data-theme="light"]) .context-usage-note--error {
   padding: 5px 0;
   border-top: 1px dashed
     color-mix(in srgb, var(--text) 7%, var(--coddy-blend-base));
+}
+
+.mcp-tool-row > .skill-switch {
+  flex: 0 0 auto;
 }
 
 .mcp-tool-row.is-disabled .mcp-tool-text {
