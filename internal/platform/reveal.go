@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	pathpkg "path"
 	"regexp"
 	"runtime"
 	"strings"
@@ -47,7 +47,7 @@ func revealFileArgv(goos, path string) ([]string, error) {
 	case "windows":
 		return []string{"explorer.exe", "/select," + path}, nil
 	case "linux":
-		return []string{"xdg-open", filepath.Dir(path)}, nil
+		return []string{"xdg-open", pathpkg.Dir(path)}, nil
 	default:
 		return nil, ErrRevealUnsupported
 	}
