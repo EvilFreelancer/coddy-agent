@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -37,7 +38,7 @@ func RevealFile(path string) error {
 
 func revealFileArgv(goos, path string) ([]string, error) {
 	path = strings.TrimSpace(path)
-	if path == "" || !filepath.IsAbs(path) {
+	if path == "" || !isAbsolutePathForOS(goos, path) {
 		return nil, errors.New("artifact source path is invalid")
 	}
 	switch goos {
@@ -50,4 +51,13 @@ func revealFileArgv(goos, path string) ([]string, error) {
 	default:
 		return nil, ErrRevealUnsupported
 	}
+}
+
+var windowsAbsolutePath = regexp.MustCompile(`(?i)^[a-z]:[\\/]`)
+
+func isAbsolutePathForOS(goos, path string) bool {
+	if goos == "windows" {
+		return windowsAbsolutePath.MatchString(path) || strings.HasPrefix(path, `\\`)
+	}
+	return strings.HasPrefix(path, "/")
 }

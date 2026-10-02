@@ -6,18 +6,18 @@ import (
 )
 
 func TestRevealFileArgv(t *testing.T) {
-	path := "/workspace/report.txt"
 	for _, tc := range []struct {
 		name string
 		goos string
+		path string
 		want []string
 	}{
-		{name: "macOS selects file", goos: "darwin", want: []string{"open", "-R", path}},
-		{name: "Windows selects file", goos: "windows", want: []string{"explorer.exe", "/select," + path}},
-		{name: "Linux opens containing folder", goos: "linux", want: []string{"xdg-open", "/workspace"}},
+		{name: "macOS selects file", goos: "darwin", path: "/workspace/report.txt", want: []string{"open", "-R", "/workspace/report.txt"}},
+		{name: "Windows selects file", goos: "windows", path: `C:\temp\artifact.txt`, want: []string{"explorer.exe", `/select,C:\temp\artifact.txt`}},
+		{name: "Linux opens containing folder", goos: "linux", path: "/workspace/report.txt", want: []string{"xdg-open", "/workspace"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := revealFileArgv(tc.goos, path)
+			got, err := revealFileArgv(tc.goos, tc.path)
 			if err != nil {
 				t.Fatal(err)
 			}
