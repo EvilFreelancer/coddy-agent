@@ -6,6 +6,10 @@ export type AssistantArtifactToken =
   | { type: "markdown"; text: string }
   | { type: "artifact"; artifact: ToolArtifact };
 
+export type AssistantArtifactRenderToken =
+  | { type: "markdown"; text: string }
+  | { type: "artifacts"; artifacts: ToolArtifact[] };
+
 const FILE_MARKER = /<coddy_file\s+id="([^"<>]+)"\s*\/>/g;
 
 /** Artifacts published earlier in this turn. IDs are server-issued and unique. */
@@ -46,6 +50,35 @@ export function tokenizeAssistantArtifacts(
   }
   const tail = content.slice(at);
   if (tail || out.length === 0) out.push({ type: "markdown", text: tail });
+  return out;
+}
+
+/** Joins markers separated only by whitespace into one shared-files row. */
+export function groupAssistantArtifactTokens(
+  tokens: readonly AssistantArtifactToken[],
+): AssistantArtifactRenderToken[] {
+  const out: AssistantArtifactRenderToken[] = [];
+  let artifacts: ToolArtifact[] = [];
+  const flush = () => {
+    if (artifacts.length > 0) {
+      out.push({ type: "artifacts", artifacts });
+      artifacts = [];
+    }
+  };
+  for (const token of tokens) {
+    if (token.type === "artifact") {
+      artifacts.push(token.artifact);
+      continue;
+    }
+    if (artifacts.length > 0 && token.text.trim() === "") {
+      continue;
+    }
+    flush();
+    if (token.text) {
+      out.push(token);
+    }
+  }
+  flush();
   return out;
 }
 

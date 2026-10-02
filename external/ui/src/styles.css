@@ -3852,10 +3852,11 @@ a.rail-brand {
 }
 
 .inline-artifacts {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 8px 0 0;
+  max-width: 100%;
+  margin: 12px 0 16px;
 }
 
 .inline-artifact-card {

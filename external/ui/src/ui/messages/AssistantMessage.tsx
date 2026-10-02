@@ -8,7 +8,10 @@ import {
 } from "./formatMessageTime";
 import { MessageCopyIconButton } from "./MessageCopyIconButton";
 import { ToolArtifactCards } from "./ToolArtifactCards";
-import { tokenizeAssistantArtifacts } from "../chat/inlineArtifacts";
+import {
+  groupAssistantArtifactTokens,
+  tokenizeAssistantArtifacts,
+} from "../chat/inlineArtifacts";
 import type { ToolArtifact } from "../chat/toolArtifacts";
 
 export const AssistantMessage = memo(function AssistantMessage(props: {
@@ -37,12 +40,17 @@ export const AssistantMessage = memo(function AssistantMessage(props: {
     props.createdAtUtc && timeHM
       ? formatUtcToLocalFullDetail(props.createdAtUtc)
       : "";
+  const contentTokens = props.artifacts
+    ? groupAssistantArtifactTokens(
+        tokenizeAssistantArtifacts(props.content, props.artifacts),
+      )
+    : [{ type: "markdown" as const, text: props.content }];
   return (
     <div className="msg-assistant-stack" data-row-id={props.rowId}>
       <div className="msg msg-assistant">
-        {(props.artifacts ? tokenizeAssistantArtifacts(props.content, props.artifacts) : [{ type: "markdown" as const, text: props.content }]).map((token, index) =>
-          token.type === "artifact" ? (
-            <ToolArtifactCards key={`${token.artifact.id}-${index}`} artifacts={[token.artifact]} inline {...(props.onMentionArtifact ? { onMention: props.onMentionArtifact } : {})} />
+        {contentTokens.map((token, index) =>
+          token.type === "artifacts" ? (
+            <ToolArtifactCards key={`${token.artifacts.map((artifact) => artifact.id).join("-")}-${index}`} artifacts={token.artifacts} inline {...(props.onMentionArtifact ? { onMention: props.onMentionArtifact } : {})} />
           ) : token.text ? <Markdown key={index} text={token.text} /> : null,
         )}
         {showFoot ? (

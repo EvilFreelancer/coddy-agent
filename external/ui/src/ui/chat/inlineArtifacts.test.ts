@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   artifactMarkersForAssistant,
+  groupAssistantArtifactTokens,
   tokenizeAssistantArtifacts,
 } from "./inlineArtifacts";
 import type { TranscriptItem } from "./types";
@@ -67,4 +68,21 @@ test("a share_file artifact remains a detached fallback until an answer actually
 
   expect(artifactMarkersForAssistant([shared, plainAnswer], 1).size).toBe(1);
   expect(artifactMarkersForAssistant([shared, markedAnswer], 1).has("artifact-1")).toBe(true);
+});
+
+test("groups adjacent verified markers while preserving surrounding Markdown", () => {
+  const second = { ...artifact, id: "artifact-2", name: "report.pdf" };
+  const tokens = tokenizeAssistantArtifacts(
+    'Files:\n\n<coddy_file id="artifact-1"/>\n <coddy_file id="artifact-2"/>\n\nRead the report.',
+    new Map([
+      [artifact.id, artifact],
+      [second.id, second],
+    ]),
+  );
+
+  expect(groupAssistantArtifactTokens(tokens)).toEqual([
+    { type: "markdown", text: "Files:\n\n" },
+    { type: "artifacts", artifacts: [artifact, second] },
+    { type: "markdown", text: "\n\nRead the report." },
+  ]);
 });

@@ -25,3 +25,9 @@ test("phone artifact cards retain an accessible action trigger", () => {
   expect(css).toMatch(/@media \(max-width: 599px\)[\s\S]*\.tool-artifact-card\s*\{[^}]*width:\s*min\(148px, calc\(50vw - 28px\)\)/);
   expect(css).toMatch(/@media \(max-width: 599px\)[\s\S]*\.inline-artifact-menu-trigger\s*\{[^}]*opacity:\s*1/);
 });
+
+test("inline artifact groups are block rows with breathing room after files", () => {
+  expect(block(".inline-artifacts")).toMatch(/display:\s*flex/);
+  expect(block(".inline-artifacts")).toMatch(/margin:\s*12px 0 16px/);
+  expect(block(".inline-artifacts")).toMatch(/max-width:\s*100%/);
+});

@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { AssistantMessage } from "./AssistantMessage";
 
@@ -50,4 +50,48 @@ test("renders only a verified file marker as an inline artifact card with action
   fireEvent.click(screen.getByRole("button", { name: "Actions for report.pdf" }));
   expect(screen.getByRole("menu")).toBeVisible();
   expect(screen.getByRole("menuitem", { name: "Mention source" })).toBeEnabled();
+});
+
+test("groups adjacent shared files and opens every image in the shared lightbox", () => {
+  const report = {
+    id: "report",
+    name: "release-report.pdf",
+    sha256: "a".repeat(64),
+    size: 1024,
+    url: "/coddy/sessions/s1/artifacts/report",
+  };
+  const chart = {
+    id: "chart",
+    name: "release-chart.png",
+    sha256: "b".repeat(64),
+    size: 2048,
+    url: "/coddy/sessions/s1/artifacts/chart",
+    previewUrl: "/coddy/sessions/s1/artifacts/chart/preview",
+  };
+  const cover = {
+    id: "cover",
+    name: "release-cover.webp",
+    sha256: "c".repeat(64),
+    size: 4096,
+    url: "/coddy/sessions/s1/artifacts/cover",
+    previewUrl: "/coddy/sessions/s1/artifacts/cover/preview",
+  };
+  render(
+    <AssistantMessage
+      content={'Prepared files:\n\n<coddy_file id="report"/>\n<coddy_file id="chart"/>\n<coddy_file id="cover"/>\n\nOpen either image for a preview.'}
+      artifacts={new Map([
+        [report.id, report],
+        [chart.id, chart],
+        [cover.id, cover],
+      ])}
+    />,
+  );
+
+  const groups = screen.getAllByRole("region", { name: "Shared files" });
+  expect(groups).toHaveLength(1);
+  expect(within(groups[0]!).getAllByRole("article")).toHaveLength(3);
+  fireEvent.click(
+    within(groups[0]!).getByRole("button", { name: "Open release-cover.webp" }),
+  );
+  expect(screen.getByRole("dialog")).toHaveTextContent("release-cover.webp");
 });
