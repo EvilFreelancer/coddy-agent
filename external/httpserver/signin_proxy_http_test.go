@@ -217,6 +217,7 @@ func TestNeuralDeepDeviceStartFollowsBodyProxy(t *testing.T) {
 
 	srv := signInTestServer(t, t.TempDir(),
 		config.ProviderConfig{Name: "x", Type: "neuraldeep", Proxy: "none"}, "")
+	defer srv.Drain()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
